@@ -1,12 +1,12 @@
 {
-    "name": "judgement_flutter",
-    "short_name": "judgement_flutter",
+    "name": "Judgement",
+    "short_name": "Judgement",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0B3D2E",
+    "theme_color": "#0B3D2E",
+    "description": "Online multiplayer Judgement (Oh Hell) card game.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

@@ -1,0 +1,33 @@
+# Keep Fly/Docker build context small (only backend/ + rules/ are needed).
+.git
+.github
+.firebase
+.cursor
+**/.DS_Store
+
+# Rust build artifacts
+backend/target
+**/target
+
+# Flutter (not used in API image)
+frontend
+**/node_modules
+**/.dart_tool
+**/build
+
+# Docs / local ops
+docs
+PLAN.md
+README.md
+docker-compose.yml
+deployment/docker-compose.prod.yml
+deployment/scripts
+deployment/load
+deployment/docker/nginx.conf
+*.md
+*.log
+
+# Secrets / env
+.env
+.env.*
+**/*-firebase-adminsdk-*.json

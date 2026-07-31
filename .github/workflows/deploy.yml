@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   deploy-api:
-    name: Deploy API (Railway)
+    name: Deploy API (Fly.io)
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' ||
@@ -21,27 +21,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # workflow_run checkout defaults to default branch tip; pin to the
-          # commit that passed CI when triggered that way.
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-      - name: Deploy via CLI (optional)
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "RAILWAY_TOKEN unset — skipping CLI deploy."
-            echo "Prefer Railway's GitHub integration to build from railway.toml,"
-            echo "or add RAILWAY_TOKEN (+ RAILWAY_SERVICE_ID variable) for CLI deploys."
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN unset — skipping Fly deploy."
+            echo "Create a deploy token: fly tokens create deploy -a judgment-api"
+            echo "Add it as GitHub secret FLY_API_TOKEN."
             exit 0
           fi
-          if [ -n "$RAILWAY_SERVICE_ID" ]; then
-            railway up --ci --service "$RAILWAY_SERVICE_ID"
-          else
-            railway up --ci
-          fi
+          flyctl deploy --remote-only
 
   deploy-web:
     name: Deploy Web (Firebase)
@@ -62,8 +54,8 @@ jobs:
           API_BASE: ${{ vars.API_BASE }}
         run: |
           if [ -z "$API_BASE" ]; then
-            echo "Set GitHub Actions variable API_BASE to the Railway public HTTPS URL"
-            echo "(no trailing slash), e.g. https://judgement-server.up.railway.app"
+            echo "Set GitHub Actions variable API_BASE to the Fly public HTTPS URL"
+            echo "(no trailing slash), e.g. https://judgment-api.fly.dev"
             exit 1
           fi
           echo "API_BASE=$API_BASE"

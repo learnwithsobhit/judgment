@@ -10,6 +10,7 @@ ALTER TABLE scheduled_event_rsvps
 DROP INDEX IF EXISTS scheduled_event_rsvps_going_mobile;
 
 -- One active RSVP per mobile (going or waitlisted).
-CREATE UNIQUE INDEX scheduled_event_rsvps_active_mobile
+-- IF NOT EXISTS: safe if a prior deploy created the index before sqlx recorded v5.
+CREATE UNIQUE INDEX IF NOT EXISTS scheduled_event_rsvps_active_mobile
     ON scheduled_event_rsvps (event_id, mobile_e164)
     WHERE status IN ('going', 'waitlisted');

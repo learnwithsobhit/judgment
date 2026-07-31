@@ -184,30 +184,30 @@ rejected with a stable reason code (PLAN.md §29.2).
 Every game is fully reproducible from its seed (`GameEngine::new_with_seed`);
 bug reports should include the seed and state version.
 
-## Production deploy (GitHub + Railway + Firebase)
+## Production deploy (GitHub + Fly.io + Firebase)
 
 | Piece | Host |
 |-------|------|
 | Flutter Web | Firebase Hosting |
-| API + WebSocket | Railway (`deployment/docker/Dockerfile`) |
-| Postgres | Railway Postgres plugin |
+| API + WebSocket | Fly.io (`fly.toml` + `deployment/docker/Dockerfile`) |
+| Postgres | Fly Postgres (attached `DATABASE_URL`) |
 
 Full click-through: [`docs/runbooks/deploy.md`](docs/runbooks/deploy.md).
 
 **Quick first launch**
 
 1. Push this repo to GitHub (`git` root is this directory — see the runbook).
-2. Railway: deploy from GitHub using [`railway.toml`](railway.toml), add Postgres,
-   set env from [`deployment/railway.env.example`](deployment/railway.env.example).
-3. Build web against the Railway URL and deploy Hosting:
+2. Fly.io: `fly auth login`, then create app/Postgres and `fly deploy` (see runbook).
+   Config: [`fly.toml`](fly.toml), secrets template [`deployment/fly.env.example`](deployment/fly.env.example).
+3. Build web against the Fly URL and deploy Hosting:
    ```bash
    cd frontend/judgement_flutter
-   flutter build web --release --dart-define=API_BASE=https://<railway-host>
-   firebase deploy --only hosting --project <FIREBASE_PROJECT_ID>
+   flutter build web --release --dart-define=API_BASE=https://judgment-api.fly.dev
+   firebase deploy --only hosting --project judgment-lws-260731
    ```
-4. Set Railway `ALLOWED_ORIGINS` + `PUBLIC_WEB_ORIGIN` to the Firebase URL(s).
+4. Set Fly secrets `ALLOWED_ORIGINS` + `PUBLIC_WEB_ORIGIN` to the Firebase URL(s).
 5. GitHub Actions variables/secrets: `API_BASE`, `FIREBASE_PROJECT_ID`,
-   `PUBLIC_WEB_ORIGIN`, `FIREBASE_TOKEN` (and optional `RAILWAY_TOKEN`).
+   `PUBLIC_WEB_ORIGIN`, `FIREBASE_TOKEN`, `FLY_API_TOKEN`.
    Workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
    [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
 
