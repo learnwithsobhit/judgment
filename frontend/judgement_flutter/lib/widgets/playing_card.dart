@@ -60,7 +60,7 @@ class PlayingCardWidget extends StatelessWidget {
                 height: height,
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.medium,
-                errorBuilder: (_, __, ___) => _CardFallback(card: card),
+                errorBuilder: (_, _, _) => _CardFallback(card: card),
               ),
             ),
             if (disabled) const ColoredBox(color: Color(0x99B0B0B0)),
@@ -131,7 +131,7 @@ class CardBack extends StatelessWidget {
           width: width,
           height: height,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const ColoredBox(
+          errorBuilder: (_, _, _) => const ColoredBox(
             color: Color(0xFF1A237E),
           ),
         ),

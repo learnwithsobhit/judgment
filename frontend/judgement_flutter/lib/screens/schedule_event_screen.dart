@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import 'event_manage_screen.dart';
 
@@ -19,7 +18,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
   String _timezone = 'Asia/Kolkata';
   int _durationMinutes = 90;
   bool _timerEnabled = true;
-  int _timerSeconds = 30;
+  final int _timerSeconds = 30;
   String? _firstTrump;
   bool _busy = false;
 

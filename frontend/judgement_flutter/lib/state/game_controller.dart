@@ -420,7 +420,7 @@ class GameController extends ChangeNotifier {
     _sendAction({
       'type': 'send_reaction',
       'emoji': emoji,
-      if (target != null) 'target': target,
+      'target': ?target,
     });
   }
 
