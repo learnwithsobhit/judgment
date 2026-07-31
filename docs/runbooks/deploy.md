@@ -64,7 +64,7 @@ Public API base (no trailing slash): `https://judgment-api.fly.dev`
 npm install -g firebase-tools
 firebase login
 cd frontend/judgement_flutter
-flutter build web --release --dart-define=API_BASE=https://judgment-api.fly.dev
+flutter build web --release --pwa-strategy=none --dart-define=API_BASE=https://judgment-api.fly.dev
 firebase deploy --only hosting --project judgment-lws-260731
 ```
 

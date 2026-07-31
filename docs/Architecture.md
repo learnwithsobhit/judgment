@@ -215,7 +215,7 @@ See [`docs/runbooks/deploy.md`](runbooks/deploy.md) and [`deployment/fly.env.exa
 
 | Transport | Use |
 |-----------|-----|
-| **REST** | Guest session, rooms/lobby, avatar (lobby), scheduled events, AI rules query, coach/highlights, history |
+| **REST** | Guest session, rooms/lobby (incl. host remove-player before start), avatar (lobby), scheduled events, AI rules query, coach/highlights, history |
 | **WebSocket** | Live bids/plays, snapshots, presence, timers, pause/resume, bot takeover, in-game avatar, table emotes |
 
 Lobby freshness uses **HTTP polling** (~2s). Live play uses **full personalized snapshots** after each accepted mutation (no client-side deltas).
@@ -233,6 +233,7 @@ flowchart TB
     createRoom[POST /api/v1/rooms]
     joinRoom[POST /api/v1/rooms/ref/join]
     ready[POST ready]
+    removePlayer[POST remove-player host only]
     start[POST start]
   end
 

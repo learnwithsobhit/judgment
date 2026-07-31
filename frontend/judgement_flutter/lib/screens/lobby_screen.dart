@@ -56,6 +56,16 @@ class _LobbyScreenState extends State<LobbyScreen> {
     try {
       final room = await widget.api.getRoom(_room.roomId);
       if (!mounted) return;
+      final stillSeated =
+          room.seats.any((s) => s.playerId == widget.myPlayerId);
+      if (!stillSeated && room.phase == 'lobby') {
+        _poll?.cancel();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You were removed from the lobby')),
+        );
+        Navigator.of(context).pop();
+        return;
+      }
       setState(() {
         _room = room;
         _myAvatarId = room.seats
@@ -69,6 +79,37 @@ class _LobbyScreenState extends State<LobbyScreen> {
       }
     } catch (_) {
       // Transient polling errors are ignored; the next tick retries.
+    }
+  }
+
+  Future<void> _removePlayer(SeatView seat) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove player'),
+        content: Text('Remove ${seat.nickname} from the lobby?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final room =
+          await widget.api.removePlayer(_room.roomId, seat.playerId);
+      if (mounted) setState(() => _room = room);
+    } on ApiException catch (error) {
+      _showError(error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -285,6 +326,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   Widget _seatTile(int seatNumber) {
     final seat = _room.seats.where((s) => s.seat == seatNumber).firstOrNull;
     final isMe = seat?.playerId == widget.myPlayerId;
+    final canRemove = _amHost && seat != null && !isMe && !_busy;
     return ListTile(
       dense: true,
       leading: CircleAvatar(
@@ -310,9 +352,21 @@ class _LobbyScreenState extends State<LobbyScreen> {
           : '${seat.nickname}${isMe ? ' (you)' : ''}${seat.isHost ? ' · host' : ''}'),
       trailing: seat == null
           ? null
-          : seat.ready
-              ? const Icon(Icons.check_circle, color: Colors.lightGreenAccent)
-              : const Icon(Icons.hourglass_empty, color: Colors.white38),
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (canRemove)
+                  IconButton(
+                    icon: const Icon(Icons.person_remove_outlined),
+                    tooltip: 'Remove from lobby',
+                    onPressed: () => _removePlayer(seat),
+                  ),
+                seat.ready
+                    ? const Icon(Icons.check_circle,
+                        color: Colors.lightGreenAccent)
+                    : const Icon(Icons.hourglass_empty, color: Colors.white38),
+              ],
+            ),
     );
   }
 }

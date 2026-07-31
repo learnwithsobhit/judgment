@@ -9,10 +9,11 @@ use axum::http::HeaderMap;
 use axum::Json;
 use chrono::Utc;
 use judgement_domain::{
-    ActionId, GameId, GameRules, PlayerId, PlayerState, RoomId, TrumpRule, MAX_PLAYERS, MIN_PLAYERS,
+    ActionId, GameId, GameRules, PlayerId, PlayerState, RoomId, SessionId, TrumpRule, MAX_PLAYERS,
+    MIN_PLAYERS,
 };
 use judgement_engine::GameEngine;
-use judgement_persistence::NewGamePlayer;
+use judgement_persistence::{NewGamePlayer, StoredRoom};
 use judgement_ai::{
     coach_from_analysis, narrate_highlights, narrate_round_summary,
     ExplanationResponse as AiExplanation, RulesQueryRequest as AiRulesQuery, TrickPlayQuery,
@@ -25,9 +26,9 @@ use judgement_analytics::{
 use judgement_protocol::{
     CoachingResponse, CreateGuestSessionRequest, CreateGuestSessionResponse, CreateRoomRequest,
     CreateRoomResponse, ExplanationResponse, GameHistoryResponse, GameResultResponse,
-    HighlightsResponse, JoinRoomRequest, JoinRoomResponse, ReadyRequest, RoomView,
-    RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest, SetAvatarResponse,
-    StartGameRequest, StartGameResponse,
+    HighlightsResponse, JoinRoomRequest, JoinRoomResponse, ReadyRequest, RemovePlayerRequest,
+    RoomView, RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest,
+    SetAvatarResponse, StartGameRequest, StartGameResponse,
 };
 use crate::emotes::is_allowed_avatar;
 
@@ -245,9 +246,7 @@ pub async fn leave_room(
                 "cannot leave a started game via this endpoint".into(),
             ));
         }
-        let before = room.seats.len();
-        room.seats.retain(|s| s.session_id != session.id);
-        if room.seats.len() == before {
+        if !remove_seat_by_session(room, session.id) {
             return Err(ApiError::Forbidden("you are not seated in this room".into()));
         }
 
@@ -266,6 +265,68 @@ pub async fn leave_room(
         }
     };
 
+    persist_lobby_after_seat_change(&state, room_id, outcome).await
+}
+
+/// Host removes another seated player from the lobby (before start only).
+pub async fn remove_player(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(room_ref): Path<String>,
+    Json(body): Json<RemovePlayerRequest>,
+) -> Result<Json<RoomView>, ApiError> {
+    let session = state.authenticate(&headers)?;
+    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+
+    let outcome = {
+        let mut rooms = state.rooms.lock().unwrap();
+        let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
+
+        if room.status != RoomStatus::Lobby {
+            return Err(ApiError::Conflict(
+                "cannot remove players after the game has started".into(),
+            ));
+        }
+        if room.host_session != session.id {
+            return Err(ApiError::Forbidden(
+                "only the host can remove players".into(),
+            ));
+        }
+        let target = room
+            .seats
+            .iter()
+            .find(|s| s.player_id == body.player_id)
+            .cloned()
+            .ok_or(ApiError::NotFound("player"))?;
+        if target.session_id == room.host_session {
+            return Err(ApiError::Forbidden("cannot remove yourself".into()));
+        }
+        let _ = remove_seat_by_session(room, target.session_id);
+
+        if room.seats.is_empty() {
+            let code = room.code.clone();
+            rooms.remove(&room_id);
+            state.room_codes.lock().unwrap().remove(&code);
+            None
+        } else {
+            Some((room.view(), stored_room(room)))
+        }
+    };
+
+    persist_lobby_after_seat_change(&state, room_id, outcome).await
+}
+
+fn remove_seat_by_session(room: &mut Room, session_id: SessionId) -> bool {
+    let before = room.seats.len();
+    room.seats.retain(|s| s.session_id != session_id);
+    room.seats.len() < before
+}
+
+async fn persist_lobby_after_seat_change(
+    state: &AppState,
+    room_id: RoomId,
+    outcome: Option<(RoomView, StoredRoom)>,
+) -> Result<Json<RoomView>, ApiError> {
     match outcome {
         None => {
             let _ = state.store.delete_room(room_id).await;

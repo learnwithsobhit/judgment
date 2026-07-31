@@ -72,6 +72,12 @@ pub struct ReadyRequest {
     pub ready: bool,
 }
 
+/// Host removes a seated player from the lobby before the game starts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemovePlayerRequest {
+    pub player_id: PlayerId,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StartGameRequest {
     /// Deterministic shuffle seed for dev/test rooms. Production clients omit

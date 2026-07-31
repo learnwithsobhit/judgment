@@ -118,6 +118,12 @@ class ApiClient {
   Future<RoomView> leaveRoom(String roomRef) async =>
       RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/leave', {}));
 
+  /// Host-only: remove a seated player from the lobby before start.
+  Future<RoomView> removePlayer(String roomRef, String playerId) async =>
+      RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/remove-player', {
+        'player_id': playerId,
+      }));
+
   Future<String> startGame(String roomRef, {int? seed}) async {
     final json = await _post('/api/v1/rooms/$roomRef/start', {
       'seed': ?seed,

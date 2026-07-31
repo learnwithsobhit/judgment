@@ -37,6 +37,9 @@ do not re-open them without an ADR.
 - **3 to 8 players** (host chooses the table size at room creation; default 6).
   The game can start when at least 3 players are seated and everyone seated is
   ready.
+- Before start, the **host may remove** any other seated player from the lobby
+  (the removed player may rejoin if a seat is free). The host cannot remove
+  themselves; they leave via the normal leave action.
 - Standard **52-card deck**, no jokers.
 - Seats are fixed table positions; play proceeds **clockwise** (ascending
   seat order, wrapping). Seat numbers may be non-contiguous if players left
