@@ -666,12 +666,14 @@ pub async fn open_lobby(
             seat: 0,
             ready: false,
             joined_at: Utc::now(),
+            avatar_id: session.avatar_id.clone(),
         }],
         status: RoomStatus::Lobby,
         max_players,
         turn_timeout_seconds,
         first_trump,
         round_schedule: round_schedule.clone(),
+        dealer_total_restriction: false,
     };
     let room_view = room.view();
     state

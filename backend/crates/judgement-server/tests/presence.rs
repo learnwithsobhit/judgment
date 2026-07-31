@@ -21,6 +21,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 async fn spawn_with(state: Arc<AppState>) -> SocketAddr {
+    std::env::set_var("JUDGEMENT_ALLOW_SEED", "1");
     let router = build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

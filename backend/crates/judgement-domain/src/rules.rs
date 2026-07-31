@@ -279,7 +279,9 @@ impl Default for BiddingRule {
             allow_zero: true,
             bids_visible_immediately: true,
             allow_edit_before_next_bid: false,
-            dealer_total_restriction: true,
+            // Off by default: dealer may bid so totals equal tricks.
+            // Hosts can enable the classic Oh Hell restriction per room.
+            dealer_total_restriction: false,
         }
     }
 }
@@ -315,7 +317,7 @@ pub struct GameRules {
 impl GameRules {
     /// MVP configuration for the actual number of seated players (3–8):
     /// descending `max → 1` rounds, revealed-card trump, dealer restriction
-    /// on, 30-second timer.
+    /// off by default, 30-second timer.
     pub fn mvp_for_players(player_count: u8) -> Self {
         Self {
             min_players: MIN_PLAYERS,

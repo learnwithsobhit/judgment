@@ -9,6 +9,7 @@ use judgement_protocol::{CreateGuestSessionResponse, CreateRoomResponse, GameHis
 use judgement_server::{build_router, state::AppState};
 
 async fn spawn_server() -> SocketAddr {
+    std::env::set_var("JUDGEMENT_ALLOW_SEED", "1");
     let state = Arc::new(AppState::new(Arc::new(MemoryStore::new())));
     let router = build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -175,6 +176,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
             seat: i,
             ready: true,
             joined_at: Utc::now(),
+            avatar_id: None,
         });
     }
     let host_session = seats[0].session_id;
@@ -196,6 +198,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                     mode: RoundScheduleMode::Manual,
                     steps: Some(vec![ManualRoundStep { cards: 12, repeat: 1 }]),
                 },
+                dealer_total_restriction: false,
             },
         );
         codes.insert(code.clone(), room_id);

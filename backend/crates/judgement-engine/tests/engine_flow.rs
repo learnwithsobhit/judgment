@@ -198,7 +198,10 @@ fn bid_validation_rules() {
 
 #[test]
 fn dealer_restriction_forbids_exactly_the_matching_total() {
-    let mut engine = engine_with_seed(4);
+    let mut rules = GameRules::default_six_player();
+    rules.bidding_rule.dealer_total_restriction = true;
+    let mut engine = GameEngine::new_with_seed(4, GameId::new(), rules, six_players())
+        .expect("six players are valid");
     engine.start_game().unwrap();
 
     // First five bidders each bid 1 (total 5); with 8 tricks available the
@@ -220,6 +223,23 @@ fn dealer_restriction_forbids_exactly_the_matching_total() {
         Err(GameError::DealerBidRestriction { bid: 3, tricks_available: 8 })
     );
     engine.place_bid(dealer, 2).unwrap();
+    assert_eq!(engine.phase(), GamePhase::Playing);
+}
+
+#[test]
+fn dealer_may_match_total_when_restriction_off() {
+    let mut engine = engine_with_seed(4);
+    engine.start_game().unwrap();
+    assert!(!engine.state().rules.bidding_rule.dealer_total_restriction);
+
+    for _ in 0..5 {
+        let player = current_player(&engine);
+        engine.place_bid(player, 1).unwrap();
+    }
+    let dealer = engine.state().dealer;
+    let legal = engine.legal_bids(dealer);
+    assert!(legal.contains(&3), "matching total is allowed by default");
+    engine.place_bid(dealer, 3).unwrap();
     assert_eq!(engine.phase(), GamePhase::Playing);
 }
 
@@ -443,6 +463,95 @@ fn view_for_unknown_player_is_rejected() {
     let mut engine = engine_with_seed(14);
     engine.start_game().unwrap();
     assert_eq!(engine.view_for(PlayerId::new()), Err(GameError::PlayerNotInGame));
+}
+
+#[test]
+fn projection_keeps_last_completed_trick_until_next_lead() {
+    let mut engine = engine_with_seed(21);
+    engine.start_game().unwrap();
+    bid_all(&mut engine);
+
+    let mut winner = None;
+    for _ in 0..6 {
+        for event in play_one_card(&mut engine) {
+            if let GameEvent::TrickCompleted { winner: w, .. } = event {
+                winner = Some(w);
+            }
+        }
+    }
+    let winner = winner.expect("trick completed");
+    let viewer = engine.state().player_ids()[0];
+    let view = engine.view_for(viewer).unwrap();
+    assert!(view.current_trick.is_empty());
+    let completed = view.last_completed_trick.expect("completed trick projected");
+    assert_eq!(completed.winner_id, winner);
+    assert_eq!(completed.plays.len(), 6);
+
+    play_one_card(&mut engine);
+    let view = engine.view_for(viewer).unwrap();
+    assert_eq!(view.current_trick.len(), 1);
+    assert!(view.last_completed_trick.is_none());
+}
+
+#[test]
+fn projection_exposes_round_history_and_leader() {
+    let mut engine = GameEngine::new_with_seed(
+        3,
+        GameId::new(),
+        GameRules {
+            trump_rule: TrumpRule::rotating_from(Suit::Spades),
+            turn_timeout_seconds: None,
+            round_pattern: RoundPattern::Custom { rounds: vec![1, 1] },
+            ..GameRules::mvp_for_players(3)
+        },
+        (0..3)
+            .map(|seat| PlayerState::human(PlayerId::new(), format!("P{seat}"), seat))
+            .collect(),
+    )
+    .unwrap();
+    engine.start_game().unwrap();
+    while !engine.is_finished() {
+        match engine.phase() {
+            GamePhase::Bidding => bid_all(&mut engine),
+            GamePhase::Playing => {
+                play_one_card(&mut engine);
+            }
+            _ => break,
+        }
+    }
+    // After first round scoring, history should be non-empty while game may continue.
+    // Re-run a 1-round game and inspect mid-finish.
+    let mut engine = GameEngine::new_with_seed(
+        4,
+        GameId::new(),
+        GameRules {
+            trump_rule: TrumpRule::rotating_from(Suit::Spades),
+            turn_timeout_seconds: None,
+            round_pattern: RoundPattern::Custom { rounds: vec![1] },
+            ..GameRules::mvp_for_players(3)
+        },
+        (0..3)
+            .map(|seat| {
+                PlayerState::human(PlayerId::new(), format!("P{seat}"), seat).with_avatar("fox")
+            })
+            .collect(),
+    )
+    .unwrap();
+    engine.start_game().unwrap();
+    while !engine.is_finished() {
+        match engine.phase() {
+            GamePhase::Bidding => bid_all(&mut engine),
+            GamePhase::Playing => {
+                let _ = play_one_card(&mut engine);
+            }
+            _ => break,
+        }
+    }
+    let viewer = engine.state().player_ids()[0];
+    let view = engine.view_for(viewer).unwrap();
+    assert!(!view.round_history.is_empty());
+    assert!(view.leader.is_some());
+    assert_eq!(view.own_avatar_id.as_deref(), Some("fox"));
 }
 
 #[test]

@@ -21,6 +21,7 @@ async fn memory_store_finishes_game_and_records_history() {
                 nickname: format!("P{i}"),
                 token: format!("tok-{i}"),
                 created_at: Utc::now(),
+                avatar_id: None,
             })
             .await
             .unwrap();
@@ -50,6 +51,7 @@ async fn memory_store_finishes_game_and_records_history() {
             turn_timeout_seconds: None,
             first_trump: Some(Suit::Clubs),
             round_schedule: Default::default(),
+            dealer_total_restriction: false,
             phase: "lobby".into(),
             game_id: None,
             players: game_players
@@ -61,6 +63,7 @@ async fn memory_store_finishes_game_and_records_history() {
                     seat: p.seat,
                     ready: true,
                     joined_at: Utc::now(),
+                    avatar_id: None,
                 })
                 .collect(),
             created_at: Utc::now(),

@@ -81,10 +81,10 @@ There is no ranking across suits except via the trump and lead-suit rules.
   clockwise; **the dealer bids last**.
 - Bid range is `0..=cards_in_round`; zero is allowed.
 - Bids are visible immediately; an accepted bid cannot be changed.
-- **Dealer restriction** (configurable, on by default): the dealer may not bid a
-  value that would make the total of all bids equal the number of tricks
-  available. Invariant: this removes exactly one option from `0..=cards`, so the
-  dealer always has a legal bid.
+- **Dealer restriction** (optional, **off by default**): when the host enables
+  it at room create, the dealer may not bid a value that would make the total
+  of all bids equal the number of tricks available. When enabled, this removes
+  exactly one option from `0..=cards`, so the dealer always has a legal bid.
 
 ## Card play
 
@@ -135,3 +135,9 @@ rounds (desc) → total tricks missed `Σ|bid − won|` (asc) → shared rank
 - Player returns: control restored at a safe command boundary.
 - Permanent leave: the bot plays out the remainder of the game.
 - Host leave: longest-connected occupied seat becomes host.
+
+## Table engagement (cosmetic)
+
+Reactions, avatar flashes, emoji bursts, last-trick reveal pause, and surprise
+scoreboard UX (hiding running totals mid-game) are **presentation only**. They
+do not change legal bids, playable cards, trick winners, or scoring.

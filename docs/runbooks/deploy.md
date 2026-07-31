@@ -41,7 +41,12 @@ fly secrets set \
   ALLOWED_ORIGINS=https://judgment-lws-260731.web.app,https://judgment-lws-260731.firebaseapp.com \
   PUBLIC_WEB_ORIGIN=https://judgment-lws-260731.web.app \
   RAG_ENABLED=0 \
+  HTTP_RATE_LIMIT=120 \
+  HTTP_GUEST_RATE_LIMIT=20 \
+  HTTP_RATE_WINDOW_SECS=60 \
   -a judgment-api
+
+# Enable / confirm Fly Postgres backups (dashboard or provider docs) before public launch.
 
 # First deploy (remote Docker build)
 fly deploy -a judgment-api
@@ -82,6 +87,8 @@ Hosting URL: `https://judgment-lws-260731.web.app`
 | `FIREBASE_TOKEN` | `firebase login:ci` |
 | `FLY_API_TOKEN` | `fly tokens create deploy -a judgment-api` |
 
+**Required:** Deploy fails if `FLY_API_TOKEN` or `FIREBASE_TOKEN` is missing (no silent skip).
+
 Push to `main` runs CI; Deploy workflow runs after CI succeeds (`fly deploy` + Firebase Hosting).
 
 ---
@@ -110,13 +117,38 @@ fly deploy -a judgment-api
 
 ---
 
+## Post-deploy migration check
+
+After a deploy that includes new migrations, confirm columns exist (via `fly postgres connect -a judgment-db` or your SQL client):
+
+```sql
+-- 0006 avatars
+SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'guest_sessions' AND column_name = 'avatar_id';
+SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'room_players' AND column_name = 'avatar_id';
+
+-- 0007 dealer bid restriction
+SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'rooms' AND column_name = 'dealer_total_restriction';
+```
+
+Migrations run automatically on API boot (`JUDGEMENT_MIGRATIONS_DIR`).
+
+---
+
 ## Smoke checklist (after first go-live)
 
 1. Open Firebase URL → create room → second browser joins → play a few tricks (WSS).
-2. Schedule event → open `/e/{slug}` in a fresh tab (SPA rewrite).
-3. Manage → Copy WhatsApp text → Firebase origin + sensible local time.
-4. `curl -fsS https://judgment-api.fly.dev/readyz` → 200.
-5. `fly logs -a judgment-api` — no CORS failures.
+2. Create room with dealer restriction OFF and ON; verify bidding when ON.
+3. Mid-game: change avatar → hard refresh → avatar still set; reaction + typed emote appear for peers.
+4. Scoreboard: round rows / player columns / full names; no Tot until finished.
+5. Finish game → victory celebration → results tally + round matrix.
+6. Kill network briefly → confirm Reconnect / actions work after reconnect.
+7. Schedule event → open `/e/{slug}` in a fresh tab (SPA rewrite).
+8. Manage → Copy WhatsApp text → Firebase origin + sensible local time.
+9. `curl -fsS https://judgment-api.fly.dev/readyz` → 200.
+10. `fly logs -a judgment-api` — no CORS failures; **no** raw `DATABASE_URL` in logs.
 
 ---
 

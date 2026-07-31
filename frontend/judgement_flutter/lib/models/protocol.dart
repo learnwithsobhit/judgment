@@ -78,6 +78,7 @@ class OpponentView {
   final int? bid;
   final int tricksWon;
   final String connectionStatus;
+  final String? avatarId;
 
   OpponentView.fromJson(Map<String, dynamic> json)
       : playerId = json['player_id'] as String,
@@ -86,7 +87,54 @@ class OpponentView {
         cardCount = json['card_count'] as int,
         bid = json['bid'] as int?,
         tricksWon = json['tricks_won'] as int,
-        connectionStatus = json['connection_status'] as String;
+        connectionStatus = json['connection_status'] as String,
+        avatarId = json['avatar_id'] as String?;
+}
+
+class CompletedTrickView {
+  final int trickIndex;
+  final String winnerId;
+  final List<PlayedCard> plays;
+
+  CompletedTrickView.fromJson(Map<String, dynamic> json)
+      : trickIndex = json['trick_index'] as int,
+        winnerId = json['winner_id'] as String,
+        plays = (json['plays'] as List)
+            .map((p) => PlayedCard.fromJson(p as Map<String, dynamic>))
+            .toList();
+}
+
+class RoundScoreLine {
+  final String playerId;
+  final int bid;
+  final int tricksWon;
+  final int score;
+
+  RoundScoreLine.fromJson(Map<String, dynamic> json)
+      : playerId = json['player_id'] as String,
+        bid = json['bid'] as int,
+        tricksWon = json['tricks_won'] as int,
+        score = json['score'] as int;
+}
+
+class RoundScoreView {
+  final int roundIndex;
+  final List<RoundScoreLine> entries;
+
+  RoundScoreView.fromJson(Map<String, dynamic> json)
+      : roundIndex = json['round_index'] as int,
+        entries = (json['entries'] as List)
+            .map((e) => RoundScoreLine.fromJson(e as Map<String, dynamic>))
+            .toList();
+}
+
+class LeaderView {
+  final String playerId;
+  final int margin;
+
+  LeaderView.fromJson(Map<String, dynamic> json)
+      : playerId = json['player_id'] as String,
+        margin = json['margin'] as int;
 }
 
 class PlayedCard {
@@ -166,13 +214,17 @@ class PlayerGameView {
   final int ownSeat;
   final int? ownBid;
   final int ownTricksWon;
+  final String? ownAvatarId;
   final List<OpponentView> opponents;
   final List<PlayedCard> currentTrick;
+  final CompletedTrickView? lastCompletedTrick;
   final String? trump;
   final CardModel? trumpCard;
   final String? currentTurn;
   final List<PublicBid> bids;
   final List<PlayerScore> scores;
+  final List<RoundScoreView> roundHistory;
+  final LeaderView? leader;
   final PublicRoundState? round;
   final LegalActions legalActions;
   final List<RankedPlayer>? finalRanking;
@@ -187,12 +239,17 @@ class PlayerGameView {
         ownSeat = json['own_seat'] as int,
         ownBid = json['own_bid'] as int?,
         ownTricksWon = json['own_tricks_won'] as int,
+        ownAvatarId = json['own_avatar_id'] as String?,
         opponents = (json['opponents'] as List)
             .map((o) => OpponentView.fromJson(o as Map<String, dynamic>))
             .toList(),
         currentTrick = (json['current_trick'] as List)
             .map((p) => PlayedCard.fromJson(p as Map<String, dynamic>))
             .toList(),
+        lastCompletedTrick = json['last_completed_trick'] == null
+            ? null
+            : CompletedTrickView.fromJson(
+                json['last_completed_trick'] as Map<String, dynamic>),
         trump = json['trump'] as String?,
         trumpCard = json['trump_card'] == null
             ? null
@@ -204,6 +261,12 @@ class PlayerGameView {
         scores = (json['scores'] as List)
             .map((s) => PlayerScore.fromJson(s as Map<String, dynamic>))
             .toList(),
+        roundHistory = (json['round_history'] as List? ?? const [])
+            .map((r) => RoundScoreView.fromJson(r as Map<String, dynamic>))
+            .toList(),
+        leader = json['leader'] == null
+            ? null
+            : LeaderView.fromJson(json['leader'] as Map<String, dynamic>),
         round = json['round'] == null
             ? null
             : PublicRoundState.fromJson(json['round'] as Map<String, dynamic>),
@@ -277,6 +340,17 @@ sealed class ServerMessage {
         return PlayerResumedControl(playerId: json['player_id'] as String);
       case 'token_rotated':
         return TokenRotated(token: json['token'] as String);
+      case 'table_event':
+        return TableEventMessage(
+          kind: json['kind'] as String,
+          from: json['from'] as String,
+          target: json['target'] as String?,
+          emojis: (json['emojis'] as List? ?? const []).cast<String>(),
+          text: json['text'] as String?,
+          mood: json['mood'] as String?,
+          stickerId: json['sticker_id'] as String?,
+          ttlMs: json['ttl_ms'] as int? ?? 1600,
+        );
       default:
         return UnknownMessage(type: json['type'] as String);
     }
@@ -352,6 +426,28 @@ class TokenRotated extends ServerMessage {
   TokenRotated({required this.token});
 }
 
+class TableEventMessage extends ServerMessage {
+  final String kind;
+  final String from;
+  final String? target;
+  final List<String> emojis;
+  final String? text;
+  final String? mood;
+  final String? stickerId;
+  final int ttlMs;
+
+  TableEventMessage({
+    required this.kind,
+    required this.from,
+    required this.target,
+    required this.emojis,
+    required this.text,
+    required this.mood,
+    required this.stickerId,
+    required this.ttlMs,
+  });
+}
+
 class UnknownMessage extends ServerMessage {
   final String type;
   UnknownMessage({required this.type});
@@ -397,13 +493,15 @@ class SeatView {
   final int seat;
   final bool ready;
   final bool isHost;
+  final String? avatarId;
 
   SeatView.fromJson(Map<String, dynamic> json)
       : playerId = json['player_id'] as String,
         nickname = json['nickname'] as String,
         seat = json['seat'] as int,
         ready = json['ready'] as bool,
-        isHost = json['is_host'] as bool;
+        isHost = json['is_host'] as bool,
+        avatarId = json['avatar_id'] as String?;
 }
 
 /// One manual schedule step: deal [cards] for [repeat] consecutive rounds.
@@ -508,6 +606,7 @@ class RoomView {
   final String? firstTrump;
   final RoundSchedule roundSchedule;
   final String roundScheduleSummary;
+  final bool dealerTotalRestriction;
   final List<SeatView> seats;
 
   RoomView.fromJson(Map<String, dynamic> json)
@@ -524,6 +623,8 @@ class RoomView {
         ),
         roundScheduleSummary =
             (json['round_schedule_summary'] as String?) ?? 'Automatic',
+        dealerTotalRestriction =
+            json['dealer_total_restriction'] as bool? ?? false,
         seats = (json['seats'] as List)
             .map((s) => SeatView.fromJson(s as Map<String, dynamic>))
             .toList();

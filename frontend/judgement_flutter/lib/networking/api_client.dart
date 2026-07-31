@@ -81,12 +81,14 @@ class ApiClient {
     int? turnTimeoutSeconds,
     String? firstTrump,
     RoundSchedule? roundSchedule,
+    bool dealerTotalRestriction = false,
   }) async {
     final json = await _post('/api/v1/rooms', {
       'max_players': ?maxPlayers,
       'turn_timeout_seconds': ?turnTimeoutSeconds,
       'first_trump': ?firstTrump,
       'round_schedule': ?roundSchedule?.toJson(),
+      'dealer_total_restriction': dealerTotalRestriction,
     });
     return (
       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
@@ -107,6 +109,11 @@ class ApiClient {
 
   Future<RoomView> setReady(String roomRef, bool ready) async =>
       RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/ready', {'ready': ready}));
+
+  Future<String> setAvatar(String avatarId) async {
+    final json = await _post('/api/v1/me/avatar', {'avatar_id': avatarId});
+    return json['avatar_id'] as String;
+  }
 
   Future<RoomView> leaveRoom(String roomRef) async =>
       RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/leave', {}));

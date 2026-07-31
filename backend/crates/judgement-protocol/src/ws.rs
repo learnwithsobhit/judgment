@@ -29,6 +29,18 @@ pub enum ClientCommand {
     PlayCard { card_id: judgement_domain::CardId },
     RequestStateSync,
     LeaveGame,
+    /// Built-in avatar pack id (cosmetic).
+    SetAvatar { avatar_id: String },
+    /// Quick emoji reaction (ephemeral table event).
+    SendReaction {
+        emoji: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<PlayerId>,
+    },
+    /// Free-text vibe; server broadcasts resolved emoji burst (client may also resolve).
+    SendEmoteText { text: String },
+    /// Manual avatar flash mood: cheer | laugh | facepalm | fire
+    AvatarFlash { mood: String },
 }
 
 /// Why a command was rejected: either a domain rule or a protocol-level
@@ -95,6 +107,23 @@ pub enum ServerMessage {
     PlayerResumedControl { player_id: PlayerId },
     /// Issued on successful WebSocket reconnect (PLAN.md §15.1).
     TokenRotated { token: String },
+    /// Ephemeral table engagement (reactions / cheers). Not stored in engine.
+    TableEvent {
+        kind: String,
+        from: PlayerId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<PlayerId>,
+        #[serde(default)]
+        emojis: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mood: Option<String>,
+        /// Curated cartoon sticker id for hybrid text blasts (cosmetic).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sticker_id: Option<String>,
+        ttl_ms: u32,
+    },
 }
 
 #[cfg(test)]
@@ -133,6 +162,19 @@ mod tests {
             ClientCommand::PlayCard { card_id: CardId { suit: judgement_domain::Suit::Spades, rank: judgement_domain::Rank::Seven } },
             ClientCommand::RequestStateSync,
             ClientCommand::LeaveGame,
+            ClientCommand::SetAvatar {
+                avatar_id: "fox".into(),
+            },
+            ClientCommand::SendReaction {
+                emoji: "🔥".into(),
+                target: None,
+            },
+            ClientCommand::SendEmoteText {
+                text: "nice".into(),
+            },
+            ClientCommand::AvatarFlash {
+                mood: "cheer".into(),
+            },
         ];
         for command in commands {
             let json = serde_json::to_string(&command).unwrap();

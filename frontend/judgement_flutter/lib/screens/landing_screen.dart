@@ -25,6 +25,8 @@ class _LandingScreenState extends State<LandingScreen> {
   int _timerSeconds = 30;
   String? _firstTrump; // null = revealed-card trump each round
   bool _manualSchedule = false;
+  /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
+  bool _dealerTotalRestriction = false;
   List<ManualRoundStep> _manualSteps =
       RoundSchedule.defaultManualForPlayers(6).steps!;
 
@@ -92,6 +94,7 @@ class _LandingScreenState extends State<LandingScreen> {
           turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
           firstTrump: _firstTrump,
           roundSchedule: schedule,
+          dealerTotalRestriction: _dealerTotalRestriction,
         );
         result = (room: created.room, playerId: created.playerId);
       }
@@ -189,6 +192,20 @@ class _LandingScreenState extends State<LandingScreen> {
           ),
           value: _timerEnabled,
           onChanged: (value) => setState(() => _timerEnabled = value),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text('Dealer bid restriction', style: labelStyle),
+          subtitle: Text(
+            _dealerTotalRestriction
+                ? 'Dealer cannot make total bids equal the tricks this round'
+                : 'Off — dealer may bid so totals match the trick count',
+            style: const TextStyle(fontSize: 12),
+          ),
+          value: _dealerTotalRestriction,
+          onChanged: (value) =>
+              setState(() => _dealerTotalRestriction = value),
         ),
         if (_timerEnabled)
           Wrap(

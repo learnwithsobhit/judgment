@@ -18,6 +18,7 @@ pub fn stored_session(session: &Session) -> StoredSession {
         nickname: session.nickname.clone(),
         token: session.token.clone(),
         created_at: Utc::now(),
+        avatar_id: session.avatar_id.clone(),
     }
 }
 
@@ -34,6 +35,7 @@ pub fn stored_room(room: &Room) -> StoredRoom {
         turn_timeout_seconds: room.turn_timeout_seconds,
         first_trump: room.first_trump,
         round_schedule: room.round_schedule.clone(),
+        dealer_total_restriction: room.dealer_total_restriction,
         phase,
         game_id,
         players: room
@@ -46,6 +48,7 @@ pub fn stored_room(room: &Room) -> StoredRoom {
                 seat: s.seat,
                 ready: s.ready,
                 joined_at: s.joined_at,
+                avatar_id: s.avatar_id.clone(),
             })
             .collect(),
         created_at: Utc::now(),

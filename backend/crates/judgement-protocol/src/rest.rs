@@ -45,6 +45,10 @@ pub struct CreateRoomRequest {
     /// Automatic (default) or Manual step list expanded at game start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub round_schedule: Option<RoundSchedule>,
+    /// When true, dealer may not make total bids equal tricks (classic Oh Hell).
+    /// Default `false` — matching totals are allowed.
+    #[serde(default)]
+    pub dealer_total_restriction: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +114,9 @@ pub struct RoomView {
     pub round_schedule: RoundSchedule,
     /// Human-readable summary for the lobby, e.g. `Automatic (12→1)`.
     pub round_schedule_summary: String,
+    /// Classic dealer bid restriction (default off).
+    #[serde(default)]
+    pub dealer_total_restriction: bool,
     pub seats: Vec<SeatView>,
 }
 
@@ -120,6 +127,18 @@ pub struct SeatView {
     pub seat: u8,
     pub ready: bool,
     pub is_host: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetAvatarRequest {
+    pub avatar_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetAvatarResponse {
+    pub avatar_id: String,
 }
 
 /// Uniform error body for REST endpoints.

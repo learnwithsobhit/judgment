@@ -25,6 +25,7 @@ pub async fn restore_from_store(state: &AppState) -> Result<usize, judgement_per
                     id: session.session_id,
                     nickname: session.nickname,
                     token: session.token,
+                    avatar_id: session.avatar_id,
                 },
             );
         }
@@ -56,6 +57,7 @@ pub async fn restore_from_store(state: &AppState) -> Result<usize, judgement_per
                             seat: p.seat,
                             ready: p.ready,
                             joined_at: p.joined_at,
+                            avatar_id: p.avatar_id,
                         })
                         .collect(),
                     status,
@@ -63,6 +65,7 @@ pub async fn restore_from_store(state: &AppState) -> Result<usize, judgement_per
                     turn_timeout_seconds: stored.turn_timeout_seconds,
                     first_trump: stored.first_trump,
                     round_schedule: stored.round_schedule,
+                    dealer_total_restriction: stored.dealer_total_restriction,
                 },
             );
         }

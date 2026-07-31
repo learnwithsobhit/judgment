@@ -26,13 +26,59 @@ use judgement_protocol::{
     CoachingResponse, CreateGuestSessionRequest, CreateGuestSessionResponse, CreateRoomRequest,
     CreateRoomResponse, ExplanationResponse, GameHistoryResponse, GameResultResponse,
     HighlightsResponse, JoinRoomRequest, JoinRoomResponse, ReadyRequest, RoomView,
-    RoundResultView, RoundSummaryResponse, RulesQueryRequest, StartGameRequest, StartGameResponse,
+    RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest, SetAvatarResponse,
+    StartGameRequest, StartGameResponse,
 };
+use crate::emotes::is_allowed_avatar;
 
 use crate::actor::{self, SpawnActor};
 use crate::error::ApiError;
 use crate::persist::{persist_new_game, stored_room, stored_session};
 use crate::state::{generate_room_code, AppState, GameInfo, Room, RoomSeat, RoomStatus};
+
+pub async fn set_avatar(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<SetAvatarRequest>,
+) -> Result<Json<SetAvatarResponse>, ApiError> {
+    let session = state.authenticate(&headers)?;
+    if !is_allowed_avatar(&body.avatar_id) {
+        return Err(ApiError::BadRequest("unknown avatar_id".into()));
+    }
+    let avatar_id = state
+        .set_avatar(session.id, body.avatar_id.clone())
+        .ok_or(ApiError::Unauthorized)?;
+    // Refresh session from map for persist.
+    let session = state
+        .sessions
+        .lock()
+        .unwrap()
+        .get(&session.id)
+        .cloned()
+        .ok_or(ApiError::Unauthorized)?;
+    state
+        .store
+        .upsert_session(&stored_session(&session))
+        .await
+        .map_err(|e| ApiError::Conflict(format!("persist session: {e}")))?;
+    // Persist lobby seats that carry the new avatar.
+    let room_snapshots: Vec<_> = {
+        let rooms = state.rooms.lock().unwrap();
+        rooms
+            .values()
+            .filter(|r| r.seats.iter().any(|s| s.session_id == session.id))
+            .map(stored_room)
+            .collect()
+    };
+    for snapshot in room_snapshots {
+        state
+            .store
+            .upsert_room(&snapshot)
+            .await
+            .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
+    }
+    Ok(Json(SetAvatarResponse { avatar_id }))
+}
 
 pub async fn create_guest_session(
     State(state): State<Arc<AppState>>,
@@ -100,12 +146,14 @@ pub async fn create_room(
             seat: 0,
             ready: false,
             joined_at: Utc::now(),
+            avatar_id: session.avatar_id.clone(),
         }],
         status: RoomStatus::Lobby,
         max_players,
         turn_timeout_seconds,
         first_trump: body.first_trump,
         round_schedule,
+        dealer_total_restriction: body.dealer_total_restriction,
     };
     let view = room.view();
     state
@@ -166,6 +214,7 @@ pub async fn join_room(
             seat: seat_number,
             ready: false,
             joined_at: Utc::now(),
+            avatar_id: session.avatar_id.clone(),
         });
         (room.view(), player_id, stored_room(room))
     };
@@ -275,9 +324,21 @@ pub async fn start_game(
     let session = state.authenticate(&headers)?;
     let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
     let seed = body.and_then(|Json(b)| b.seed);
+    if seed.is_some() && !seed_allowed() {
+        return Err(ApiError::Forbidden(
+            "deterministic seed is disabled (set JUDGEMENT_ALLOW_SEED=1 for non-prod)".into(),
+        ));
+    }
 
-    let (players, session_to_player, turn_timeout_seconds, first_trump, round_schedule, game_players) =
-        {
+    let (
+        players,
+        session_to_player,
+        turn_timeout_seconds,
+        first_trump,
+        round_schedule,
+        dealer_total_restriction,
+        game_players,
+    ) = {
             let rooms = state.rooms.lock().unwrap();
             let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
 
@@ -301,7 +362,13 @@ pub async fn start_game(
             seats.sort_by_key(|s| s.seat);
             let players: Vec<PlayerState> = seats
                 .iter()
-                .map(|s| PlayerState::human(s.player_id, s.nickname.clone(), s.seat))
+                .map(|s| {
+                    let mut p = PlayerState::human(s.player_id, s.nickname.clone(), s.seat);
+                    if let Some(avatar) = &s.avatar_id {
+                        p = p.with_avatar(avatar.clone());
+                    }
+                    p
+                })
                 .collect();
             let mapping: HashMap<_, _> =
                 seats.iter().map(|s| (s.session_id, s.player_id)).collect();
@@ -320,6 +387,7 @@ pub async fn start_game(
                 room.turn_timeout_seconds,
                 room.first_trump,
                 room.round_schedule.clone(),
+                room.dealer_total_restriction,
                 game_players,
             )
         };
@@ -338,12 +406,13 @@ pub async fn start_game(
                 "round schedule is not valid for {seated} seated players: {e}"
             ))
         })?;
-    let rules = GameRules {
+    let mut rules = GameRules {
         turn_timeout_seconds,
         trump_rule,
         round_pattern,
         ..GameRules::mvp_for_players(seated)
     };
+    rules.bidding_rule.dealer_total_restriction = dealer_total_restriction;
     let rules_for_store = rules.clone();
     let reconnect_grace = Duration::from_secs(rules.reconnect_grace_seconds as u64);
     let turn_timeout = turn_timeout_seconds.map(|t| Duration::from_secs(t as u64));
@@ -667,6 +736,14 @@ pub async fn get_round_summary(
         summary: serde_json::to_value(&summary).unwrap_or_default(),
         narration: to_protocol_explanation(narration),
     }))
+}
+
+/// Deterministic deals are for tests/local only. Production must omit `seed`.
+fn seed_allowed() -> bool {
+    match std::env::var("JUDGEMENT_ALLOW_SEED") {
+        Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"),
+        Err(_) => false,
+    }
 }
 
 fn ensure_game_participant(

@@ -16,6 +16,10 @@ use judgement_protocol::{
 };
 use tokio::sync::mpsc;
 
+use crate::emotes::{
+    is_allowed_avatar, is_allowed_emoji, is_allowed_mood, resolve_emote_text, MAX_EMOTE_TEXT_LEN,
+    REACTION_COOLDOWN_MS,
+};
 use crate::metrics::Metrics;
 use crate::persist::command_commit_from;
 
@@ -85,6 +89,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         grace_ids: HashMap::new(),
         paused: false,
         metrics: config.metrics,
+        last_emote_at: HashMap::new(),
     };
     tokio::spawn(actor.run());
     tx
@@ -107,6 +112,8 @@ struct GameActor {
     /// player → active grace id (stale-id guard, same pattern as turn deadlines).
     grace_ids: HashMap<PlayerId, u64>,
     paused: bool,
+    /// Rate-limit cosmetic emotes (player → last emit millis).
+    last_emote_at: HashMap<PlayerId, u64>,
 }
 
 impl GameActor {
@@ -334,6 +341,68 @@ impl GameActor {
             return;
         }
 
+        // Cosmetic engagement: no engine rules, optional rate limit.
+        if matches!(
+            envelope.action,
+            ClientCommand::SendReaction { .. }
+                | ClientCommand::SendEmoteText { .. }
+                | ClientCommand::AvatarFlash { .. }
+        ) {
+            self.handle_table_emote(player_id, envelope);
+            return;
+        }
+
+        if let ClientCommand::SetAvatar { avatar_id } = &envelope.action {
+            let avatar_id = avatar_id.clone();
+            if !is_allowed_avatar(&avatar_id) {
+                self.reject(
+                    player_id,
+                    Some(action_id),
+                    RejectReason::MalformedMessage {
+                        detail: "unknown avatar_id".into(),
+                    },
+                );
+                return;
+            }
+            let previous = self.engine.state().clone();
+            if self.engine.set_avatar(player_id, avatar_id).is_err() {
+                self.reject(
+                    player_id,
+                    Some(action_id),
+                    RejectReason::Game {
+                        error: GameError::PlayerNotInGame,
+                    },
+                );
+                return;
+            }
+            // Persist snapshot so mid-game avatar survives process restart.
+            if !Self::persist_accepted(
+                &self.store,
+                self.game_id,
+                action_id,
+                &[],
+                self.engine.state(),
+                &self.metrics,
+            )
+            .await
+            {
+                self.engine.replace_state(previous);
+                self.reject(player_id, Some(action_id), RejectReason::QueueFull);
+                return;
+            }
+            let new_state_version = self.engine.version();
+            self.processed.insert(action_id, new_state_version);
+            self.send_to(
+                player_id,
+                ServerMessage::CommandAccepted {
+                    action_id,
+                    new_state_version,
+                },
+            );
+            self.broadcast_snapshots();
+            return;
+        }
+
         if let Some(&version) = self.processed.get(&action_id) {
             self.send_to(
                 player_id,
@@ -395,7 +464,12 @@ impl GameActor {
                 self.reject(player_id, Some(action_id), RejectReason::UnsupportedCommand);
                 return;
             }
-            ClientCommand::LeaveGame | ClientCommand::RequestStateSync => unreachable!(),
+            ClientCommand::LeaveGame
+            | ClientCommand::RequestStateSync
+            | ClientCommand::SetAvatar { .. }
+            | ClientCommand::SendReaction { .. }
+            | ClientCommand::SendEmoteText { .. }
+            | ClientCommand::AvatarFlash { .. } => unreachable!(),
         };
 
         match result {
@@ -424,11 +498,179 @@ impl GameActor {
                     },
                 );
                 self.broadcast_snapshots();
+                self.emit_auto_cheers(&events);
                 self.schedule_deadline();
                 self.maybe_request_bot_turn();
             }
             Err(error) => {
                 self.reject(player_id, Some(action_id), RejectReason::Game { error });
+            }
+        }
+    }
+
+    fn handle_table_emote(&mut self, player_id: PlayerId, envelope: ClientEnvelope) {
+        let action_id = envelope.action_id;
+        if !self.clients.contains_key(&player_id) {
+            return;
+        }
+        if !self.allow_emote(player_id) {
+            self.reject(
+                player_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "slow down — reactions are rate limited".into(),
+                },
+            );
+            return;
+        }
+
+        let event = match envelope.action {
+            ClientCommand::SendReaction { emoji, target } => {
+                if !is_allowed_emoji(&emoji) {
+                    self.reject(
+                        player_id,
+                        Some(action_id),
+                        RejectReason::MalformedMessage {
+                            detail: "emoji not allowed".into(),
+                        },
+                    );
+                    return;
+                }
+                ServerMessage::TableEvent {
+                    kind: "reaction".into(),
+                    from: player_id,
+                    target,
+                    emojis: vec![emoji],
+                    text: None,
+                    mood: None,
+                    sticker_id: None,
+                    ttl_ms: 1800,
+                }
+            }
+            ClientCommand::SendEmoteText { text } => {
+                let trimmed = text.trim();
+                if trimmed.is_empty() || trimmed.chars().count() > MAX_EMOTE_TEXT_LEN {
+                    self.reject(
+                        player_id,
+                        Some(action_id),
+                        RejectReason::MalformedMessage {
+                            detail: format!("emote text must be 1–{MAX_EMOTE_TEXT_LEN} characters"),
+                        },
+                    );
+                    return;
+                }
+                let style = resolve_emote_text(trimmed);
+                ServerMessage::TableEvent {
+                    kind: "emote_text".into(),
+                    from: player_id,
+                    target: None,
+                    emojis: style.emojis,
+                    text: Some(trimmed.to_string()),
+                    mood: Some(style.mood),
+                    sticker_id: style.sticker_id,
+                    ttl_ms: 2200,
+                }
+            }
+            ClientCommand::AvatarFlash { mood } => {
+                if !is_allowed_mood(&mood) {
+                    self.reject(
+                        player_id,
+                        Some(action_id),
+                        RejectReason::MalformedMessage {
+                            detail: "unknown mood".into(),
+                        },
+                    );
+                    return;
+                }
+                ServerMessage::TableEvent {
+                    kind: "avatar_flash".into(),
+                    from: player_id,
+                    target: None,
+                    emojis: Vec::new(),
+                    text: None,
+                    mood: Some(mood),
+                    sticker_id: None,
+                    ttl_ms: 1600,
+                }
+            }
+            _ => unreachable!(),
+        };
+
+        self.send_to(
+            player_id,
+            ServerMessage::CommandAccepted {
+                action_id,
+                new_state_version: self.engine.version(),
+            },
+        );
+        self.broadcast(event);
+    }
+
+    fn allow_emote(&mut self, player_id: PlayerId) -> bool {
+        let now = now_ms();
+        if let Some(&last) = self.last_emote_at.get(&player_id) {
+            if now.saturating_sub(last) < REACTION_COOLDOWN_MS {
+                return false;
+            }
+        }
+        self.last_emote_at.insert(player_id, now);
+        true
+    }
+
+    fn emit_auto_cheers(&self, events: &[judgement_engine::GameEvent]) {
+        use judgement_engine::GameEvent;
+        for event in events {
+            match event {
+                GameEvent::TrickCompleted { winner, .. } => {
+                    self.broadcast(ServerMessage::TableEvent {
+                        kind: "auto_cheer".into(),
+                        from: *winner,
+                        target: None,
+                        emojis: vec!["👏".into(), "🔥".into()],
+                        text: None,
+                        mood: Some("cheer".into()),
+                        sticker_id: Some("laugh".into()),
+                        ttl_ms: 1600,
+                    });
+                }
+                GameEvent::RoundCompleted { .. } => {
+                    let state = self.engine.state();
+                    let mut best: Option<(PlayerId, i32)> = None;
+                    for p in &state.players {
+                        let score = state.score_table.total_score(p.id);
+                        best = match best {
+                            Some((_, s)) if s >= score => best,
+                            _ => Some((p.id, score)),
+                        };
+                    }
+                    if let Some((from, _)) = best {
+                        self.broadcast(ServerMessage::TableEvent {
+                            kind: "auto_cheer".into(),
+                            from,
+                            target: None,
+                            emojis: vec!["🎯".into(), "✨".into()],
+                            text: None,
+                            mood: Some("cheer".into()),
+                            sticker_id: Some("crown".into()),
+                            ttl_ms: 2000,
+                        });
+                    }
+                }
+                GameEvent::GameCompleted { ranking } => {
+                    if let Some(winner) = ranking.first() {
+                        self.broadcast(ServerMessage::TableEvent {
+                            kind: "auto_cheer".into(),
+                            from: winner.player_id,
+                            target: None,
+                            emojis: vec!["🙌".into(), "🔥".into(), "✨".into()],
+                            text: None,
+                            mood: Some("fire".into()),
+                            sticker_id: Some("fire".into()),
+                            ttl_ms: 2500,
+                        });
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -561,6 +803,7 @@ impl GameActor {
                 }
                 self.processed.insert(action_id, self.engine.version());
                 self.broadcast_snapshots();
+                self.emit_auto_cheers(&events);
                 self.schedule_deadline();
                 self.maybe_request_bot_turn();
             }
@@ -657,6 +900,7 @@ impl GameActor {
                 self.processed.insert(action_id, self.engine.version());
                 tracing::info!(player = %player_id, "bot action applied");
                 self.broadcast_snapshots();
+                self.emit_auto_cheers(&events);
                 self.schedule_deadline();
                 self.maybe_request_bot_turn();
             }
@@ -736,6 +980,13 @@ impl GameActor {
             let _ = outbound.try_send(message);
         }
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn reject_message(reason: &RejectReason) -> String {

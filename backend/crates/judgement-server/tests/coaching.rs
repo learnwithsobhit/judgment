@@ -27,6 +27,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
                 nickname: format!("P{i}"),
                 token: if i == 0 { token.clone() } else { format!("tok-{i}") },
                 created_at: Utc::now(),
+                avatar_id: None,
             })
             .await
             .unwrap();
@@ -57,6 +58,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             turn_timeout_seconds: None,
             first_trump: Some(Suit::Clubs),
             round_schedule: Default::default(),
+            dealer_total_restriction: false,
             phase: "in_game".into(),
             game_id: None,
             players: game_players
@@ -68,6 +70,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
                     seat: p.seat,
                     ready: true,
                     joined_at: Utc::now(),
+                    avatar_id: None,
                 })
                 .collect(),
             created_at: Utc::now(),
@@ -158,6 +161,7 @@ fn to_commit(
 }
 
 async fn spawn(store: Arc<MemoryStore>) -> (String, Arc<AppState>) {
+    std::env::set_var("JUDGEMENT_ALLOW_SEED", "1");
     let state = Arc::new(AppState::new(store));
     // Mirror durable sessions into AppState auth maps.
     for session in state.store.load_sessions().await.unwrap() {
@@ -167,6 +171,7 @@ async fn spawn(store: Arc<MemoryStore>) -> (String, Arc<AppState>) {
                 id: session.session_id,
                 nickname: session.nickname.clone(),
                 token: session.token.clone(),
+                avatar_id: session.avatar_id.clone(),
             },
         );
         state

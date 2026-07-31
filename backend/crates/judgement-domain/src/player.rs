@@ -20,6 +20,9 @@ pub struct PlayerState {
     pub seat: u8,
     pub is_bot: bool,
     pub connection_status: ConnectionStatus,
+    /// Built-in avatar pack id (cosmetic; not used by rules).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
 }
 
 impl PlayerState {
@@ -30,6 +33,7 @@ impl PlayerState {
             seat,
             is_bot: false,
             connection_status: ConnectionStatus::Connected,
+            avatar_id: None,
         }
     }
 
@@ -40,6 +44,12 @@ impl PlayerState {
             seat,
             is_bot: true,
             connection_status: ConnectionStatus::BotControlled,
+            avatar_id: None,
         }
+    }
+
+    pub fn with_avatar(mut self, avatar_id: impl Into<String>) -> Self {
+        self.avatar_id = Some(avatar_id.into());
+        self
     }
 }

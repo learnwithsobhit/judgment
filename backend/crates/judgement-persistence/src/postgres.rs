@@ -64,16 +64,19 @@ impl GameStore for PostgresStore {
     async fn upsert_session(&self, session: &StoredSession) -> Result<(), PersistError> {
         sqlx::query(
             r#"
-            INSERT INTO guest_sessions (session_id, nickname, token, created_at)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO guest_sessions (session_id, nickname, token, created_at, avatar_id)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (session_id) DO UPDATE
-              SET nickname = EXCLUDED.nickname, token = EXCLUDED.token
+              SET nickname = EXCLUDED.nickname,
+                  token = EXCLUDED.token,
+                  avatar_id = EXCLUDED.avatar_id
             "#,
         )
         .bind(session.session_id.0)
         .bind(&session.nickname)
         .bind(&session.token)
         .bind(session.created_at)
+        .bind(&session.avatar_id)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -86,14 +89,15 @@ impl GameStore for PostgresStore {
             r#"
             INSERT INTO rooms (
                 room_id, code, host_session_id, max_players, turn_timeout_seconds,
-                first_trump, round_schedule, phase, game_id, created_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                first_trump, round_schedule, dealer_total_restriction, phase, game_id, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
             ON CONFLICT (room_id) DO UPDATE SET
                 host_session_id = EXCLUDED.host_session_id,
                 max_players = EXCLUDED.max_players,
                 turn_timeout_seconds = EXCLUDED.turn_timeout_seconds,
                 first_trump = EXCLUDED.first_trump,
                 round_schedule = EXCLUDED.round_schedule,
+                dealer_total_restriction = EXCLUDED.dealer_total_restriction,
                 phase = EXCLUDED.phase,
                 game_id = EXCLUDED.game_id
             "#,
@@ -105,6 +109,7 @@ impl GameStore for PostgresStore {
         .bind(room.turn_timeout_seconds.map(|t| t as i16))
         .bind(room.first_trump.map(suit_to_db))
         .bind(serde_json::to_value(&room.round_schedule)?)
+        .bind(room.dealer_total_restriction)
         .bind(&room.phase)
         .bind(room.game_id.map(|g| g.0))
         .bind(room.created_at)
@@ -120,8 +125,8 @@ impl GameStore for PostgresStore {
             sqlx::query(
                 r#"
                 INSERT INTO room_players (
-                    room_id, session_id, player_id, nickname, seat, ready, joined_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    room_id, session_id, player_id, nickname, seat, ready, joined_at, avatar_id
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
                 "#,
             )
             .bind(room.room_id.0)
@@ -131,6 +136,7 @@ impl GameStore for PostgresStore {
             .bind(player.seat as i16)
             .bind(player.ready)
             .bind(player.joined_at)
+            .bind(&player.avatar_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -149,7 +155,7 @@ impl GameStore for PostgresStore {
 
     async fn load_sessions(&self) -> Result<Vec<StoredSession>, PersistError> {
         let rows = sqlx::query(
-            "SELECT session_id, nickname, token, created_at FROM guest_sessions",
+            "SELECT session_id, nickname, token, created_at, avatar_id FROM guest_sessions",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -161,6 +167,7 @@ impl GameStore for PostgresStore {
                 nickname: row.get("nickname"),
                 token: row.get("token"),
                 created_at: row.get("created_at"),
+                avatar_id: row.get("avatar_id"),
             })
             .collect())
     }
@@ -169,7 +176,7 @@ impl GameStore for PostgresStore {
         let room_rows = sqlx::query(
             r#"
             SELECT room_id, code, host_session_id, max_players, turn_timeout_seconds,
-                   first_trump, round_schedule, phase, game_id, created_at
+                   first_trump, round_schedule, dealer_total_restriction, phase, game_id, created_at
             FROM rooms
             "#,
         )
@@ -181,7 +188,7 @@ impl GameStore for PostgresStore {
             let room_id: Uuid = row.get("room_id");
             let players = sqlx::query(
                 r#"
-                SELECT session_id, player_id, nickname, seat, ready, joined_at
+                SELECT session_id, player_id, nickname, seat, ready, joined_at, avatar_id
                 FROM room_players WHERE room_id = $1 ORDER BY seat
                 "#,
             )
@@ -196,6 +203,7 @@ impl GameStore for PostgresStore {
                 seat: p.get::<i16, _>("seat") as u8,
                 ready: p.get("ready"),
                 joined_at: p.get("joined_at"),
+                avatar_id: p.get("avatar_id"),
             })
             .collect();
 
@@ -212,6 +220,7 @@ impl GameStore for PostgresStore {
                     .map(|t| t as u16),
                 first_trump: first_trump.as_deref().and_then(suit_from_db),
                 round_schedule,
+                dealer_total_restriction: row.get("dealer_total_restriction"),
                 phase: row.get("phase"),
                 game_id: row.get::<Option<Uuid>, _>("game_id").map(GameId),
                 players,

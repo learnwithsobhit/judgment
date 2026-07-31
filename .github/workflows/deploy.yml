@@ -28,10 +28,10 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           if [ -z "$FLY_API_TOKEN" ]; then
-            echo "FLY_API_TOKEN unset — skipping Fly deploy."
+            echo "FLY_API_TOKEN unset — cannot deploy API."
             echo "Create a deploy token: fly tokens create deploy -a judgment-api"
             echo "Add it as GitHub secret FLY_API_TOKEN."
-            exit 0
+            exit 1
           fi
           flyctl deploy --remote-only
 

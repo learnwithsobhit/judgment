@@ -130,6 +130,23 @@ impl GameEngine {
         Ok(())
     }
 
+    /// Cosmetic avatar pack id (does not affect rules).
+    pub fn set_avatar(
+        &mut self,
+        player_id: PlayerId,
+        avatar_id: String,
+    ) -> Result<(), GameError> {
+        let player = self
+            .state
+            .players
+            .iter_mut()
+            .find(|p| p.id == player_id)
+            .ok_or(GameError::PlayerNotInGame)?;
+        player.avatar_id = Some(avatar_id);
+        self.state.version += 1;
+        Ok(())
+    }
+
     /// Personalised projection for one player; never leaks hidden state.
     pub fn view_for(&self, player_id: PlayerId) -> Result<PlayerGameView, GameError> {
         if !self.state.contains_player(player_id) {

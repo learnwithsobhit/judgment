@@ -16,6 +16,8 @@ pub struct StoredSession {
     pub nickname: String,
     pub token: String,
     pub created_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +28,8 @@ pub struct StoredRoomPlayer {
     pub seat: u8,
     pub ready: bool,
     pub joined_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +43,8 @@ pub struct StoredRoom {
     /// Automatic descending or manual `{cards, repeat}` steps.
     #[serde(default)]
     pub round_schedule: RoundSchedule,
+    #[serde(default)]
+    pub dealer_total_restriction: bool,
     pub phase: String,
     pub game_id: Option<GameId>,
     pub players: Vec<StoredRoomPlayer>,

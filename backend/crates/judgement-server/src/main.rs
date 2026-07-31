@@ -30,7 +30,7 @@ async fn main() {
                 .migrate(migrations_dir())
                 .await
                 .expect("failed to run migrations");
-            tracing::info!(%url, "using PostgreSQL persistence");
+            tracing::info!("using PostgreSQL persistence");
             let store: Arc<dyn judgement_persistence::GameStore> = Arc::new(store);
             let state = Arc::new(AppState::with_explanations(store, explanations));
             let restored = restore_from_store(&state)

@@ -12,9 +12,9 @@ Last reviewed: 2026-07-31
 ## Transport & origins
 
 - [x] `ALLOWED_ORIGINS` configures CORS allow-list (unset = permissive **dev only**)
-- [x] Production TLS termination at Railway (API/WSS) and Firebase Hosting (web)
-- [x] Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, deploy tokens) via Railway / GitHub
-  Actions secrets — never baked into images (see `docs/runbooks/deploy.md`)
+- [x] Production TLS termination at Fly.io (API/WSS) and Firebase Hosting (web)
+- [x] Secrets (`DATABASE_URL`, `OPENAI_API_KEY`, deploy tokens) via Fly secrets /
+  GitHub Actions secrets — never baked into images (see `docs/runbooks/deploy.md`)
 
 ## Abuse controls
 
@@ -22,14 +22,15 @@ Last reviewed: 2026-07-31
 - [x] AI per-session rate limits + cost caps (Phase 7)
 - [x] WebSocket max message size + actor backpressure
 - [x] Action-id deduplication + state-version checks
+- [x] Deterministic `seed` on start-game rejected unless `JUDGEMENT_ALLOW_SEED=1`
 
 ## Data
 
 - [x] Server-side shuffle; seed not logged before game completion
 - [x] Postgres persistence with restore-on-boot
 - [x] Daily backup + restore verification scripts under `deployment/scripts/`
-- [x] Managed DB automated backups — enable in Railway Postgres plugin UI
-  (operator checklist; confirm before first public launch)
+- [x] Managed DB automated backups — enable Fly Postgres continuous backups
+  (or provider equivalent); confirm before first public launch
 
 ## AI boundaries (ADR 0002)
 
@@ -43,10 +44,10 @@ Last reviewed: 2026-07-31
 Before promoting a release (see also `docs/runbooks/deploy.md`):
 
 1. `ALLOWED_ORIGINS` set to the real Firebase Hosting origins  
-2. `DATABASE_URL` points at managed Postgres with TLS (Railway plugin)  
+2. `DATABASE_URL` points at managed Postgres with TLS (Fly Postgres attach or Neon/Supabase)  
 3. `PUBLIC_WEB_ORIGIN` set to the primary Firebase URL  
 4. `/readyz` returns 200 and `/metrics` scrapes cleanly  
 5. GitHub Actions `CI` green; Deploy smoke curls succeed  
-6. Railway Postgres automated backups confirmed in the dashboard  
-7. This checklist re-checked for any new endpoints  
-
+6. Fly Postgres automated / continuous backups confirmed (`fly postgres …` / dashboard)  
+7. Migrations through `0007_dealer_bid_restriction` applied (avatar + dealer columns)  
+8. This checklist re-checked for any new endpoints  

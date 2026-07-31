@@ -8,8 +8,13 @@ import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
 import '../widgets/assistant_panel.dart';
+import '../widgets/cartoon_text_blast.dart';
+import '../widgets/emoji_blast.dart';
+import '../widgets/emote_bar.dart';
+import '../widgets/player_avatar.dart';
 import '../widgets/playing_card.dart';
 import '../widgets/scoreboard.dart';
+import '../widgets/victory_celebration.dart';
 import 'result_screen.dart';
 
 /// The main game table: opponents around the felt, the current trick in the
@@ -25,6 +30,8 @@ class TableScreen extends StatefulWidget {
 
 class _TableScreenState extends State<TableScreen> {
   Timer? _ticker;
+  /// After the game ends, celebrate first; open results on demand.
+  bool _showResults = false;
 
   GameController get controller => widget.controller;
 
@@ -84,7 +91,10 @@ class _TableScreenState extends State<TableScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const CircularProgressIndicator(),
+                  if (controller.connection != GameConnectionState.disconnected)
+                    const CircularProgressIndicator()
+                  else
+                    const Icon(Icons.wifi_off, size: 40, color: Colors.white54),
                   const SizedBox(height: 16),
                   Text(
                     switch (controller.connection) {
@@ -94,6 +104,13 @@ class _TableScreenState extends State<TableScreen> {
                       GameConnectionState.connected => 'Waiting for the deal…',
                     },
                   ),
+                  if (controller.canManualReconnect) ...[
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: controller.manualReconnect,
+                      child: const Text('Reconnect'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -101,7 +118,13 @@ class _TableScreenState extends State<TableScreen> {
         }
 
         if (view.isFinished && view.finalRanking != null) {
-          return ResultScreen(controller: controller);
+          if (_showResults) {
+            return ResultScreen(controller: controller);
+          }
+          return VictoryCelebration(
+            controller: controller,
+            onViewResults: () => setState(() => _showResults = true),
+          );
         }
 
         final wide = MediaQuery.sizeOf(context).width >= 900;
@@ -138,6 +161,24 @@ class _TableScreenState extends State<TableScreen> {
                     ],
                   ),
                 ),
+                if (controller.roundResultBanner != null)
+                  Material(
+                    color: goldAccent.withValues(alpha: 0.9),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      child: Text(
+                        controller.roundResultBanner!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                EmoteBar(controller: controller),
                 _ActionArea(controller: controller),
                 _HandArea(controller: controller),
               ],
@@ -197,6 +238,11 @@ class _TopBar extends StatelessWidget {
                 const SizedBox(width: 12),
               ],
               _connectionDot(controller.connection),
+              if (controller.canManualReconnect)
+                TextButton(
+                  onPressed: controller.manualReconnect,
+                  child: const Text('Reconnect'),
+                ),
               IconButton(
                 icon: const Icon(Icons.menu_book_outlined),
                 tooltip: 'Rules assistant',
@@ -330,15 +376,40 @@ class _TableArea extends StatelessWidget {
             Align(
               alignment: _alignmentFor(index + 1, relativeOrder.length),
               child: _OpponentSeat(
+                controller: controller,
                 opponent: opponent,
                 isTurn: view.currentTurn == opponent.playerId,
                 isDealer: view.round?.dealer == opponent.playerId,
+                isLeader: view.leader?.playerId == opponent.playerId,
               ),
             ),
           Align(
             alignment: const Alignment(0, 0.05),
             child: _TrickArea(controller: controller),
           ),
+          EmojiBlastOverlay(controller: controller),
+          CartoonTextBlastOverlay(controller: controller),
+          if (view.leader != null && view.roundHistory.isNotEmpty)
+            Align(
+              alignment: const Alignment(0, -0.92),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  view.leader!.margin == 0 &&
+                          view.roundHistory.isNotEmpty
+                      ? 'Tied on round scores'
+                      : view.leader!.playerId == controller.myPlayerId
+                          ? 'You’re ahead on round scores'
+                          : '${controller.nicknameOf(view.leader!.playerId)} ahead on round scores',
+                  style: const TextStyle(fontSize: 12, color: goldAccent),
+                ),
+              ),
+            ),
           // The viewer's own turn/dealer markers, shown at the bottom edge.
           Align(
             alignment: const Alignment(0, 0.97),
@@ -358,31 +429,50 @@ class _TableArea extends StatelessWidget {
         color: isMyTurn ? goldAccent : Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Text(
-        [
-          controller.myNickname,
-          if (isDealer) '(dealer)',
-          if (view.ownBid != null) 'bid ${view.ownBid} · won ${view.ownTricksWon}',
-        ].join(' '),
-        style: TextStyle(
-          color: isMyTurn ? Colors.black : Colors.white,
-          fontWeight: FontWeight.w600,
-          fontSize: 13,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          PlayerAvatar(
+            avatarId: view.ownAvatarId,
+            nickname: controller.myNickname,
+            radius: 12,
+            highlight: isMyTurn,
+            flashMood: controller.avatarFlashes[controller.myPlayerId],
+            onLongPress: () => controller.sendAvatarFlash('cheer'),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            [
+              controller.myNickname,
+              if (isDealer) '(dealer)',
+              if (view.ownBid != null)
+                'bid ${view.ownBid} · won ${view.ownTricksWon}',
+            ].join(' '),
+            style: TextStyle(
+              color: isMyTurn ? Colors.black : Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _OpponentSeat extends StatelessWidget {
+  final GameController controller;
   final OpponentView opponent;
   final bool isTurn;
   final bool isDealer;
+  final bool isLeader;
 
   const _OpponentSeat({
+    required this.controller,
     required this.opponent,
     required this.isTurn,
     required this.isDealer,
+    required this.isLeader,
   });
 
   @override
@@ -396,28 +486,14 @@ class _OpponentSeat extends StatelessWidget {
           Stack(
             clipBehavior: Clip.none,
             children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.all(3),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isTurn ? goldAccent : Colors.transparent,
-                    width: 3,
-                  ),
-                ),
-                child: CircleAvatar(
-                  radius: 20,
-                  backgroundColor:
-                      disconnected ? Colors.grey.shade700 : const Color(0xFF37474F),
-                  child: disconnected
-                      ? const Icon(Icons.wifi_off, size: 18, color: Colors.white54)
-                      : Text(
-                          opponent.nickname.characters.first.toUpperCase(),
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                ),
+              PlayerAvatar(
+                avatarId: opponent.avatarId,
+                nickname: opponent.nickname,
+                highlight: isTurn || isLeader,
+                muted: disconnected,
+                flashMood: controller.avatarFlashes[opponent.playerId],
+                onLongPress: () =>
+                    controller.sendReaction('👏', target: opponent.playerId),
               ),
               if (isDealer)
                 const Positioned(
@@ -432,6 +508,12 @@ class _OpponentSeat extends StatelessWidget {
                             color: Colors.black,
                             fontWeight: FontWeight.bold)),
                   ),
+                ),
+              if (isLeader)
+                const Positioned(
+                  left: -2,
+                  top: -2,
+                  child: Text('👑', style: TextStyle(fontSize: 14)),
                 ),
             ],
           ),
@@ -471,8 +553,9 @@ class _TrickArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final view = controller.view!;
-    if (view.currentTrick.isEmpty) {
+    final cards = controller.displayTrick;
+    if (cards.isEmpty) {
+      final view = controller.view!;
       final label = switch (view.phase) {
         'bidding' => 'Bidding in progress',
         'playing' => 'Waiting for the lead…',
@@ -484,23 +567,40 @@ class _TrickArea extends StatelessWidget {
         style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 14),
       );
     }
-    return Wrap(
-      spacing: 10,
-      runSpacing: 8,
-      alignment: WrapAlignment.center,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        for (final played in view.currentTrick)
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              PlayingCardWidget(card: played.card, width: 48),
-              const SizedBox(height: 2),
-              Text(
-                controller.nicknameOf(played.playerId),
-                style: const TextStyle(fontSize: 10, color: Colors.white70),
+        if (controller.showingCompletedTrick && controller.trickBanner != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              controller.trickBanner!,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: goldAccent,
+                fontSize: 14,
               ),
-            ],
+            ),
           ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          children: [
+            for (final played in cards)
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PlayingCardWidget(card: played.card, width: 48),
+                  const SizedBox(height: 2),
+                  Text(
+                    controller.nicknameOf(played.playerId),
+                    style: const TextStyle(fontSize: 10, color: Colors.white70),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -524,12 +624,14 @@ class _ActionArea extends StatelessWidget {
       final cards = view.round?.cardsPerPlayer ?? 0;
       final legal = view.legalActions.legalBids.toSet();
       final isDealer = view.round?.dealer == controller.myPlayerId;
+      final dealerRestricted = isDealer &&
+          List.generate(cards + 1, (b) => b).any((b) => !legal.contains(b));
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Column(
           children: [
             Text(
-              isDealer
+              dealerRestricted
                   ? 'Your bid — as dealer, the total cannot equal $cards'
                   : 'Your bid — how many tricks will you win?',
               style: const TextStyle(fontWeight: FontWeight.w600),

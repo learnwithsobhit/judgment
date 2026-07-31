@@ -31,6 +31,8 @@ pub struct Session {
     pub nickname: String,
     /// Opaque bearer token. Never logged (PLAN.md §22).
     pub token: String,
+    /// Built-in avatar pack id (cosmetic).
+    pub avatar_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +44,7 @@ pub struct RoomSeat {
     pub ready: bool,
     /// Connection order, used for host promotion (locked decision 5).
     pub joined_at: DateTime<Utc>,
+    pub avatar_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +68,8 @@ pub struct Room {
     pub first_trump: Option<Suit>,
     /// Resolved into `GameRules.round_pattern` at start.
     pub round_schedule: RoundSchedule,
+    /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
+    pub dealer_total_restriction: bool,
 }
 
 impl Room {
@@ -86,6 +91,7 @@ impl Room {
                 seat: s.seat,
                 ready: s.ready,
                 is_host: s.session_id == self.host_session,
+                avatar_id: s.avatar_id.clone(),
             })
             .collect();
         seats.sort_by_key(|s| s.seat);
@@ -100,6 +106,7 @@ impl Room {
             first_trump: self.first_trump,
             round_schedule: self.round_schedule.clone(),
             round_schedule_summary: self.round_schedule.summary(self.max_players),
+            dealer_total_restriction: self.dealer_total_restriction,
             seats,
         }
     }
@@ -193,10 +200,27 @@ impl AppState {
             id: SessionId::new(),
             nickname,
             token: generate_token(),
+            avatar_id: None,
         };
         self.sessions.lock().unwrap().insert(session.id, session.clone());
         self.tokens.lock().unwrap().insert(session.token.clone(), session.id);
         session
+    }
+
+    /// Persist a built-in avatar choice on the guest session (and any lobby seat).
+    pub fn set_avatar(&self, session_id: SessionId, avatar_id: String) -> Option<String> {
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = sessions.get_mut(&session_id)?;
+            session.avatar_id = Some(avatar_id.clone());
+        }
+        let mut rooms = self.rooms.lock().unwrap();
+        for room in rooms.values_mut() {
+            if let Some(seat) = room.seats.iter_mut().find(|s| s.session_id == session_id) {
+                seat.avatar_id = Some(avatar_id.clone());
+            }
+        }
+        Some(avatar_id)
     }
 
     /// Resolve the bearer token from `Authorization: Bearer <token>`.

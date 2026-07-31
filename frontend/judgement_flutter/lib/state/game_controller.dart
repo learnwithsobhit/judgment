@@ -21,6 +21,30 @@ enum GameConnectionState {
   disconnected,
 }
 
+/// Ephemeral reaction / cheer for the blast overlays.
+class EmoteBurst {
+  final String id;
+  final String from;
+  final String? target;
+  final List<String> emojis;
+  final String? text;
+  final String? mood;
+  final String? stickerId;
+  final int ttlMs;
+  final DateTime createdAt;
+
+  EmoteBurst({
+    required this.id,
+    required this.from,
+    required this.target,
+    required this.emojis,
+    this.text,
+    required this.mood,
+    this.stickerId,
+    required this.ttlMs,
+  }) : createdAt = DateTime.now();
+}
+
 class GameController extends ChangeNotifier {
   final ApiClient api;
   final String gameId;
@@ -55,7 +79,27 @@ class GameController extends ChangeNotifier {
   String? pauseReason;
   DateTime? pauseUntil;
 
+  /// Held last-trick cards for min 1.6s presentation pause.
+  CompletedTrickView? heldCompletedTrick;
+  DateTime? _holdUntil;
+  Timer? _holdTimer;
+
+  /// Transient "X takes the trick" / last-round strip.
+  String? trickBanner;
+  String? roundResultBanner;
+  Timer? _bannerTimer;
+
+  /// Active emoji bursts (auto-pruned).
+  final List<EmoteBurst> activeBursts = [];
+
+  /// playerId → latest flash mood for avatar bounce.
+  final Map<String, String> avatarFlashes = {};
+
+  bool muteReactions = false;
+
   final _uuid = const Uuid();
+
+  static const _minTrickHold = Duration(milliseconds: 1600);
 
   GameController({
     required this.api,
@@ -72,6 +116,39 @@ class GameController extends ChangeNotifier {
       view!.currentTurn == myPlayerId &&
       !view!.isFinished &&
       !isPaused;
+
+  /// Cards shown in the trick area (live trick or held completed overlay).
+  List<PlayedCard> get displayTrick {
+    final v = view;
+    if (v == null) return const [];
+    // Prefer the held completed trick until the min pause elapses, even if the
+    // next lead has already arrived underneath.
+    if (_holdActive && heldCompletedTrick != null) {
+      return heldCompletedTrick!.plays;
+    }
+    if (v.currentTrick.isNotEmpty) return v.currentTrick;
+    return heldCompletedTrick?.plays ??
+        v.lastCompletedTrick?.plays ??
+        const [];
+  }
+
+  bool get showingCompletedTrick {
+    if (_holdActive && heldCompletedTrick != null) return true;
+    final v = view;
+    if (v == null) return false;
+    if (v.currentTrick.isNotEmpty) return false;
+    return heldCompletedTrick != null || v.lastCompletedTrick != null;
+  }
+
+  bool get _holdActive =>
+      _holdUntil != null && DateTime.now().isBefore(_holdUntil!);
+
+  String? avatarOf(String playerId) {
+    if (playerId == myPlayerId) return view?.ownAvatarId;
+    final o = view?.opponents.where((e) => e.playerId == playerId);
+    if (o == null || o.isEmpty) return null;
+    return o.first.avatarId;
+  }
 
   String nicknameOf(String playerId) {
     if (playerId == myPlayerId) return myNickname;
@@ -105,13 +182,33 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  static const _maxReconnectAttempts = 5;
+
+  /// True when auto-reconnect gave up and the user can retry manually.
+  bool get canManualReconnect =>
+      connection == GameConnectionState.disconnected &&
+      _reconnectAttempts >= _maxReconnectAttempts &&
+      !(view?.isFinished ?? false);
+
+  /// Reset attempt counter and reconnect after auto-retry exhaustion.
+  Future<void> manualReconnect() async {
+    if (_disposed) return;
+    _reconnectAttempts = 0;
+    pendingActionId = null;
+    await connect();
+  }
+
   void _handleDisconnect() {
     if (_disposed) return;
+    // Unstick bid/play if the socket died before CommandAccepted.
+    pendingActionId = null;
     connection = GameConnectionState.disconnected;
     _notify();
-    if (_reconnectAttempts < 5 && !(view?.isFinished ?? false)) {
+    if (_reconnectAttempts < _maxReconnectAttempts &&
+        !(view?.isFinished ?? false)) {
       _reconnectAttempts += 1;
-      final delay = Duration(milliseconds: 500 * pow(2, _reconnectAttempts).toInt());
+      final delay =
+          Duration(milliseconds: 500 * pow(2, _reconnectAttempts).toInt());
       Timer(delay, () {
         if (!_disposed) connect();
       });
@@ -121,8 +218,7 @@ class GameController extends ChangeNotifier {
   void _handleMessage(ServerMessage message) {
     switch (message) {
       case StateSnapshot(:final view):
-        this.view = view;
-        _notify();
+        _applySnapshot(view);
       case CommandAccepted(:final actionId):
         if (pendingActionId == actionId) {
           pendingActionId = null;
@@ -159,6 +255,26 @@ class GameController extends ChangeNotifier {
         _notify();
       case TokenRotated(:final token):
         api.token = token;
+      case TableEventMessage(
+          :final kind,
+          :final from,
+          :final target,
+          :final emojis,
+          :final text,
+          :final mood,
+          :final stickerId,
+          :final ttlMs
+        ):
+        _onTableEvent(
+          kind: kind,
+          from: from,
+          target: target,
+          emojis: emojis,
+          text: text,
+          mood: mood,
+          stickerId: stickerId,
+          ttlMs: ttlMs,
+        );
       case BotTookOver() ||
             PlayerResumedControl() ||
             PlayerConnected() ||
@@ -170,12 +286,150 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  void _applySnapshot(PlayerGameView next) {
+    final prev = view;
+    final prevHistoryLen = prev?.roundHistory.length ?? 0;
+
+    // Trick reveal hold: when a completed trick appears (or persists), ensure
+    // the client keeps showing it for at least 1.6s.
+    if (next.lastCompletedTrick != null && next.currentTrick.isEmpty) {
+      final incoming = next.lastCompletedTrick!;
+      final same = heldCompletedTrick?.trickIndex == incoming.trickIndex &&
+          heldCompletedTrick?.winnerId == incoming.winnerId;
+      if (!same) {
+        heldCompletedTrick = incoming;
+        trickBanner =
+            '${nicknameOf(incoming.winnerId)} takes the trick';
+        _armHold();
+      }
+    } else if (next.currentTrick.isNotEmpty) {
+      // New lead arrived — keep hold until min duration elapses.
+      if (heldCompletedTrick != null &&
+          _holdUntil != null &&
+          DateTime.now().isBefore(_holdUntil!)) {
+        // Keep overlay; live lead waits underneath until hold ends.
+      } else if (heldCompletedTrick != null &&
+          (_holdUntil == null || !DateTime.now().isBefore(_holdUntil!))) {
+        heldCompletedTrick = null;
+        trickBanner = null;
+      }
+    } else if (next.lastCompletedTrick == null &&
+        (heldCompletedTrick == null ||
+            _holdUntil == null ||
+            !DateTime.now().isBefore(_holdUntil!))) {
+      heldCompletedTrick = null;
+      trickBanner = null;
+    }
+
+    if (next.roundHistory.length > prevHistoryLen &&
+        next.roundHistory.isNotEmpty) {
+      final last = next.roundHistory.last;
+      final lines = last.entries
+          .map((e) =>
+              '${nicknameOf(e.playerId)} ${e.score} (bid ${e.bid}→${e.tricksWon})')
+          .join(' · ');
+      roundResultBanner = 'Round ${last.roundIndex + 1} scores: $lines';
+      _bannerTimer?.cancel();
+      _bannerTimer = Timer(const Duration(seconds: 5), () {
+        roundResultBanner = null;
+        _notify();
+      });
+    }
+
+    view = next;
+    _notify();
+  }
+
+  void _armHold() {
+    _holdUntil = DateTime.now().add(_minTrickHold);
+    _holdTimer?.cancel();
+    _holdTimer = Timer(_minTrickHold, () {
+      // Drop hold only once the server no longer needs it OR live trick started
+      // after the min hold.
+      final v = view;
+      if (v != null && v.currentTrick.isNotEmpty) {
+        heldCompletedTrick = null;
+        trickBanner = null;
+      } else if (v == null || v.lastCompletedTrick == null) {
+        heldCompletedTrick = null;
+        trickBanner = null;
+      }
+      // If last_completed_trick still present, keep showing server projection
+      // (heldCompletedTrick can stay synced).
+      heldCompletedTrick = v?.lastCompletedTrick;
+      if (heldCompletedTrick == null) trickBanner = null;
+      _notify();
+    });
+  }
+
+  void _onTableEvent({
+    required String kind,
+    required String from,
+    required String? target,
+    required List<String> emojis,
+    required String? text,
+    required String? mood,
+    required String? stickerId,
+    required int ttlMs,
+  }) {
+    if (muteReactions && kind != 'auto_cheer') return;
+    if (mood != null) {
+      avatarFlashes[from] = '$mood-${DateTime.now().millisecondsSinceEpoch}';
+    }
+    final hasText = text != null && text.trim().isNotEmpty;
+    if (emojis.isNotEmpty || kind == 'avatar_flash' || hasText) {
+      final burst = EmoteBurst(
+        id: _uuid.v4(),
+        from: from,
+        target: target,
+        emojis: emojis.isEmpty
+            ? switch (mood) {
+                'laugh' => ['😂'],
+                'facepalm' || 'oops' => ['😤'],
+                'fire' || 'roast' => ['🔥'],
+                _ => ['🙌'],
+              }
+            : emojis,
+        text: text,
+        mood: mood,
+        stickerId: stickerId,
+        ttlMs: ttlMs,
+      );
+      activeBursts.add(burst);
+      Timer(Duration(milliseconds: ttlMs + 50), () {
+        activeBursts.removeWhere((b) => b.id == burst.id);
+        _notify();
+      });
+    }
+    _notify();
+  }
+
   void placeBid(int bid) {
     _sendCommand({'type': 'place_bid', 'bid': bid});
   }
 
   void playCard(String cardId) {
     _sendCommand({'type': 'play_card', 'card_id': cardId});
+  }
+
+  void setAvatar(String avatarId) {
+    _sendAction({'type': 'set_avatar', 'avatar_id': avatarId});
+  }
+
+  void sendReaction(String emoji, {String? target}) {
+    _sendAction({
+      'type': 'send_reaction',
+      'emoji': emoji,
+      if (target != null) 'target': target,
+    });
+  }
+
+  void sendEmoteText(String text) {
+    _sendAction({'type': 'send_emote_text', 'text': text});
+  }
+
+  void sendAvatarFlash(String mood) {
+    _sendAction({'type': 'avatar_flash', 'mood': mood});
   }
 
   /// Why a card is not currently playable, for user feedback
@@ -233,6 +487,8 @@ class GameController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _holdTimer?.cancel();
+    _bannerTimer?.cancel();
     _subscription?.cancel();
     _socket?.close();
     super.dispose();

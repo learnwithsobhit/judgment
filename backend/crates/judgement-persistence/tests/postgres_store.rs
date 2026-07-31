@@ -32,6 +32,7 @@ async fn postgres_persists_and_restores_a_game() {
             nickname: "Ada".into(),
             token: format!("tok-{}", session_id),
             created_at: Utc::now(),
+            avatar_id: None,
         })
         .await
         .unwrap();
@@ -48,6 +49,7 @@ async fn postgres_persists_and_restores_a_game() {
                 nickname: format!("P{seat}"),
                 token: format!("tok-{sid}"),
                 created_at: Utc::now(),
+                avatar_id: None,
             })
             .await
             .unwrap();
@@ -59,6 +61,7 @@ async fn postgres_persists_and_restores_a_game() {
             seat,
             ready: true,
             joined_at: Utc::now(),
+            avatar_id: None,
         });
         players.push(PlayerState::human(pid, format!("P{seat}"), seat));
         game_players.push(NewGamePlayer {
@@ -78,6 +81,7 @@ async fn postgres_persists_and_restores_a_game() {
             turn_timeout_seconds: None,
             first_trump: Some(Suit::Spades),
             round_schedule: Default::default(),
+            dealer_total_restriction: false,
             phase: "lobby".into(),
             game_id: None,
             players: seats,

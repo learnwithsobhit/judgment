@@ -14,7 +14,10 @@ pub mod trick;
 
 pub use engine::GameEngine;
 pub use events::GameEvent;
-pub use projection::{LegalActionView, OpponentView, PlayerGameView, PublicBid, PlayerScore, PublicRoundState};
+pub use projection::{
+    CompletedTrickView, LeaderView, LegalActionView, OpponentView, PlayerGameView, PlayerScore,
+    PublicBid, PublicRoundState, RoundScoreLine, RoundScoreView,
+};
 pub use scoring::{scoring_strategy_for, ExactBidScoring, ScoringContext, ScoringStrategy};
 pub use shuffle::{DeckShuffler, SecureShuffler, SeededShuffler};
 pub use state::{CompletedTrick, GamePhase, InternalGameState, PlayedCard, RoundState};

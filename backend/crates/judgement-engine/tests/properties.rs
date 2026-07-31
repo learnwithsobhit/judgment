@@ -57,10 +57,12 @@ proptest! {
         seed in any::<u64>(),
         other_bids in proptest::collection::vec(0u8..=8, 5),
     ) {
+        let mut rules = GameRules::default_six_player();
+        rules.bidding_rule.dealer_total_restriction = true;
         let mut engine = GameEngine::new_with_seed(
             seed,
             GameId::new(),
-            GameRules::default_six_player(),
+            rules,
             six_players(),
         ).unwrap();
         engine.start_game().unwrap();

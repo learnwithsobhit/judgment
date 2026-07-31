@@ -7,6 +7,8 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
+import '../util/avatar_pack.dart';
+import '../widgets/avatar_picker.dart';
 import 'table_screen.dart';
 
 class LobbyScreen extends StatefulWidget {
@@ -32,10 +34,15 @@ class _LobbyScreenState extends State<LobbyScreen> {
   Timer? _poll;
   bool _busy = false;
   bool _navigatedToGame = false;
+  String? _myAvatarId;
 
   @override
   void initState() {
     super.initState();
+    _myAvatarId = _room.seats
+        .where((s) => s.playerId == widget.myPlayerId)
+        .map((s) => s.avatarId)
+        .firstOrNull;
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
   }
 
@@ -49,7 +56,14 @@ class _LobbyScreenState extends State<LobbyScreen> {
     try {
       final room = await widget.api.getRoom(_room.roomId);
       if (!mounted) return;
-      setState(() => _room = room);
+      setState(() {
+        _room = room;
+        _myAvatarId = room.seats
+                .where((s) => s.playerId == widget.myPlayerId)
+                .map((s) => s.avatarId)
+                .firstOrNull ??
+            _myAvatarId;
+      });
       if (room.phase == 'in_game' && room.gameId != null) {
         _enterGame(room.gameId!);
       }
@@ -92,6 +106,21 @@ class _LobbyScreenState extends State<LobbyScreen> {
     try {
       final room = await widget.api.setReady(_room.roomId, !_amReady);
       if (mounted) setState(() => _room = room);
+    } on ApiException catch (error) {
+      _showError(error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickAvatar(String avatarId) async {
+    setState(() {
+      _busy = true;
+      _myAvatarId = avatarId;
+    });
+    try {
+      await widget.api.setAvatar(avatarId);
+      await _refresh();
     } on ApiException catch (error) {
       _showError(error.message);
     } finally {
@@ -192,6 +221,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                 ? 'revealed-card trump'
                                 : 'trump rotates from ${suitSymbols[_room.firstTrump]}',
                             _room.roundScheduleSummary,
+                            _room.dealerTotalRestriction
+                                ? 'dealer bid restriction on'
+                                : 'dealer may match total',
                           ].join(' · '),
                           style: const TextStyle(fontSize: 12, color: Colors.white54),
                         ),
@@ -201,6 +233,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
                       ],
                     ),
                   ),
+                ),
+                const SizedBox(height: 16),
+                Text('Your avatar', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                AvatarPicker(
+                  selectedId: _myAvatarId,
+                  onSelected: _busy ? (_) {} : _pickAvatar,
                 ),
                 const SizedBox(height: 20),
                 Row(
@@ -255,9 +294,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
         child: seat == null
             ? const Icon(Icons.person_outline, size: 18, color: Colors.white38)
             : Text(
-                seat.nickname.characters.first.toUpperCase(),
+                avatarGlyph(
+                  seat.avatarId,
+                  fallbackLetter: seat.nickname.characters.first,
+                ),
                 style: TextStyle(
-                  color: isMe ? Colors.black : Colors.white,
+                  fontSize: seat.avatarId == null ? 14 : 18,
+                  color: isMe && seat.avatarId == null ? Colors.black : null,
                   fontWeight: FontWeight.bold,
                 ),
               ),

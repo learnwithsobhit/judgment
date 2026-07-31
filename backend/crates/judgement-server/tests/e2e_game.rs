@@ -25,6 +25,8 @@ use judgement_server::{build_router, state::AppState};
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn spawn_server() -> SocketAddr {
+    // Tests use StartGameRequest.seed for deterministic deals.
+    std::env::set_var("JUDGEMENT_ALLOW_SEED", "1");
     let state = Arc::new(AppState::new(Arc::new(MemoryStore::new())));
     let router = build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

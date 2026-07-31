@@ -158,6 +158,28 @@ void main() {
     test('unknown message type does not throw', () {
       expect(parse('{"type":"future_thing"}'), isA<UnknownMessage>());
     });
+
+    test('table_event reaction', () {
+      final message = parse(
+        '{"type":"table_event","kind":"reaction","from":"p1","emojis":["🔥"],"ttl_ms":1800}',
+      );
+      expect(message, isA<TableEventMessage>());
+      final event = message as TableEventMessage;
+      expect(event.kind, 'reaction');
+      expect(event.emojis, ['🔥']);
+      expect(event.ttlMs, 1800);
+    });
+
+    test('table_event emote_text with sticker', () {
+      final message = parse(
+        '{"type":"table_event","kind":"emote_text","from":"p1","emojis":["💀","🔥"],'
+        '"text":"ye mara","mood":"roast","sticker_id":"slam","ttl_ms":2200}',
+      );
+      final event = message as TableEventMessage;
+      expect(event.text, 'ye mara');
+      expect(event.mood, 'roast');
+      expect(event.stickerId, 'slam');
+    });
   });
 
   group('RoomView', () {
