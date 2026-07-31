@@ -1,0 +1,36 @@
+[package]
+name = "judgement-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+judgement-domain = { workspace = true }
+judgement-engine = { workspace = true }
+judgement-protocol = { workspace = true }
+judgement-persistence = { workspace = true }
+judgement-bot = { workspace = true }
+judgement-ai = { workspace = true }
+judgement-rag = { workspace = true }
+judgement-analytics = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+axum = { version = "0.8.9", features = ["ws"] }
+tokio = { version = "1.53.1", features = ["full"] }
+tower-http = { version = "0.7.0", features = ["trace", "cors"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+futures-util = { version = "0.3.33", default-features = false, features = ["sink", "std", "async-await"] }
+
+[dev-dependencies]
+futures-util = { version = "0.3.33", features = ["sink"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
+tokio-tungstenite = "0.30.0"
+judgement-persistence = { workspace = true }

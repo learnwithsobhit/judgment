@@ -1,0 +1,27 @@
+[package]
+name = "judgement-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Deterministic explanations + curated FAQ; optional Rig LLM rewrite (ADR 0002)"
+
+[features]
+default = []
+# Optional tone rewrite via rig-core. MVP explanations never require this.
+rig = ["dep:rig-core", "dep:tokio"]
+
+[dependencies]
+judgement-domain = { workspace = true }
+judgement-engine = { workspace = true }
+judgement-rag = { workspace = true }
+judgement-analytics = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = "0.1"
+tracing = "0.1"
+rig-core = { version = "0.41", optional = true }
+tokio = { version = "1", features = ["rt", "macros", "time"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

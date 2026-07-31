@@ -1,0 +1,43 @@
+# Rust
+/backend/target/
+**/*.rs.bk
+**/Cargo.lock.bak
+
+# Flutter / Dart
+frontend/judgement_flutter/.dart_tool/
+frontend/judgement_flutter/.flutter-plugins
+frontend/judgement_flutter/.flutter-plugins-dependencies
+frontend/judgement_flutter/.pub-cache/
+frontend/judgement_flutter/.pub/
+frontend/judgement_flutter/build/
+frontend/judgement_flutter/.packages
+frontend/judgement_flutter/**/Generated.xcconfig
+frontend/judgement_flutter/**/flutter_export_environment.sh
+frontend/judgement_flutter/**/*.iml
+frontend/judgement_flutter/coverage/
+*.symbols
+*.map.json
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+deployment/railway.env
+*.pem
+*-firebase-adminsdk-*.json
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local tooling
+.cursor/
+*.log
+flutter_*.log

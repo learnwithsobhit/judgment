@@ -1,0 +1,27 @@
+[package]
+name = "judgement-rag"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Feature-flagged vector RAG over curated rule docs (Phase 7b, ADR 0002)"
+
+[features]
+default = ["postgres"]
+# sqlx + pgvector persistence. Disable for pure in-memory unit tests if desired.
+postgres = ["dep:sqlx", "dep:pgvector"]
+# Optional OpenAI embeddings via Rig (same 64-d target as the deterministic embedder).
+rig = ["dep:rig-core"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = "0.1"
+tracing = "0.1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"], optional = true }
+pgvector = { version = "0.4", features = ["sqlx"], optional = true }
+rig-core = { version = "0.41", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tempfile = "3"

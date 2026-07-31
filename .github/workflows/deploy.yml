@@ -1,0 +1,128 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy-api:
+    name: Deploy API (Railway)
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run checkout defaults to default branch tip; pin to the
+          # commit that passed CI when triggered that way.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+      - name: Deploy via CLI (optional)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "RAILWAY_TOKEN unset — skipping CLI deploy."
+            echo "Prefer Railway's GitHub integration to build from railway.toml,"
+            echo "or add RAILWAY_TOKEN (+ RAILWAY_SERVICE_ID variable) for CLI deploys."
+            exit 0
+          fi
+          if [ -n "$RAILWAY_SERVICE_ID" ]; then
+            railway up --ci --service "$RAILWAY_SERVICE_ID"
+          else
+            railway up --ci
+          fi
+
+  deploy-web:
+    name: Deploy Web (Firebase)
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Require API_BASE
+        env:
+          API_BASE: ${{ vars.API_BASE }}
+        run: |
+          if [ -z "$API_BASE" ]; then
+            echo "Set GitHub Actions variable API_BASE to the Railway public HTTPS URL"
+            echo "(no trailing slash), e.g. https://judgement-server.up.railway.app"
+            exit 1
+          fi
+          echo "API_BASE=$API_BASE"
+      - name: Build Flutter Web
+        working-directory: frontend/judgement_flutter
+        env:
+          API_BASE: ${{ vars.API_BASE }}
+        run: |
+          flutter pub get
+          flutter build web --release --dart-define=API_BASE="$API_BASE"
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+      - name: Deploy Hosting
+        working-directory: frontend/judgement_flutter
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "FIREBASE_TOKEN secret missing — skip hosting deploy"
+            exit 1
+          fi
+          if [ -z "$FIREBASE_PROJECT_ID" ]; then
+            echo "FIREBASE_PROJECT_ID variable missing — skip hosting deploy"
+            exit 1
+          fi
+          firebase deploy --only hosting \
+            --project "$FIREBASE_PROJECT_ID" \
+            --token "$FIREBASE_TOKEN" \
+            --non-interactive
+
+  smoke:
+    name: Post-deploy smoke
+    needs: [deploy-api, deploy-web]
+    if: always() && needs.deploy-web.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health checks
+        env:
+          API_BASE: ${{ vars.API_BASE }}
+          WEB_ORIGIN: ${{ vars.PUBLIC_WEB_ORIGIN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${API_BASE:-}" ]; then
+            echo "Checking $API_BASE/healthz"
+            curl -fsS "$API_BASE/healthz" | tee /tmp/healthz
+            echo "Checking $API_BASE/readyz"
+            curl -fsS "$API_BASE/readyz" | tee /tmp/readyz
+          else
+            echo "API_BASE unset — skip API smoke"
+          fi
+          if [ -n "${WEB_ORIGIN:-}" ]; then
+            echo "Checking $WEB_ORIGIN/"
+            code=$(curl -fsS -o /dev/null -w "%{http_code}" "$WEB_ORIGIN/" || true)
+            echo "HTTP $code"
+            case "$code" in
+              200|301|302) ;;
+              *) echo "Unexpected status"; exit 1 ;;
+            esac
+          else
+            echo "PUBLIC_WEB_ORIGIN unset — skip web smoke"
+          fi
