@@ -29,6 +29,8 @@ pub enum ClientCommand {
     PlayCard { card_id: judgement_domain::CardId },
     RequestStateSync,
     LeaveGame,
+    /// Host ends a game paused for vacant seats (replace-or-end).
+    EndGame,
     /// Built-in avatar pack id (cosmetic).
     SetAvatar { avatar_id: String },
     /// Quick emoji reaction (ephemeral table event).
@@ -55,6 +57,8 @@ pub enum RejectReason {
     MessageTooLarge,
     /// Actor command queue is full — backpressure; retry shortly.
     QueueFull,
+    /// Persist timed out or DB unavailable — retry shortly.
+    PersistUnavailable,
     WrongGame,
     /// The command is not available in this phase of the MVP (e.g. lobby
     /// commands over the game socket).
@@ -63,7 +67,10 @@ pub enum RejectReason {
 
 impl RejectReason {
     pub fn retryable(&self) -> bool {
-        matches!(self, RejectReason::QueueFull)
+        matches!(
+            self,
+            RejectReason::QueueFull | RejectReason::PersistUnavailable
+        )
     }
 }
 
@@ -103,6 +110,22 @@ pub enum ServerMessage {
         remaining_ms: u64,
     },
     GameResumed,
+    /// Seat open after grace/leave — another human may claim via room code.
+    SeatVacant {
+        player_id: PlayerId,
+        room_code: String,
+    },
+    SeatClaimed {
+        player_id: PlayerId,
+        nickname: String,
+    },
+    /// Host or vacancy-timeout ended the game before natural completion.
+    GameEnded {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        aborted: Option<bool>,
+    },
+    /// Legacy wire name; no longer emitted for live disconnect (kept for older clients).
     BotTookOver { player_id: PlayerId },
     PlayerResumedControl { player_id: PlayerId },
     /// Issued on successful WebSocket reconnect (PLAN.md §15.1).
@@ -162,6 +185,7 @@ mod tests {
             ClientCommand::PlayCard { card_id: CardId { suit: judgement_domain::Suit::Spades, rank: judgement_domain::Rank::Seven } },
             ClientCommand::RequestStateSync,
             ClientCommand::LeaveGame,
+            ClientCommand::EndGame,
             ClientCommand::SetAvatar {
                 avatar_id: "fox".into(),
             },

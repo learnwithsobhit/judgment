@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import '../app/app.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
+import '../state/game_controller.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
+import 'table_screen.dart';
 
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
@@ -99,14 +101,28 @@ class _LandingScreenState extends State<LandingScreen> {
         result = (room: created.room, playerId: created.playerId);
       }
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => LobbyScreen(
+      final gameId = result.room.gameId;
+      if (result.room.phase == 'in_game' && gameId != null) {
+        final controller = GameController(
           api: api,
-          nickname: session.nickname,
-          initialRoom: result.room,
+          gameId: gameId,
           myPlayerId: result.playerId,
-        ),
-      ));
+          myNickname: session.nickname,
+        )..roomCode = result.room.code;
+        controller.connect();
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => TableScreen(controller: controller),
+        ));
+      } else {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => LobbyScreen(
+            api: api,
+            nickname: session.nickname,
+            initialRoom: result.room,
+            myPlayerId: result.playerId,
+          ),
+        ));
+      }
     } on ApiException catch (error) {
       _showError(error.message);
     } catch (_) {

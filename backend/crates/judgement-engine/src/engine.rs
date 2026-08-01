@@ -147,6 +147,27 @@ impl GameEngine {
         Ok(())
     }
 
+    /// Mid-game seat claim: swap display identity on the same `player_id` seat.
+    pub fn set_seat_identity(
+        &mut self,
+        player_id: PlayerId,
+        nickname: String,
+        avatar_id: Option<String>,
+    ) -> Result<(), GameError> {
+        let player = self
+            .state
+            .players
+            .iter_mut()
+            .find(|p| p.id == player_id)
+            .ok_or(GameError::PlayerNotInGame)?;
+        player.nickname = nickname;
+        player.avatar_id = avatar_id;
+        player.is_bot = false;
+        player.connection_status = judgement_domain::ConnectionStatus::Connected;
+        self.state.version += 1;
+        Ok(())
+    }
+
     /// Personalised projection for one player; never leaks hidden state.
     pub fn view_for(&self, player_id: PlayerId) -> Result<PlayerGameView, GameError> {
         if !self.state.contains_player(player_id) {

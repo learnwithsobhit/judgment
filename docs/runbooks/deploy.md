@@ -32,9 +32,16 @@ fly auth login
 cd judgement   # repo root with fly.toml
 fly apps create judgment-api --org personal   # skip if app exists
 
-# Managed Postgres (pick a region close to the app; sin = Singapore)
+# Managed Postgres (pick a region close to the app; sin = Singapore).
+# Minimum memory: 1GB — 256MB thrashing causes mid-game persist hangs.
 fly postgres create --name judgment-db --region sin --vm-size shared-cpu-1x --volume-size 1
 fly postgres attach judgment-db -a judgment-api   # sets DATABASE_URL secret
+# If the cluster was created at 256MB, scale immediately:
+#   fly machine update <pg-machine-id> -a judgment-db --vm-memory 1024
+# Enable backups (interactive ToS agree):
+#   fly pg backup enable -a judgment-db
+# Optional one-time data GC after launch / retention change:
+#   fly postgres connect -a judgment-db < deployment/scripts/purge_finished_games.sql
 
 # App secrets / env (see deployment/fly.env.example)
 fly secrets set \

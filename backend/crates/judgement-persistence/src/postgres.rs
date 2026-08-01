@@ -21,7 +21,19 @@ pub struct PostgresStore {
 impl PostgresStore {
     pub async fn connect(database_url: &str) -> Result<Self, PersistError> {
         let pool = PgPoolOptions::new()
-            .max_connections(10)
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(2))
+            .idle_timeout(std::time::Duration::from_secs(60))
+            .max_lifetime(std::time::Duration::from_secs(30 * 60))
+            .test_before_acquire(true)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    sqlx::query("SET statement_timeout = '3s'")
+                        .execute(&mut *conn)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect(database_url)
             .await?;
         Ok(Self { pool })
@@ -344,7 +356,18 @@ impl GameStore for PostgresStore {
             .await?;
         }
 
+        // Keep a single latest snapshot (restore only needs the tip).
         let state = serde_json::to_value(&commit.state)?;
+        sqlx::query(
+            r#"
+            DELETE FROM game_snapshots
+            WHERE game_id = $1 AND state_version <> $2
+            "#,
+        )
+        .bind(commit.game_id.0)
+        .bind(commit.state.version as i64)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query(
             r#"
             INSERT INTO game_snapshots (game_id, state_version, state)
@@ -692,6 +715,135 @@ impl GameStore for PostgresStore {
             });
         }
         Ok(events)
+    }
+
+    async fn remap_game_player_session(
+        &self,
+        game_id: GameId,
+        player_id: PlayerId,
+        new_session_id: SessionId,
+        nickname: &str,
+    ) -> Result<(), PersistError> {
+        let mut tx = self.pool.begin().await?;
+        // Free UNIQUE(game_id, session_id) if this session was already bound.
+        sqlx::query(
+            r#"
+            UPDATE game_players
+            SET session_id = $3, nickname = $4
+            WHERE game_id = $1 AND player_id = $2
+            "#,
+        )
+        .bind(game_id.0)
+        .bind(player_id.0)
+        .bind(new_session_id.0)
+        .bind(nickname)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn abort_game(&self, game_id: GameId) -> Result<(), PersistError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE games
+            SET status = 'aborted', finished_at = now()
+            WHERE game_id = $1 AND status = 'active'
+            "#,
+        )
+        .bind(game_id.0)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(PersistError::NotFound(format!("active game {game_id}")));
+        }
+        Ok(())
+    }
+
+    async fn compact_finished_game(&self, game_id: GameId) -> Result<(), PersistError> {
+        let mut tx = self.pool.begin().await?;
+        let latest: Option<(i64,)> = sqlx::query_as(
+            r#"
+            SELECT COALESCE(MAX(state_version), 0) FROM game_snapshots WHERE game_id = $1
+            "#,
+        )
+        .bind(game_id.0)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let latest_version = latest.map(|r| r.0).unwrap_or(0);
+        sqlx::query("DELETE FROM game_events WHERE game_id = $1")
+            .bind(game_id.0)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM game_snapshots
+            WHERE game_id = $1 AND state_version <> $2
+            "#,
+        )
+        .bind(game_id.0)
+        .bind(latest_version)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn delete_game(&self, game_id: GameId) -> Result<(), PersistError> {
+        sqlx::query("DELETE FROM games WHERE game_id = $1")
+            .bind(game_id.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn list_terminal_games_older_than(
+        &self,
+        older_than: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<(GameId, RoomId)>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT game_id, room_id FROM games
+            WHERE status IN ('finished', 'aborted')
+              AND finished_at IS NOT NULL
+              AND finished_at < $1
+            "#,
+        )
+        .bind(older_than)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (GameId(r.get("game_id")), RoomId(r.get("room_id"))))
+            .collect())
+    }
+
+    async fn delete_orphan_sessions(
+        &self,
+        older_than: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, PersistError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM guest_sessions gs
+            WHERE gs.created_at < $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM room_players rp WHERE rp.session_id = gs.session_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM game_players gp WHERE gp.session_id = gs.session_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM rooms r WHERE r.host_session_id = gs.session_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM scheduled_events se WHERE se.host_session_id = gs.session_id
+              )
+            "#,
+        )
+        .bind(older_than)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 
     async fn ping(&self) -> Result<(), PersistError> {

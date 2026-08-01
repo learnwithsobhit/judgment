@@ -49,5 +49,5 @@ Before promoting a release (see also `docs/runbooks/deploy.md`):
 4. `/readyz` returns 200 and `/metrics` scrapes cleanly  
 5. GitHub Actions `CI` green; Deploy smoke curls succeed  
 6. Fly Postgres automated / continuous backups confirmed (`fly postgres …` / dashboard)  
-7. Migrations through `0007_dealer_bid_restriction` applied (avatar + dealer columns)  
+7. Migrations through `0008_game_aborted_status` applied (aborted games + retention GC)  
 8. This checklist re-checked for any new endpoints  

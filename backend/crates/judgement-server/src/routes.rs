@@ -24,15 +24,17 @@ use judgement_analytics::{
     scores_from_value,
 };
 use judgement_protocol::{
-    CoachingResponse, CreateGuestSessionRequest, CreateGuestSessionResponse, CreateRoomRequest,
-    CreateRoomResponse, ExplanationResponse, GameHistoryResponse, GameResultResponse,
-    HighlightsResponse, JoinRoomRequest, JoinRoomResponse, ReadyRequest, RemovePlayerRequest,
-    RoomView, RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest,
-    SetAvatarResponse, StartGameRequest, StartGameResponse,
+    ClaimSeatRequest, ClaimSeatResponse, CoachingResponse, CreateGuestSessionRequest,
+    CreateGuestSessionResponse, CreateRoomRequest, CreateRoomResponse, EndGameResponse,
+    ExplanationResponse, GameHistoryResponse, GameResultResponse, HighlightsResponse,
+    JoinRoomRequest, JoinRoomResponse, ReadyRequest, RemovePlayerRequest, RoomView,
+    RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest, SetAvatarResponse,
+    StartGameRequest, StartGameResponse,
 };
 use crate::emotes::is_allowed_avatar;
+use tokio::sync::oneshot;
 
-use crate::actor::{self, SpawnActor};
+use crate::actor::{self, ActorMessage, SpawnActor};
 use crate::error::ApiError;
 use crate::persist::{persist_new_game, stored_room, stored_session};
 use crate::state::{generate_room_code, AppState, GameInfo, Room, RoomSeat, RoomStatus};
@@ -189,6 +191,40 @@ pub async fn join_room(
     let session = state.authenticate(&headers)?;
     let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
 
+    let already_seated: Option<(RoomView, PlayerId)> = {
+        let rooms = state.rooms.lock().unwrap();
+        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+        if let RoomStatus::InGame(_) = room.status {
+            room.seat_of(session.id)
+                .map(|seat| (room.view(), seat.player_id))
+        } else {
+            None
+        }
+    };
+    if let Some((room, player_id)) = already_seated {
+        return Ok(Json(JoinRoomResponse { room, player_id }));
+    }
+    let needs_claim = {
+        let rooms = state.rooms.lock().unwrap();
+        rooms
+            .get(&room_id)
+            .map(|r| matches!(r.status, RoomStatus::InGame(_)))
+            .unwrap_or(false)
+    };
+    if needs_claim {
+        let claimed = claim_seat_inner(
+            &state,
+            &session,
+            room_id,
+            ClaimSeatRequest { player_id: None },
+        )
+        .await?;
+        return Ok(Json(JoinRoomResponse {
+            room: claimed.room,
+            player_id: claimed.player_id,
+        }));
+    }
+
     let (view, player_id, snapshot) = {
         let mut rooms = state.rooms.lock().unwrap();
         let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
@@ -198,7 +234,10 @@ pub async fn join_room(
         }
         if let Some(seat) = room.seat_of(session.id) {
             let player_id = seat.player_id;
-            return Ok(Json(JoinRoomResponse { room: room.view(), player_id }));
+            return Ok(Json(JoinRoomResponse {
+                room: room.view(),
+                player_id,
+            }));
         }
         if room.seats.len() as u8 >= room.max_players {
             return Err(ApiError::Conflict("the room is full".into()));
@@ -227,6 +266,152 @@ pub async fn join_room(
         .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
 
     Ok(Json(JoinRoomResponse { room: view, player_id }))
+}
+
+pub async fn claim_seat(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(room_ref): Path<String>,
+    body: Option<Json<ClaimSeatRequest>>,
+) -> Result<Json<ClaimSeatResponse>, ApiError> {
+    let session = state.authenticate(&headers)?;
+    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let req = body.map(|j| j.0).unwrap_or_default();
+    let claimed = claim_seat_inner(&state, &session, room_id, req).await?;
+    Ok(Json(claimed))
+}
+
+async fn claim_seat_inner(
+    state: &AppState,
+    session: &crate::state::Session,
+    room_id: RoomId,
+    req: ClaimSeatRequest,
+) -> Result<ClaimSeatResponse, ApiError> {
+    let (game_id, commands) = {
+        let rooms = state.rooms.lock().unwrap();
+        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+        let RoomStatus::InGame(game_id) = room.status else {
+            return Err(ApiError::Conflict(
+                "claim is only available for in-progress games with a vacant seat".into(),
+            ));
+        };
+        if room.seat_of(session.id).is_some() {
+            return Err(ApiError::Conflict(
+                "you are already seated in this room".into(),
+            ));
+        }
+        let games = state.games.lock().unwrap();
+        let info = games
+            .get(&game_id)
+            .ok_or(ApiError::Conflict("game actor not found".into()))?;
+        (game_id, info.commands.clone())
+    };
+
+    let (reply_tx, reply_rx) = oneshot::channel();
+    commands
+        .send(ActorMessage::ClaimVacantSeat {
+            preferred: req.player_id,
+            nickname: session.nickname.clone(),
+            avatar_id: session.avatar_id.clone(),
+            reply: reply_tx,
+        })
+        .await
+        .map_err(|_| ApiError::Conflict("game actor unavailable".into()))?;
+    let player_id = reply_rx
+        .await
+        .map_err(|_| ApiError::Conflict("claim reply dropped".into()))?
+        .map_err(ApiError::Conflict)?;
+
+    // Remap session → player in GameInfo and room seats.
+    let snapshot = {
+        let mut games = state.games.lock().unwrap();
+        let info = games
+            .get_mut(&game_id)
+            .ok_or(ApiError::Conflict("game actor not found".into()))?;
+        info.players.retain(|_, pid| *pid != player_id);
+        info.players.insert(session.id, player_id);
+
+        let mut rooms = state.rooms.lock().unwrap();
+        let room = rooms
+            .get_mut(&room_id)
+            .ok_or(ApiError::NotFound("room"))?;
+        if let Some(seat) = room.seats.iter_mut().find(|s| s.player_id == player_id) {
+            seat.session_id = session.id;
+            seat.nickname = session.nickname.clone();
+            seat.avatar_id = session.avatar_id.clone();
+        } else {
+            return Err(ApiError::Conflict("vacant seat missing from room".into()));
+        }
+        stored_room(room)
+    };
+
+    state
+        .store
+        .remap_game_player_session(game_id, player_id, session.id, &session.nickname)
+        .await
+        .map_err(|e| ApiError::Conflict(format!("persist claim: {e}")))?;
+    state
+        .store
+        .upsert_room(&snapshot)
+        .await
+        .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
+
+    let view = {
+        let rooms = state.rooms.lock().unwrap();
+        rooms
+            .get(&room_id)
+            .ok_or(ApiError::NotFound("room"))?
+            .view()
+    };
+    Ok(ClaimSeatResponse {
+        room: view,
+        player_id,
+        game_id,
+    })
+}
+
+pub async fn end_game(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(room_ref): Path<String>,
+) -> Result<Json<EndGameResponse>, ApiError> {
+    let session = state.authenticate(&headers)?;
+    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+
+    let (game_id, player_id, commands) = {
+        let rooms = state.rooms.lock().unwrap();
+        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+        let RoomStatus::InGame(game_id) = room.status else {
+            return Err(ApiError::Conflict("no active game to end".into()));
+        };
+        let seat = room
+            .seat_of(session.id)
+            .ok_or(ApiError::Forbidden("you are not seated in this room".into()))?;
+        let games = state.games.lock().unwrap();
+        let info = games
+            .get(&game_id)
+            .ok_or(ApiError::Conflict("game actor not found".into()))?;
+        (game_id, seat.player_id, info.commands.clone())
+    };
+
+    let (reply_tx, reply_rx) = oneshot::channel();
+    commands
+        .send(ActorMessage::EndGame {
+            requesting_player_id: Some(player_id),
+            reason: "host ended the game".into(),
+            reply: reply_tx,
+        })
+        .await
+        .map_err(|_| ApiError::Conflict("game actor unavailable".into()))?;
+    reply_rx
+        .await
+        .map_err(|_| ApiError::Conflict("end-game reply dropped".into()))?
+        .map_err(ApiError::Conflict)?;
+
+    Ok(Json(EndGameResponse {
+        game_id,
+        aborted: true,
+    }))
 }
 
 pub async fn leave_room(
@@ -508,6 +693,13 @@ pub async fn start_game(
     let host_player_id = *session_to_player
         .get(&session.id)
         .expect("host is seated");
+    let room_code = {
+        let rooms = state.rooms.lock().unwrap();
+        rooms
+            .get(&room_id)
+            .map(|r| r.code.clone())
+            .unwrap_or_default()
+    };
     let commands = actor::spawn_game_actor(SpawnActor {
         engine,
         turn_timeout,
@@ -516,6 +708,7 @@ pub async fn start_game(
         processed,
         host_player_id,
         metrics: state.metrics.clone(),
+        room_code,
     });
     state
         .metrics

@@ -9,7 +9,6 @@ judgement-domain = { workspace = true }
 judgement-engine = { workspace = true }
 judgement-protocol = { workspace = true }
 judgement-persistence = { workspace = true }
-judgement-bot = { workspace = true }
 judgement-ai = { workspace = true }
 judgement-rag = { workspace = true }
 judgement-analytics = { workspace = true }

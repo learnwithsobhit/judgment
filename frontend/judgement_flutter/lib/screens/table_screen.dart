@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app/app.dart';
 import '../models/protocol.dart';
@@ -40,7 +41,10 @@ class _TableScreenState extends State<TableScreen> {
     super.initState();
     controller.addListener(_onControllerChanged);
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (controller.turnDeadline != null && mounted) setState(() {});
+      if (!mounted) return;
+      if (controller.turnDeadline != null || controller.pauseUntil != null) {
+        setState(() {});
+      }
     });
     // Warm SVG faces/back so the first deal does not flicker.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -117,6 +121,34 @@ class _TableScreenState extends State<TableScreen> {
           );
         }
 
+        if (controller.gameAborted) {
+          return Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.flag, size: 48, color: Colors.white70),
+                    const SizedBox(height: 16),
+                    Text(
+                      controller.endedReason ?? 'Game ended',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context)
+                          .popUntil((route) => route.isFirst),
+                      child: const Text('Back to home'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
         if (view.isFinished && view.finalRanking != null) {
           if (_showResults) {
             return ResultScreen(controller: controller);
@@ -142,6 +174,8 @@ class _TableScreenState extends State<TableScreen> {
             child: Column(
               children: [
                 _TopBar(controller: controller, showScoreboardButton: !wide),
+                if (controller.pauseReason != null)
+                  _PauseBanner(controller: controller),
                 Expanded(
                   child: Row(
                     children: [
@@ -186,6 +220,143 @@ class _TableScreenState extends State<TableScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pause / disconnect banner (reconnect grace or vacant seat)
+// ---------------------------------------------------------------------------
+
+class _PauseBanner extends StatelessWidget {
+  final GameController controller;
+
+  const _PauseBanner({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final vacant = controller.vacantPlayerId != null;
+    final code = controller.vacantRoomCode ?? controller.roomCode;
+    final remaining = controller.pauseUntil?.difference(DateTime.now());
+    final secs = remaining == null
+        ? null
+        : remaining.inMilliseconds <= 0
+            ? 0
+            : (remaining.inMilliseconds / 1000).ceil();
+
+    // Soft slate/teal — calm pause signal, not alarm orange.
+    const bg = Color(0xFF243B3A);
+    const accent = Color(0xFF7EB8B2);
+    const border = Color(0xFF3A5C58);
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                vacant ? Icons.chair_alt_outlined : Icons.wifi_off_rounded,
+                color: accent,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    vacant ? 'Seat open' : 'Player reconnecting',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    controller.pauseReason ?? '',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.82),
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                  if (secs != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      vacant
+                          ? 'Table ends in ${secs}s if no one joins'
+                          : 'Resumes when they return · ${secs}s left',
+                      style: TextStyle(
+                        color: accent.withValues(alpha: 0.95),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                  if (vacant && code != null) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            await Clipboard.setData(ClipboardData(text: code));
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Room code $code copied'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.copy_rounded, size: 16),
+                          label: Text('Copy $code'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: accent,
+                            side: BorderSide(color: accent.withValues(alpha: 0.55)),
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => controller.endGameAsHost(),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white70,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: const Text('End game'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -477,7 +648,8 @@ class _OpponentSeat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final disconnected = opponent.connectionStatus == 'disconnected';
+    final disconnected = opponent.connectionStatus == 'disconnected' ||
+        opponent.connectionStatus == 'vacant';
     return Padding(
       padding: const EdgeInsets.all(6),
       child: Column(

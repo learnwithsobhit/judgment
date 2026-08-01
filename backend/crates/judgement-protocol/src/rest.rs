@@ -67,6 +67,27 @@ pub struct JoinRoomResponse {
     pub player_id: PlayerId,
 }
 
+/// Claim a vacant in-game seat (replace-or-end presence).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClaimSeatRequest {
+    /// Optional specific vacant `player_id`; omitted ⇒ first vacant seat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_id: Option<PlayerId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimSeatResponse {
+    pub room: RoomView,
+    pub player_id: PlayerId,
+    pub game_id: GameId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EndGameResponse {
+    pub game_id: GameId,
+    pub aborted: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadyRequest {
     pub ready: bool,

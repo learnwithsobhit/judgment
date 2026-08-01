@@ -107,6 +107,13 @@ pub async fn restore_from_store(state: &AppState) -> Result<usize, judgement_per
             .first()
             .map(|p| p.player_id)
             .expect("restored game has players");
+        let room_code = {
+            let rooms = state.rooms.lock().unwrap();
+            rooms
+                .get(&game.room_id)
+                .map(|r| r.code.clone())
+                .unwrap_or_default()
+        };
         let commands = spawn_game_actor(SpawnActor {
             engine,
             turn_timeout,
@@ -115,6 +122,7 @@ pub async fn restore_from_store(state: &AppState) -> Result<usize, judgement_per
             processed,
             host_player_id,
             metrics: state.metrics.clone(),
+            room_code,
         });
 
         let players: HashMap<_, _> = game

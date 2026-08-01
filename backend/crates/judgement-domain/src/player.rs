@@ -9,6 +9,9 @@ use crate::ids::PlayerId;
 pub enum ConnectionStatus {
     Connected,
     Disconnected,
+    /// Seat open for another human to claim (replace-or-end presence).
+    Vacant,
+    /// Offline / simulation bots only — not used for live disconnect playout.
     BotControlled,
 }
 

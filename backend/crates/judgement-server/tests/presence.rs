@@ -1,4 +1,4 @@
-//! Phase 6: grace → bot takeover, control restore, host migration.
+//! Presence: grace → vacant seat → claim or end-game; host migration.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -9,8 +9,8 @@ use judgement_domain::{ActionId, ConnectionStatus, GameId, PlayerId};
 use judgement_engine::{GamePhase, PlayerGameView};
 use judgement_persistence::MemoryStore;
 use judgement_protocol::{
-    ClientCommand, ClientEnvelope, CreateGuestSessionResponse, CreateRoomResponse,
-    JoinRoomResponse, ServerMessage, StartGameResponse, PROTOCOL_VERSION,
+    ClaimSeatResponse, ClientCommand, ClientEnvelope, CreateGuestSessionResponse,
+    CreateRoomResponse, JoinRoomResponse, ServerMessage, StartGameResponse, PROTOCOL_VERSION,
 };
 use judgement_server::restore::bootstrap;
 use judgement_server::{build_router, state::AppState};
@@ -96,15 +96,9 @@ impl Client {
         }
         panic!("no snapshot");
     }
-
-    async fn close_ws(&mut self) {
-        if let Some(mut ws) = self.ws.take() {
-            let _ = ws.close(None).await;
-        }
-    }
 }
 
-async fn start_four_player_game(base: &str, clients: &mut [Client]) -> GameId {
+async fn start_four_player_game(base: &str, clients: &mut [Client]) -> (GameId, String) {
     let http = reqwest::Client::new();
     let created: CreateRoomResponse = http
         .post(format!("{base}/api/v1/rooms"))
@@ -121,7 +115,7 @@ async fn start_four_player_game(base: &str, clients: &mut [Client]) -> GameId {
         .await
         .unwrap();
     clients[0].player_id = created.player_id;
-    let code = created.room.code;
+    let code = created.room.code.clone();
     let room_id = created.room.room_id;
 
     for client in clients.iter_mut().skip(1) {
@@ -154,15 +148,11 @@ async fn start_four_player_game(base: &str, clients: &mut [Client]) -> GameId {
         .json()
         .await
         .unwrap();
-    started.game_id
+    (started.game_id, code)
 }
 
 #[tokio::test]
-async fn disconnect_grace_then_bot_takeover_and_restore() {
-    // Shorten grace via rules — GameRules default is 60s; we override by
-    // patching is hard, so we wait with a custom AppState... Use default 60s
-    // is too slow. Instead: LeaveGame for immediate bot takeover, then
-    // reconnect to restore control.
+async fn leave_marks_seat_vacant_then_claim_restores() {
     let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
     let addr = spawn_with(state).await;
     let base = format!("http://{addr}");
@@ -171,12 +161,12 @@ async fn disconnect_grace_then_bot_takeover_and_restore() {
     for name in ["A", "B", "C", "D"] {
         clients.push(Client::guest(&base, name).await);
     }
-    let game_id = start_four_player_game(&base, &mut clients).await;
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
     for client in &mut clients {
         client.connect_ws(&base, game_id).await;
     }
 
-    // Permanent leave for player A → immediate bot takeover.
+    let vacant_player = clients[0].player_id;
     {
         let view = clients[0].last.as_ref().unwrap();
         let envelope = ClientEnvelope {
@@ -193,9 +183,8 @@ async fn disconnect_grace_then_bot_takeover_and_restore() {
         clients[0].ws = None;
     }
 
-    // Another client should observe BotTookOver / bot-controlled status.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    let mut saw_bot = false;
+    let mut saw_vacant = false;
     while tokio::time::Instant::now() < deadline {
         let ws = clients[1].ws.as_mut().unwrap();
         if let Ok(Some(Ok(Message::Text(text)))) =
@@ -203,42 +192,146 @@ async fn disconnect_grace_then_bot_takeover_and_restore() {
         {
             let msg: ServerMessage = serde_json::from_str(&text).unwrap();
             match msg {
-                ServerMessage::BotTookOver { player_id } => {
-                    assert_eq!(player_id, clients[0].player_id);
-                    saw_bot = true;
+                ServerMessage::SeatVacant { player_id, room_code } => {
+                    assert_eq!(player_id, vacant_player);
+                    assert_eq!(room_code, code);
+                    saw_vacant = true;
                 }
                 ServerMessage::StateSnapshot { view } => {
                     clients[1].last = Some(view.clone());
                     if view.opponents.iter().any(|o| {
-                        o.player_id == clients[0].player_id
-                            && o.connection_status == ConnectionStatus::BotControlled
+                        o.player_id == vacant_player
+                            && o.connection_status == ConnectionStatus::Vacant
                     }) {
-                        saw_bot = true;
+                        saw_vacant = true;
                         break;
                     }
                 }
                 _ => {}
             }
         }
-        if saw_bot {
+        if saw_vacant {
             break;
         }
     }
-    assert!(saw_bot, "bot should take over after LeaveGame");
+    assert!(saw_vacant, "seat should be vacant after LeaveGame");
 
-    // Reconnect A with the rotated-capable token (still valid until WS rotate).
-    // After LeaveGame the WS is closed but the session token from before leave
-    // may have been rotated on the prior connect — use the client's current token.
-    clients[0].connect_ws(&base, game_id).await;
-    let view = clients[0].last.as_ref().unwrap();
+    // Replacement joins via room code claim.
+    let mut replacer = Client::guest(&base, "E").await;
+    let http = reqwest::Client::new();
+    let claimed: ClaimSeatResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/claim"))
+        .headers(replacer.headers())
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed.player_id, vacant_player);
+    assert_eq!(claimed.game_id, game_id);
+    replacer.player_id = claimed.player_id;
+    replacer.connect_ws(&base, game_id).await;
+    let view = replacer.last.as_ref().unwrap();
     assert_eq!(view.phase, GamePhase::Bidding);
-    // Own connection should be connected again.
-    assert!(
-        view.opponents
-            .iter()
-            .all(|o| o.connection_status != ConnectionStatus::BotControlled
-                || o.player_id != clients[0].player_id)
-    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut saw_name = false;
+    while tokio::time::Instant::now() < deadline {
+        let ws = clients[1].ws.as_mut().unwrap();
+        if let Ok(Some(Ok(Message::Text(text)))) =
+            tokio::time::timeout(Duration::from_millis(100), ws.next()).await
+        {
+            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
+            match msg {
+                ServerMessage::StateSnapshot { view } => {
+                    let ok = view.opponents.iter().any(|o| {
+                        o.player_id == vacant_player && o.nickname == "E"
+                    });
+                    clients[1].last = Some(view);
+                    if ok {
+                        saw_name = true;
+                        break;
+                    }
+                }
+                ServerMessage::SeatClaimed { player_id, nickname } => {
+                    assert_eq!(player_id, vacant_player);
+                    assert_eq!(nickname, "E");
+                    saw_name = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(saw_name, "claimed seat should show new nickname to peers");
+}
+
+#[tokio::test]
+async fn host_can_end_game_while_vacant() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, _code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    // Non-host leaves → vacant.
+    {
+        let view = clients[1].last.as_ref().unwrap();
+        let envelope = ClientEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            action_id: ActionId::new(),
+            game_id,
+            expected_state_version: view.state_version,
+            action: ClientCommand::LeaveGame,
+        };
+        let ws = clients[1].ws.as_mut().unwrap();
+        ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
+            .await
+            .unwrap();
+        clients[1].ws = None;
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Host ends game.
+    {
+        let view = clients[0].last.as_ref().unwrap();
+        let envelope = ClientEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            action_id: ActionId::new(),
+            game_id,
+            expected_state_version: view.state_version,
+            action: ClientCommand::EndGame,
+        };
+        let ws = clients[0].ws.as_mut().unwrap();
+        ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
+            .await
+            .unwrap();
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut saw_ended = false;
+    while tokio::time::Instant::now() < deadline {
+        let ws = clients[2].ws.as_mut().unwrap();
+        if let Ok(Some(Ok(Message::Text(text)))) =
+            tokio::time::timeout(Duration::from_millis(100), ws.next()).await
+        {
+            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
+            if matches!(msg, ServerMessage::GameEnded { .. }) {
+                saw_ended = true;
+                break;
+            }
+        }
+    }
+    assert!(saw_ended, "clients should observe GameEnded");
 }
 
 #[tokio::test]
@@ -248,16 +341,16 @@ async fn host_leave_promotes_another_seat() {
     let base = format!("http://{addr}");
 
     let mut clients = Vec::new();
-    for name in ["Host", "B", "C", "D"] {
+    for name in ["A", "B", "C", "D"] {
         clients.push(Client::guest(&base, name).await);
     }
-    let game_id = start_four_player_game(&base, &mut clients).await;
+    let (game_id, _) = start_four_player_game(&base, &mut clients).await;
     for client in &mut clients {
         client.connect_ws(&base, game_id).await;
     }
 
-    let host_id = clients[0].player_id;
-    clients[0].close_ws().await;
+    clients[0].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[0].ws = None;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut new_host = None;
@@ -273,6 +366,6 @@ async fn host_leave_promotes_another_seat() {
             }
         }
     }
-    let new_host = new_host.expect("HostChanged should be emitted");
-    assert_ne!(new_host, host_id);
+    assert!(new_host.is_some());
+    assert_ne!(new_host.unwrap(), clients[0].player_id);
 }

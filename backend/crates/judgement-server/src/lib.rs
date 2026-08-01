@@ -38,6 +38,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/rooms", post(routes::create_room))
         .route("/api/v1/rooms/{room_ref}", get(routes::get_room))
         .route("/api/v1/rooms/{room_ref}/join", post(routes::join_room))
+        .route("/api/v1/rooms/{room_ref}/claim", post(routes::claim_seat))
+        .route("/api/v1/rooms/{room_ref}/end", post(routes::end_game))
         .route("/api/v1/rooms/{room_ref}/leave", post(routes::leave_room))
         .route(
             "/api/v1/rooms/{room_ref}/remove-player",

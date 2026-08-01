@@ -15,7 +15,7 @@ pub use models::*;
 pub use postgres::PostgresStore;
 
 use async_trait::async_trait;
-use judgement_domain::{ActionId, GameId, RoomId};
+use judgement_domain::{ActionId, GameId, PlayerId, RoomId, SessionId};
 use judgement_engine::GameEvent;
 
 /// Durable store used by the server and game actors.
@@ -51,6 +51,36 @@ pub trait GameStore: Send + Sync {
     async fn upsert_scheduled_event(&self, event: &StoredScheduledEvent) -> Result<(), PersistError>;
 
     async fn load_scheduled_events(&self) -> Result<Vec<StoredScheduledEvent>, PersistError>;
+
+    /// Bind a new session to an existing in-game seat (seat claim).
+    async fn remap_game_player_session(
+        &self,
+        game_id: GameId,
+        player_id: PlayerId,
+        new_session_id: SessionId,
+        nickname: &str,
+    ) -> Result<(), PersistError>;
+
+    /// Mark an active game aborted (host end / vacancy timeout).
+    async fn abort_game(&self, game_id: GameId) -> Result<(), PersistError>;
+
+    /// Drop mid-game events and non-latest snapshots after finish/abort.
+    async fn compact_finished_game(&self, game_id: GameId) -> Result<(), PersistError>;
+
+    /// Hard-delete a game row (cascades events/snapshots/results).
+    async fn delete_game(&self, game_id: GameId) -> Result<(), PersistError>;
+
+    /// Finished/aborted games older than `older_than` (for TTL purge).
+    async fn list_terminal_games_older_than(
+        &self,
+        older_than: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<(GameId, RoomId)>, PersistError>;
+
+    /// Guest sessions with no room/game references older than cutoff.
+    async fn delete_orphan_sessions(
+        &self,
+        older_than: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, PersistError>;
 
     /// Lightweight readiness probe (Phase 9). Memory store always succeeds;
     /// Postgres runs `SELECT 1`.

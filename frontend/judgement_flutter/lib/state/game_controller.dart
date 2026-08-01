@@ -75,9 +75,20 @@ class GameController extends ChangeNotifier {
   int turnTotalMs = 1;
   int? _timerDeadlineId;
 
-  /// Pause banner while a peer is within reconnect grace.
+  /// Pause banner while a peer is within reconnect grace or a seat is vacant.
   String? pauseReason;
   DateTime? pauseUntil;
+
+  /// Set when a seat becomes vacant — share so another human can claim.
+  String? vacantRoomCode;
+  String? vacantPlayerId;
+
+  /// Host/vacancy abort ended the game.
+  String? endedReason;
+  bool gameAborted = false;
+
+  /// Room code for share / end-game REST (set from lobby when known).
+  String? roomCode;
 
   /// Held last-trick cards for min 1.6s presentation pause.
   CompletedTrickView? heldCompletedTrick;
@@ -158,6 +169,14 @@ class GameController extends ChangeNotifier {
         : 'Player';
   }
 
+  /// Replace raw player UUIDs in server pause copy with nicknames.
+  String _humanizePauseReason(String reason) {
+    final uuid = RegExp(
+      r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+    );
+    return reason.replaceAllMapped(uuid, (m) => nicknameOf(m.group(0)!));
+  }
+
   Future<void> connect() async {
     connection = _reconnectAttempts == 0
         ? GameConnectionState.connecting
@@ -228,6 +247,7 @@ class GameController extends ChangeNotifier {
           :final actionId,
           :final message,
           :final retryable,
+          :final reasonKind,
           :final errorCode
         ):
         if (actionId == null || actionId == pendingActionId) {
@@ -236,6 +256,17 @@ class GameController extends ChangeNotifier {
         lastRejection = retryable ? '$message (retrying may help)' : message;
         lastRejectionCode = errorCode;
         _notify();
+        if (retryable &&
+            (reasonKind == 'persist_unavailable' || reasonKind == 'queue_full')) {
+          // Brief pause then clear so the user can tap again; auto-resend of
+          // the same action_id is safe server-side (idempotent).
+          Future<void>.delayed(const Duration(milliseconds: 600), () {
+            if (!_disposed && lastRejection != null) {
+              lastRejection = '$message — tap again to retry';
+              _notify();
+            }
+          });
+        }
       case TimerUpdated(:final timer):
         if (_timerDeadlineId != timer.deadlineId) {
           _timerDeadlineId = timer.deadlineId;
@@ -245,13 +276,36 @@ class GameController extends ChangeNotifier {
           _notify();
         }
       case GamePaused(:final reason, :final remainingMs):
-        pauseReason = reason;
+        pauseReason = _humanizePauseReason(reason);
         pauseUntil = DateTime.now().add(Duration(milliseconds: remainingMs));
         turnDeadline = null;
         _notify();
       case GameResumed():
         pauseReason = null;
         pauseUntil = null;
+        vacantRoomCode = null;
+        vacantPlayerId = null;
+        _notify();
+      case SeatVacant(:final playerId, :final roomCode):
+        vacantPlayerId = playerId;
+        vacantRoomCode = roomCode;
+        this.roomCode = roomCode;
+        pauseReason =
+            '${nicknameOf(playerId)} left the table. Share code $roomCode so a friend can join their seat.';
+        _notify();
+      case SeatClaimed(:final playerId, :final nickname):
+        if (vacantPlayerId == playerId) {
+          vacantPlayerId = null;
+          vacantRoomCode = null;
+        }
+        lastRejection = null;
+        pauseReason = '$nickname joined — game resuming';
+        _notify();
+      case GameEnded(:final reason, :final aborted):
+        endedReason = reason;
+        gameAborted = aborted ?? true;
+        pauseReason = _humanizePauseReason(reason);
+        pendingActionId = null;
         _notify();
       case TokenRotated(:final token):
         api.token = token;
@@ -284,6 +338,23 @@ class GameController extends ChangeNotifier {
       case UnknownMessage():
         break;
     }
+  }
+
+  void leaveGame() {
+    _sendCommand({'type': 'leave_game'});
+  }
+
+  Future<void> endGameAsHost() async {
+    final code = roomCode ?? vacantRoomCode;
+    if (code != null) {
+      try {
+        await api.endGame(code);
+      } catch (_) {
+        _sendCommand({'type': 'end_game'});
+      }
+      return;
+    }
+    _sendCommand({'type': 'end_game'});
   }
 
   void _applySnapshot(PlayerGameView next) {

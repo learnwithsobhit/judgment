@@ -104,6 +104,25 @@ class ApiClient {
     );
   }
 
+  /// Claim a vacant in-game seat (replace-or-end).
+  Future<({RoomView room, String playerId, String gameId})> claimSeat(
+    String roomRef, {
+    String? playerId,
+  }) async {
+    final json = await _post('/api/v1/rooms/$roomRef/claim', {
+      'player_id': ?playerId,
+    });
+    return (
+      room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
+      playerId: json['player_id'] as String,
+      gameId: json['game_id'] as String,
+    );
+  }
+
+  Future<void> endGame(String roomRef) async {
+    await _post('/api/v1/rooms/$roomRef/end', {});
+  }
+
   Future<RoomView> getRoom(String roomRef) async =>
       RoomView.fromJson(await _get('/api/v1/rooms/$roomRef'));
 

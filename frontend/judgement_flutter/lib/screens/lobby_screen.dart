@@ -122,7 +122,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
       gameId: gameId,
       myPlayerId: widget.myPlayerId,
       myNickname: widget.nickname,
-    );
+    )..roomCode = _room.code;
     controller.connect();
     Navigator.of(context).pushReplacement(MaterialPageRoute(
       builder: (_) => TableScreen(controller: controller),

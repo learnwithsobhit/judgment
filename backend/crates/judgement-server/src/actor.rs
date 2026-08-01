@@ -1,20 +1,19 @@
 //! One sequential actor per active game (PLAN.md §9.1, ADR 0001).
 //!
 //! Phase 5: persist-before-broadcast with rollback.
-//! Phase 6: presence, pause/grace, bot takeover, host migration hooks.
+//! Presence: reconnect grace → vacant seat (claim via room code) or host end.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use judgement_bot::{BotStrategy, RuleBasedBot};
-use judgement_domain::{ActionId, CardId, ConnectionStatus, GameError, GameId, PlayerId};
+use judgement_domain::{ActionId, ConnectionStatus, GameError, GameId, PlayerId};
 use judgement_engine::{GameEngine, GameEvent, GamePhase};
-use judgement_persistence::GameStore;
+use judgement_persistence::{GameStore, PersistError};
 use judgement_protocol::{
     ClientCommand, ClientEnvelope, RejectReason, ServerMessage, TimerEvent, PROTOCOL_VERSION,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::emotes::{
     is_allowed_avatar, is_allowed_emoji, is_allowed_mood, resolve_emote_text, MAX_EMOTE_TEXT_LEN,
@@ -25,6 +24,10 @@ use crate::persist::command_commit_from;
 
 pub const COMMAND_QUEUE_CAPACITY: usize = 256;
 pub const CLIENT_BUFFER_CAPACITY: usize = 64;
+/// Hard bound so a dead DB cannot freeze the actor loop indefinitely.
+pub const PERSIST_TIMEOUT: Duration = Duration::from_secs(3);
+/// After grace, how long a vacant seat waits for a human claim before auto-end.
+pub const VACANCY_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Pause after the last trick of a round so clients can hold the reveal
 /// (~1.6s) before the next deal or game-over screen.
@@ -48,22 +51,29 @@ pub enum ActorMessage {
     Timeout { deadline_id: u64 },
     /// Fire after [`ROUND_REVEAL_DELAY`] while phase is `RoundScoring`.
     AdvanceAfterRoundReveal { advance_id: u64 },
-    /// Reconnect-grace window expired for a seat (PLAN.md §15).
+    /// Reconnect-grace window expired for a seat.
     GraceExpired {
         player_id: PlayerId,
         grace_id: u64,
     },
-    /// Bot decision computed off-actor; applied through normal validation.
-    BotAction {
+    /// Vacant seat waited too long for a claim.
+    VacancyExpired {
         player_id: PlayerId,
-        action: BotActionKind,
+        vacancy_id: u64,
     },
-}
-
-#[derive(Debug, Clone)]
-pub enum BotActionKind {
-    Bid(u8),
-    Card(CardId),
+    /// REST claim: bind a new human identity onto a vacant seat.
+    ClaimVacantSeat {
+        preferred: Option<PlayerId>,
+        nickname: String,
+        avatar_id: Option<String>,
+        reply: oneshot::Sender<Result<PlayerId, String>>,
+    },
+    /// Host (or vacancy timeout via internal reason) ends the game.
+    EndGame {
+        requesting_player_id: Option<PlayerId>,
+        reason: String,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
 }
 
 pub struct SpawnActor {
@@ -74,6 +84,7 @@ pub struct SpawnActor {
     pub processed: HashMap<ActionId, u64>,
     pub host_player_id: PlayerId,
     pub metrics: Arc<Metrics>,
+    pub room_code: String,
 }
 
 pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
@@ -89,12 +100,16 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         deadline_seq: 0,
         round_advance_seq: 0,
         grace_seq: 0,
+        vacancy_seq: 0,
         turn_timeout: config.turn_timeout,
         reconnect_grace: config.reconnect_grace,
         store: config.store,
         host_player_id: config.host_player_id,
+        room_code: config.room_code,
         grace_ids: HashMap::new(),
+        vacancy_ids: HashMap::new(),
         paused: false,
+        ended: false,
         metrics: config.metrics,
         last_emote_at: HashMap::new(),
     };
@@ -113,14 +128,19 @@ struct GameActor {
     /// Cancels stale end-of-round reveal timers (same pattern as turn deadlines).
     round_advance_seq: u64,
     grace_seq: u64,
+    vacancy_seq: u64,
     turn_timeout: Option<Duration>,
     reconnect_grace: Duration,
     metrics: Arc<Metrics>,
     store: Option<Arc<dyn GameStore>>,
     host_player_id: PlayerId,
+    room_code: String,
     /// player → active grace id (stale-id guard, same pattern as turn deadlines).
     grace_ids: HashMap<PlayerId, u64>,
+    /// player → active vacancy id.
+    vacancy_ids: HashMap<PlayerId, u64>,
     paused: bool,
+    ended: bool,
     /// Rate-limit cosmetic emotes (player → last emit millis).
     last_emote_at: HashMap<PlayerId, u64>,
 }
@@ -128,7 +148,6 @@ struct GameActor {
 impl GameActor {
     async fn run(mut self) {
         self.schedule_deadline();
-        self.maybe_request_bot_turn();
         self.schedule_round_reveal_advance();
 
         while let Some(message) = self.rx.recv().await {
@@ -158,8 +177,30 @@ impl GameActor {
                 } => {
                     self.handle_grace_expired(player_id, grace_id).await;
                 }
-                ActorMessage::BotAction { player_id, action } => {
-                    self.handle_bot_action(player_id, action).await;
+                ActorMessage::VacancyExpired {
+                    player_id,
+                    vacancy_id,
+                } => {
+                    self.handle_vacancy_expired(player_id, vacancy_id).await;
+                }
+                ActorMessage::ClaimVacantSeat {
+                    preferred,
+                    nickname,
+                    avatar_id,
+                    reply,
+                } => {
+                    let result = self.handle_claim_vacant(preferred, nickname, avatar_id);
+                    let _ = reply.send(result);
+                }
+                ActorMessage::EndGame {
+                    requesting_player_id,
+                    reason,
+                    reply,
+                } => {
+                    let result = self
+                        .handle_end_game(requesting_player_id, reason)
+                        .await;
+                    let _ = reply.send(result);
                 }
             }
         }
@@ -184,13 +225,30 @@ impl GameActor {
             .set_connection_status(player_id, ConnectionStatus::Connected);
 
         let was_paused = self.paused;
-        // Returning from grace or bot control restores human control at a safe
-        // boundary (actor is idle between messages — PLAN.md §15).
+        // Returning from grace restores human control; vacant seats need claim path.
         self.grace_ids.remove(&player_id);
+        if previous_status == Some(ConnectionStatus::Vacant) {
+            // WS connect alone cannot steal a vacant seat — use claim REST first.
+            let _ = self
+                .engine
+                .set_connection_status(player_id, ConnectionStatus::Vacant);
+            self.send_to(
+                player_id,
+                ServerMessage::CommandRejected {
+                    action_id: None,
+                    reason: RejectReason::UnsupportedCommand,
+                    retryable: false,
+                    message: "seat is vacant — claim via room code first".into(),
+                },
+            );
+            self.clients.remove(&player_id);
+            return;
+        }
+        self.vacancy_ids.remove(&player_id);
         self.recompute_pause();
         if matches!(
             previous_status,
-            Some(ConnectionStatus::BotControlled | ConnectionStatus::Disconnected)
+            Some(ConnectionStatus::Disconnected | ConnectionStatus::BotControlled)
         ) {
             self.metrics
                 .reconnects
@@ -204,7 +262,6 @@ impl GameActor {
         }
         self.send_snapshot(player_id);
         self.send_timer(player_id);
-        // Others need an updated connection_status projection.
         for &other in self.clients.keys() {
             if other != player_id {
                 self.send_snapshot(other);
@@ -212,7 +269,7 @@ impl GameActor {
         }
         if was_paused && !self.paused {
             self.broadcast(ServerMessage::GameResumed);
-            self.resume_timers_and_bots();
+            self.resume_timers();
         }
     }
 
@@ -232,8 +289,9 @@ impl GameActor {
         self.recompute_pause();
 
         let remaining_ms = self.reconnect_grace.as_millis() as u64;
+        let name = self.nickname_of(player_id);
         self.broadcast(ServerMessage::GamePaused {
-            reason: format!("{player_id} disconnected — reconnect grace"),
+            reason: format!("Waiting for {name} to reconnect…"),
             remaining_ms,
         });
         self.broadcast_snapshots();
@@ -265,31 +323,170 @@ impl GameActor {
             return; // stale — player already reconnected
         }
         self.grace_ids.remove(&player_id);
-        let _ = self
-            .engine
-            .set_connection_status(player_id, ConnectionStatus::BotControlled);
-        self.metrics
-            .bot_takeovers
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.broadcast(ServerMessage::BotTookOver { player_id });
-        self.recompute_pause();
-        self.broadcast_snapshots();
-        if !self.paused {
-            self.broadcast(ServerMessage::GameResumed);
-            self.resume_timers_and_bots();
-        }
+        self.mark_seat_vacant(player_id).await;
     }
 
-    fn resume_timers_and_bots(&mut self) {
+    async fn handle_vacancy_expired(&mut self, player_id: PlayerId, vacancy_id: u64) {
+        if self.vacancy_ids.get(&player_id) != Some(&vacancy_id) {
+            return;
+        }
+        let _ = self
+            .handle_end_game(None, "vacancy timeout — no replacement joined".into())
+            .await;
+    }
+
+    async fn mark_seat_vacant(&mut self, player_id: PlayerId) {
+        if self.ended || self.engine.is_finished() {
+            return;
+        }
+        let _ = self
+            .engine
+            .set_connection_status(player_id, ConnectionStatus::Vacant);
+        self.metrics
+            .seat_vacancies
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast(ServerMessage::SeatVacant {
+            player_id,
+            room_code: self.room_code.clone(),
+        });
+
+        self.vacancy_seq += 1;
+        let vacancy_id = self.vacancy_seq;
+        self.vacancy_ids.insert(player_id, vacancy_id);
+        self.recompute_pause();
+        self.deadline_seq += 1;
+        self.round_advance_seq += 1;
+        let name = self.nickname_of(player_id);
+        self.broadcast(ServerMessage::GamePaused {
+            reason: format!("{name} left the table — share the room code so someone can take their seat"),
+            remaining_ms: VACANCY_TTL.as_millis() as u64,
+        });
+        self.broadcast_snapshots();
+
+        let tx = self.self_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(VACANCY_TTL).await;
+            let _ = tx
+                .send(ActorMessage::VacancyExpired {
+                    player_id,
+                    vacancy_id,
+                })
+                .await;
+        });
+    }
+
+    fn handle_claim_vacant(
+        &mut self,
+        preferred: Option<PlayerId>,
+        nickname: String,
+        avatar_id: Option<String>,
+    ) -> Result<PlayerId, String> {
+        if self.ended || self.engine.is_finished() {
+            return Err("game is over".into());
+        }
+        let vacant: Vec<PlayerId> = self
+            .engine
+            .state()
+            .players
+            .iter()
+            .filter(|p| p.connection_status == ConnectionStatus::Vacant)
+            .map(|p| p.id)
+            .collect();
+        let player_id = match preferred {
+            Some(id) if vacant.contains(&id) => id,
+            Some(_) => return Err("that seat is not vacant".into()),
+            None => *vacant.first().ok_or_else(|| "no vacant seats".to_string())?,
+        };
+        self.engine
+            .set_seat_identity(player_id, nickname.clone(), avatar_id)
+            .map_err(|e| e.to_string())?;
+        self.vacancy_ids.remove(&player_id);
+        self.grace_ids.remove(&player_id);
+        self.metrics
+            .seat_claims
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast(ServerMessage::SeatClaimed {
+            player_id,
+            nickname,
+        });
+        let was_paused = self.paused;
+        self.recompute_pause();
+        self.broadcast_snapshots();
+        if was_paused && !self.paused {
+            self.broadcast(ServerMessage::GameResumed);
+            self.resume_timers();
+        }
+        Ok(player_id)
+    }
+
+    async fn handle_end_game(
+        &mut self,
+        requesting_player_id: Option<PlayerId>,
+        reason: String,
+    ) -> Result<(), String> {
+        if self.ended || self.engine.is_finished() {
+            return Err("game is already over".into());
+        }
+        if let Some(pid) = requesting_player_id {
+            if pid != self.host_player_id {
+                return Err("only the host can end the game".into());
+            }
+            // Host must still be connected (not vacant).
+            let host_ok = self.engine.state().players.iter().any(|p| {
+                p.id == pid && p.connection_status == ConnectionStatus::Connected
+            });
+            if !host_ok {
+                return Err("host must be connected to end the game".into());
+            }
+        }
+        self.ended = true;
+        self.paused = true;
+        self.grace_ids.clear();
+        self.vacancy_ids.clear();
+        self.deadline_seq += 1;
+        self.round_advance_seq += 1;
+        if let Some(store) = &self.store {
+            if let Err(error) = store.abort_game(self.game_id).await {
+                tracing::error!(%error, game = %self.game_id, "abort_game failed");
+            } else {
+                let _ = store.compact_finished_game(self.game_id).await;
+            }
+        }
+        self.metrics
+            .games_ended_vacancy
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast(ServerMessage::GameEnded {
+            reason,
+            aborted: Some(true),
+        });
+        Ok(())
+    }
+
+    fn resume_timers(&mut self) {
         self.schedule_deadline();
-        self.maybe_request_bot_turn();
         self.schedule_round_reveal_advance();
     }
 
     fn recompute_pause(&mut self) {
-        // Paused while any seated human is within the grace window
-        // (disconnected, not yet bot-controlled).
-        self.paused = !self.grace_ids.is_empty();
+        // Paused while any seat is in reconnect grace or vacant awaiting claim.
+        self.paused = !self.grace_ids.is_empty()
+            || self
+                .engine
+                .state()
+                .players
+                .iter()
+                .any(|p| p.connection_status == ConnectionStatus::Vacant);
+    }
+
+    fn nickname_of(&self, player_id: PlayerId) -> String {
+        self.engine
+            .state()
+            .players
+            .iter()
+            .find(|p| p.id == player_id)
+            .map(|p| p.nickname.clone())
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "A player".into())
     }
 
     fn migrate_host(&mut self) {
@@ -335,24 +532,35 @@ impl GameActor {
         }
 
         if matches!(envelope.action, ClientCommand::LeaveGame) {
-            // Permanent leave: immediate bot takeover (PLAN.md §15).
+            // Permanent leave: seat becomes vacant (replace-or-end).
             if self.clients.remove(&player_id).is_some() {
                 self.grace_ids.remove(&player_id);
-                let _ = self
-                    .engine
-                    .set_connection_status(player_id, ConnectionStatus::BotControlled);
                 self.broadcast(ServerMessage::PlayerDisconnected { player_id });
-                self.metrics
-                    .bot_takeovers
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                self.broadcast(ServerMessage::BotTookOver { player_id });
                 if player_id == self.host_player_id {
                     self.migrate_host();
                 }
-                self.recompute_pause();
-                self.broadcast_snapshots();
-                if !self.paused {
-                    self.resume_timers_and_bots();
+                self.mark_seat_vacant(player_id).await;
+            }
+            return;
+        }
+
+        if matches!(envelope.action, ClientCommand::EndGame) {
+            match self.handle_end_game(Some(player_id), "host ended the game".into()).await {
+                Ok(()) => {
+                    self.send_to(
+                        player_id,
+                        ServerMessage::CommandAccepted {
+                            action_id,
+                            new_state_version: self.engine.version(),
+                        },
+                    );
+                }
+                Err(detail) => {
+                    self.reject(
+                        player_id,
+                        Some(action_id),
+                        RejectReason::MalformedMessage { detail },
+                    );
                 }
             }
             return;
@@ -404,7 +612,7 @@ impl GameActor {
             .await
             {
                 self.engine.replace_state(previous);
-                self.reject(player_id, Some(action_id), RejectReason::QueueFull);
+                self.reject(player_id, Some(action_id), RejectReason::PersistUnavailable);
                 return;
             }
             let new_state_version = self.engine.version();
@@ -432,8 +640,20 @@ impl GameActor {
             return;
         }
 
-        // Reject human commands while the seat is bot-controlled or the table
-        // is paused for someone else's grace window (own reconnect clears pause).
+        // Reject human commands while the table is paused for grace/vacancy
+        // (own reconnect clears pause; vacant seats cannot act).
+        if self.engine.state().players.iter().any(|p| {
+            p.id == player_id && p.connection_status == ConnectionStatus::Vacant
+        }) {
+            self.reject(
+                player_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "seat is vacant".into(),
+                },
+            );
+            return;
+        }
         if self.paused && !self.grace_ids.contains_key(&player_id) {
             self.reject(
                 player_id,
@@ -482,6 +702,7 @@ impl GameActor {
                 return;
             }
             ClientCommand::LeaveGame
+            | ClientCommand::EndGame
             | ClientCommand::RequestStateSync
             | ClientCommand::SetAvatar { .. }
             | ClientCommand::SendReaction { .. }
@@ -502,7 +723,7 @@ impl GameActor {
                 .await
                 {
                     self.engine.replace_state(previous);
-                    self.reject(player_id, Some(action_id), RejectReason::QueueFull);
+                    self.reject(player_id, Some(action_id), RejectReason::PersistUnavailable);
                     return;
                 }
                 let new_state_version = self.engine.version();
@@ -711,26 +932,54 @@ impl GameActor {
             return true;
         };
         let commit = command_commit_from(game_id, action_id, events, state);
-        match store.commit_command(&commit).await {
-            Ok(()) => {
-                if events
-                    .iter()
-                    .any(|e| matches!(e, GameEvent::GameCompleted { .. }))
-                {
-                    metrics
-                        .games_completed
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let started = std::time::Instant::now();
+        for attempt in 0..2u8 {
+            let result = tokio::time::timeout(PERSIST_TIMEOUT, store.commit_command(&commit)).await;
+            match result {
+                Ok(Ok(())) => {
+                    let elapsed = started.elapsed();
+                    if elapsed > Duration::from_millis(100) {
+                        tracing::warn!(
+                            game = %game_id,
+                            ?elapsed,
+                            "slow persist commit"
+                        );
+                    }
+                    if events
+                        .iter()
+                        .any(|e| matches!(e, GameEvent::GameCompleted { .. }))
+                    {
+                        metrics
+                            .games_completed
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    return true;
                 }
-                true
-            }
-            Err(error) => {
-                metrics
-                    .db_write_failures
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tracing::error!(%error, game = %game_id, "persist commit failed");
-                false
+                Ok(Err(error)) if attempt == 0 && is_transient_persist(&error) => {
+                    tracing::warn!(%error, game = %game_id, "persist retry after transient error");
+                    continue;
+                }
+                Ok(Err(error)) => {
+                    metrics
+                        .db_write_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::error!(%error, game = %game_id, "persist commit failed");
+                    return false;
+                }
+                Err(_elapsed) if attempt == 0 => {
+                    tracing::warn!(game = %game_id, "persist timeout — retrying");
+                    continue;
+                }
+                Err(_elapsed) => {
+                    metrics
+                        .db_write_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::error!(game = %game_id, "persist commit timed out");
+                    return false;
+                }
             }
         }
+        false
     }
 
     fn schedule_deadline(&mut self) {
@@ -775,15 +1024,7 @@ impl GameActor {
             return;
         };
 
-        // Prefer the bot strategy for bot-controlled seats; otherwise lowest legal.
-        let is_bot = self.engine.state().players.iter().any(|p| {
-            p.id == current && p.connection_status == ConnectionStatus::BotControlled
-        });
-        if is_bot {
-            self.maybe_request_bot_turn();
-            return;
-        }
-
+        // Turn-timer auto-play for a still-connected slow human only.
         let previous = self.engine.state().clone();
         let result = match self.engine.phase() {
             GamePhase::Bidding => {
@@ -826,110 +1067,31 @@ impl GameActor {
         }
     }
 
-    fn maybe_request_bot_turn(&self) {
-        if self.paused || self.engine.is_finished() {
-            return;
-        }
-        let Some(current) = self
-            .engine
-            .state()
-            .current_round
-            .as_ref()
-            .map(|r| r.current_turn)
-        else {
-            return;
-        };
-        let bot_seat = self.engine.state().players.iter().any(|p| {
-            p.id == current && p.connection_status == ConnectionStatus::BotControlled
-        });
-        if !bot_seat {
-            return;
-        }
-        let Ok(view) = self.engine.view_for(current) else {
-            return;
-        };
-        let phase = self.engine.phase();
-        let tx = self.self_tx.clone();
-        tokio::spawn(async move {
-            let mut bot = RuleBasedBot;
-            let action = match phase {
-                GamePhase::Bidding => bot.choose_bid(&view).ok().map(BotActionKind::Bid),
-                GamePhase::Playing => bot.choose_card(&view).ok().map(BotActionKind::Card),
-                _ => None,
-            };
-            if let Some(action) = action {
-                let _ = tx
-                    .send(ActorMessage::BotAction {
-                        player_id: current,
-                        action,
-                    })
-                    .await;
-            }
-        });
-    }
-
-    async fn handle_bot_action(&mut self, player_id: PlayerId, action: BotActionKind) {
-        if self.paused || self.engine.is_finished() {
-            return;
-        }
-        let still_bot = self.engine.state().players.iter().any(|p| {
-            p.id == player_id && p.connection_status == ConnectionStatus::BotControlled
-        });
-        if !still_bot {
-            return;
-        }
-        let Some(current) = self
-            .engine
-            .state()
-            .current_round
-            .as_ref()
-            .map(|r| r.current_turn)
-        else {
-            return;
-        };
-        if current != player_id {
-            return;
-        }
-
-        let previous = self.engine.state().clone();
-        let result = match action {
-            BotActionKind::Bid(bid) => self.engine.place_bid(player_id, bid),
-            BotActionKind::Card(card_id) => self.engine.play_card(player_id, card_id),
-        };
-        match result {
-            Ok(events) => {
-                let action_id = ActionId::new();
-                if !Self::persist_accepted(
-                    &self.store,
-                    self.game_id,
-                    action_id,
-                    &events,
-                    self.engine.state(),
-                    &self.metrics,
-                )
-                .await
-                {
-                    self.engine.replace_state(previous);
-                    return;
-                }
-                self.processed.insert(action_id, self.engine.version());
-                tracing::info!(player = %player_id, "bot action applied");
-                self.broadcast_snapshots();
-                self.emit_auto_cheers(&events);
-                self.after_engine_events(&events);
-            }
-            Err(error) => tracing::error!(%error, "bot action rejected"),
-        }
-    }
-
     fn after_engine_events(&mut self, events: &[GameEvent]) {
         self.schedule_deadline();
-        self.maybe_request_bot_turn();
         if events
             .iter()
             .any(|e| matches!(e, GameEvent::RoundCompleted { .. }))
         {
             self.schedule_round_reveal_advance();
+        }
+        if events
+            .iter()
+            .any(|e| matches!(e, GameEvent::GameCompleted { .. }))
+        {
+            if let Some(store) = self.store.clone() {
+                let game_id = self.game_id;
+                let metrics = self.metrics.clone();
+                tokio::spawn(async move {
+                    if let Err(error) = store.compact_finished_game(game_id).await {
+                        tracing::warn!(%error, game = %game_id, "compact_finished_game failed");
+                    } else {
+                        metrics
+                            .games_compacted
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                });
+            }
         }
     }
 
@@ -1080,9 +1242,22 @@ fn reject_message(reason: &RejectReason) -> String {
         RejectReason::MalformedMessage { detail } => format!("malformed message: {detail}"),
         RejectReason::MessageTooLarge => "message exceeds the maximum size".to_string(),
         RejectReason::QueueFull => "server is busy; retry shortly".to_string(),
+        RejectReason::PersistUnavailable => {
+            "database temporarily unavailable; retry shortly".to_string()
+        }
         RejectReason::WrongGame => "this connection belongs to a different game".to_string(),
         RejectReason::UnsupportedCommand => {
             "this command is not available on the game socket".to_string()
         }
     }
+}
+
+fn is_transient_persist(error: &PersistError) -> bool {
+    let msg = error.to_string().to_lowercase();
+    msg.contains("eof")
+        || msg.contains("connection")
+        || msg.contains("broken pipe")
+        || msg.contains("pool timed out")
+        || msg.contains("pool closed")
+        || msg.contains("timed out")
 }

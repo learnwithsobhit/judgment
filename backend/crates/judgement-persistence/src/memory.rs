@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use judgement_domain::{ActionId, EventId, GameId, RoomId};
+use judgement_domain::{ActionId, EventId, GameId, PlayerId, RoomId, SessionId};
 use judgement_engine::GameEvent;
 
 use crate::error::PersistError;
@@ -154,6 +154,7 @@ impl GameStore for MemoryStore {
                 payload: payload.clone(),
             });
         }
+        game.snapshots.clear();
         game.snapshots
             .insert(commit.state.version, commit.state.clone());
 
@@ -240,6 +241,76 @@ impl GameStore for MemoryStore {
             .values()
             .cloned()
             .collect())
+    }
+
+    async fn remap_game_player_session(
+        &self,
+        game_id: GameId,
+        player_id: PlayerId,
+        new_session_id: SessionId,
+        nickname: &str,
+    ) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        let game = inner
+            .games
+            .get_mut(&game_id)
+            .ok_or_else(|| PersistError::NotFound(format!("game {game_id}")))?;
+        let player = game
+            .players
+            .iter_mut()
+            .find(|p| p.player_id == player_id)
+            .ok_or_else(|| PersistError::NotFound(format!("player {player_id}")))?;
+        player.session_id = new_session_id;
+        player.nickname = nickname.to_string();
+        Ok(())
+    }
+
+    async fn abort_game(&self, game_id: GameId) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        let game = inner
+            .games
+            .get_mut(&game_id)
+            .ok_or_else(|| PersistError::NotFound(format!("game {game_id}")))?;
+        if game.status != "active" {
+            return Err(PersistError::NotFound(format!("active game {game_id}")));
+        }
+        game.status = "aborted".into();
+        Ok(())
+    }
+
+    async fn compact_finished_game(&self, game_id: GameId) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        let game = inner
+            .games
+            .get_mut(&game_id)
+            .ok_or_else(|| PersistError::NotFound(format!("game {game_id}")))?;
+        game.events.clear();
+        if let Some((&version, state)) = game.snapshots.iter().max_by_key(|(v, _)| *v) {
+            let state = state.clone();
+            game.snapshots.clear();
+            game.snapshots.insert(version, state);
+        }
+        Ok(())
+    }
+
+    async fn delete_game(&self, game_id: GameId) -> Result<(), PersistError> {
+        self.inner.lock().unwrap().games.remove(&game_id);
+        Ok(())
+    }
+
+    async fn list_terminal_games_older_than(
+        &self,
+        _older_than: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<(GameId, RoomId)>, PersistError> {
+        // Memory store has no finished_at timestamps; purge is a no-op in tests.
+        Ok(Vec::new())
+    }
+
+    async fn delete_orphan_sessions(
+        &self,
+        _older_than: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, PersistError> {
+        Ok(0)
     }
 
     async fn ping(&self) -> Result<(), PersistError> {

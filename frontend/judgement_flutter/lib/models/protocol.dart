@@ -334,6 +334,21 @@ sealed class ServerMessage {
         );
       case 'game_resumed':
         return GameResumed();
+      case 'seat_vacant':
+        return SeatVacant(
+          playerId: json['player_id'] as String,
+          roomCode: json['room_code'] as String,
+        );
+      case 'seat_claimed':
+        return SeatClaimed(
+          playerId: json['player_id'] as String,
+          nickname: json['nickname'] as String,
+        );
+      case 'game_ended':
+        return GameEnded(
+          reason: json['reason'] as String,
+          aborted: json['aborted'] as bool?,
+        );
       case 'bot_took_over':
         return BotTookOver(playerId: json['player_id'] as String);
       case 'player_resumed_control':
@@ -410,6 +425,24 @@ class GamePaused extends ServerMessage {
 }
 
 class GameResumed extends ServerMessage {}
+
+class SeatVacant extends ServerMessage {
+  final String playerId;
+  final String roomCode;
+  SeatVacant({required this.playerId, required this.roomCode});
+}
+
+class SeatClaimed extends ServerMessage {
+  final String playerId;
+  final String nickname;
+  SeatClaimed({required this.playerId, required this.nickname});
+}
+
+class GameEnded extends ServerMessage {
+  final String reason;
+  final bool? aborted;
+  GameEnded({required this.reason, this.aborted});
+}
 
 class BotTookOver extends ServerMessage {
   final String playerId;

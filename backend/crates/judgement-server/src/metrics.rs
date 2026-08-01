@@ -13,6 +13,12 @@ pub struct Metrics {
     pub ws_disconnected: AtomicU64,
     pub reconnects: AtomicU64,
     pub bot_takeovers: AtomicU64,
+    pub seat_vacancies: AtomicU64,
+    pub seat_claims: AtomicU64,
+    pub games_ended_vacancy: AtomicU64,
+    pub games_compacted: AtomicU64,
+    pub games_purged: AtomicU64,
+    pub games_abandoned: AtomicU64,
     pub invalid_actions: AtomicU64,
     pub db_write_failures: AtomicU64,
     pub ai_requests: AtomicU64,
@@ -41,7 +47,13 @@ impl Metrics {
         counter!("judgement_ws_connected_total", "WebSocket upgrades accepted", ws_connected);
         counter!("judgement_ws_disconnected_total", "WebSocket disconnects observed", ws_disconnected);
         counter!("judgement_reconnects_total", "Player reconnects that restored control", reconnects);
-        counter!("judgement_bot_takeovers_total", "Bot takeovers after grace expiry/leave", bot_takeovers);
+        counter!("judgement_bot_takeovers_total", "Legacy bot takeovers (unused in live replace-or-end)", bot_takeovers);
+        counter!("judgement_seat_vacancies_total", "Seats marked vacant after grace/leave", seat_vacancies);
+        counter!("judgement_seat_claims_total", "Vacant seats claimed by a new human", seat_claims);
+        counter!("judgement_games_ended_vacancy_total", "Games ended by host or vacancy timeout", games_ended_vacancy);
+        counter!("judgement_games_compacted_total", "Finished games compacted (events pruned)", games_compacted);
+        counter!("judgement_games_purged_total", "Terminal games hard-deleted by TTL", games_purged);
+        counter!("judgement_games_abandoned_total", "In-memory abandoned game actors dropped", games_abandoned);
         counter!("judgement_invalid_actions_total", "Rejected game commands", invalid_actions);
         counter!("judgement_db_write_failures_total", "Persist commit failures", db_write_failures);
         counter!("judgement_ai_requests_total", "AI / rules query requests", ai_requests);

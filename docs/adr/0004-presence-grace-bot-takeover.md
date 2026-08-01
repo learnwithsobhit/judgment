@@ -1,22 +1,35 @@
-# ADR 0004 — Phase 6 presence, grace, and bot takeover
+# ADR 0004 — Phase 6 presence, grace, vacant seat, and end-game
 
-**Status:** Accepted (2026-07-30)
-**Amends:** PLAN.md §15 disconnect policy details.
+**Status:** Amended (2026-08-01)  
+**Amends:** PLAN.md §15 disconnect policy details.  
+**Supersedes:** live bot takeover after grace/leave.
 
 ## Decisions
 
 1. **Whole-table pause** while any seat is inside the reconnect grace window
-   (`GameRules.reconnect_grace_seconds`, default 60). Turn deadlines are
-   cancelled for the pause duration.
-2. **Grace expiry ⇒ bot takeover** even when the room has no turn timer
-   (ADR 0003 optional timer is independent of disconnect bots).
-3. **`LeaveGame` ⇒ immediate permanent bot takeover** (skips grace).
-4. **Safe restore boundary** = actor idle between messages; reconnect always
-   restores human control immediately.
-5. **Takeover bot** = `RuleBasedBot` (lowest legal bid/card) — engine-validated.
-6. **Token rotation** on every successful game WebSocket upgrade; prior bearer
-   invalidated; new token pushed as `TokenRotated` and persisted.
-7. **Host migration** on host WS disconnect / leave: prefer a Connected human,
-   else any remaining seat; emit `HostChanged`.
-8. **Abandonment GC**: lobby rooms idle ≥ 1 hour are deleted; game actors whose
-   command channel has closed are dropped from the in-memory registry.
+   (`GameRules.reconnect_grace_seconds`, default 60) **or** marked `Vacant`.
+2. **Grace expiry ⇒ seat Vacant** (not bot). Table stays paused. Emit
+   `SeatVacant { player_id, room_code }` so peers can invite a replacement.
+3. **`LeaveGame` ⇒ immediate Vacant** (skips grace).
+4. **Claim via room code:** `POST /api/v1/rooms/{code}/claim` (also used by
+   `join` when the room is already in-game). Binds a new session to the same
+   `player_id` / seat / hand / scores; nickname/avatar update; resume when no
+   vacancies remain.
+5. **End game:** host may `EndGame` (WS) or `POST .../end` while paused for
+   vacancy. Vacancy older than **10 minutes** auto-ends the game (`aborted`).
+6. **No live `RuleBasedBot` playout** for disconnects. Bots remain for offline
+   simulation/tests only. Optional turn-timer auto-move for a *connected*
+   slow human is separate.
+7. **Safe restore boundary** = actor idle between messages; reconnect during
+   grace restores control. After Vacant, original session must claim (or was
+   remapped away).
+8. **Token rotation** on every successful game WebSocket upgrade.
+9. **Host migration** on host WS disconnect / leave: prefer a Connected human.
+10. **Abandonment GC:** lobby TTL 1h; finished/aborted games purged after 24h;
+    orphan in-game rooms and guest sessions cleaned by the reaper.
+
+## Consequences
+
+- Stops bot→DB write storms that froze tables under Postgres resource pressure.
+- Games may pause until a human claims or the host ends — product-correct for
+  invite-only tables.
