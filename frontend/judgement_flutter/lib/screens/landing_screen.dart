@@ -21,7 +21,7 @@ class _LandingScreenState extends State<LandingScreen> {
 
   // Room options (create mode, ADR 0003).
   int _maxPlayers = 6;
-  bool _timerEnabled = true;
+  bool _timerEnabled = false;
   int _timerSeconds = 30;
   String? _firstTrump; // null = revealed-card trump each round
   bool _manualSchedule = false;

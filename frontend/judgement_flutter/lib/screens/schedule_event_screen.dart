@@ -17,7 +17,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
   DateTime _startsAt = DateTime.now().toUtc().add(const Duration(hours: 24));
   String _timezone = 'Asia/Kolkata';
   int _durationMinutes = 90;
-  bool _timerEnabled = true;
+  bool _timerEnabled = false;
   final int _timerSeconds = 30;
   String? _firstTrump;
   bool _busy = false;
