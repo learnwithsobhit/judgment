@@ -21,8 +21,8 @@ fn five_hundred_random_games_complete_without_invariant_failures() {
         assert_eq!(outcome.ranking.len(), 6, "seed {seed}: all six players ranked");
         assert_eq!(outcome.ranking[0].rank, 1, "seed {seed}: ranking starts at 1");
 
-        // 1 start + 8 rounds * (6 bids + cards*6 plays) commands.
-        let expected_commands: u64 = 1 + (1..=8).map(|c: u64| 6 + c * 6).sum::<u64>();
+        // 1 start + 8 rounds * (6 bids + cards*6 plays + 1 round-scoring advance).
+        let expected_commands: u64 = 1 + (1..=8).map(|c: u64| 6 + c * 6 + 1).sum::<u64>();
         assert_eq!(
             outcome.commands_processed, expected_commands,
             "seed {seed}: exact command count for a full game"
@@ -41,11 +41,11 @@ fn all_table_sizes_complete_full_games() {
             });
             assert_eq!(outcome.ranking.len(), player_count as usize);
 
-            // 1 start + per round (bids + cards * players), rounds max..1.
+            // 1 start + per round (bids + cards * players + scoring advance), rounds max..1.
             let max_cards = max_cards_per_player(player_count) as u64;
             let players = player_count as u64;
             let expected: u64 =
-                1 + (1..=max_cards).map(|c| players + c * players).sum::<u64>();
+                1 + (1..=max_cards).map(|c| players + c * players + 1).sum::<u64>();
             assert_eq!(
                 outcome.commands_processed, expected,
                 "{player_count} players, seed {seed}: exact command count"

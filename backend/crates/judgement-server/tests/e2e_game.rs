@@ -189,7 +189,8 @@ impl Harness {
     /// Block until every client has a view and either the game is finished or
     /// exactly one seat has legal actions.
     async fn wait_until_ready(&mut self) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        // Allow for the ~1.8s end-of-round reveal pause before the next deal.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         while tokio::time::Instant::now() < deadline {
             if self.clients.iter().all(|c| c.view.is_some()) {
                 let max_v = self

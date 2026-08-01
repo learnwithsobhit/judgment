@@ -26,6 +26,10 @@ use crate::persist::command_commit_from;
 pub const COMMAND_QUEUE_CAPACITY: usize = 256;
 pub const CLIENT_BUFFER_CAPACITY: usize = 64;
 
+/// Pause after the last trick of a round so clients can hold the reveal
+/// (~1.6s) before the next deal or game-over screen.
+pub const ROUND_REVEAL_DELAY: Duration = Duration::from_millis(1800);
+
 #[derive(Debug)]
 pub enum ActorMessage {
     Connect {
@@ -42,6 +46,8 @@ pub enum ActorMessage {
         envelope: ClientEnvelope,
     },
     Timeout { deadline_id: u64 },
+    /// Fire after [`ROUND_REVEAL_DELAY`] while phase is `RoundScoring`.
+    AdvanceAfterRoundReveal { advance_id: u64 },
     /// Reconnect-grace window expired for a seat (PLAN.md §15).
     GraceExpired {
         player_id: PlayerId,
@@ -81,6 +87,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         clients: HashMap::new(),
         processed: config.processed,
         deadline_seq: 0,
+        round_advance_seq: 0,
         grace_seq: 0,
         turn_timeout: config.turn_timeout,
         reconnect_grace: config.reconnect_grace,
@@ -103,6 +110,8 @@ struct GameActor {
     clients: HashMap<PlayerId, mpsc::Sender<ServerMessage>>,
     processed: HashMap<ActionId, u64>,
     deadline_seq: u64,
+    /// Cancels stale end-of-round reveal timers (same pattern as turn deadlines).
+    round_advance_seq: u64,
     grace_seq: u64,
     turn_timeout: Option<Duration>,
     reconnect_grace: Duration,
@@ -120,6 +129,7 @@ impl GameActor {
     async fn run(mut self) {
         self.schedule_deadline();
         self.maybe_request_bot_turn();
+        self.schedule_round_reveal_advance();
 
         while let Some(message) = self.rx.recv().await {
             match message {
@@ -138,6 +148,9 @@ impl GameActor {
                 }
                 ActorMessage::Timeout { deadline_id } => {
                     self.handle_timeout(deadline_id).await;
+                }
+                ActorMessage::AdvanceAfterRoundReveal { advance_id } => {
+                    self.handle_advance_after_round_reveal(advance_id).await;
                 }
                 ActorMessage::GraceExpired {
                     player_id,
@@ -199,8 +212,7 @@ impl GameActor {
         }
         if was_paused && !self.paused {
             self.broadcast(ServerMessage::GameResumed);
-            self.schedule_deadline();
-            self.maybe_request_bot_turn();
+            self.resume_timers_and_bots();
         }
     }
 
@@ -226,8 +238,9 @@ impl GameActor {
         });
         self.broadcast_snapshots();
 
-        // Cancel turn deadlines while paused.
+        // Cancel turn / round-reveal timers while paused.
         self.deadline_seq += 1;
+        self.round_advance_seq += 1;
 
         let tx = self.self_tx.clone();
         let grace = self.reconnect_grace;
@@ -263,9 +276,14 @@ impl GameActor {
         self.broadcast_snapshots();
         if !self.paused {
             self.broadcast(ServerMessage::GameResumed);
-            self.schedule_deadline();
-            self.maybe_request_bot_turn();
+            self.resume_timers_and_bots();
         }
+    }
+
+    fn resume_timers_and_bots(&mut self) {
+        self.schedule_deadline();
+        self.maybe_request_bot_turn();
+        self.schedule_round_reveal_advance();
     }
 
     fn recompute_pause(&mut self) {
@@ -334,8 +352,7 @@ impl GameActor {
                 self.recompute_pause();
                 self.broadcast_snapshots();
                 if !self.paused {
-                    self.schedule_deadline();
-                    self.maybe_request_bot_turn();
+                    self.resume_timers_and_bots();
                 }
             }
             return;
@@ -499,8 +516,7 @@ impl GameActor {
                 );
                 self.broadcast_snapshots();
                 self.emit_auto_cheers(&events);
-                self.schedule_deadline();
-                self.maybe_request_bot_turn();
+                self.after_engine_events(&events);
             }
             Err(error) => {
                 self.reject(player_id, Some(action_id), RejectReason::Game { error });
@@ -804,8 +820,7 @@ impl GameActor {
                 self.processed.insert(action_id, self.engine.version());
                 self.broadcast_snapshots();
                 self.emit_auto_cheers(&events);
-                self.schedule_deadline();
-                self.maybe_request_bot_turn();
+                self.after_engine_events(&events);
             }
             Err(error) => tracing::error!(%error, "timeout auto-action rejected"),
         }
@@ -901,11 +916,78 @@ impl GameActor {
                 tracing::info!(player = %player_id, "bot action applied");
                 self.broadcast_snapshots();
                 self.emit_auto_cheers(&events);
-                self.schedule_deadline();
-                self.maybe_request_bot_turn();
+                self.after_engine_events(&events);
             }
             Err(error) => tracing::error!(%error, "bot action rejected"),
         }
+    }
+
+    fn after_engine_events(&mut self, events: &[GameEvent]) {
+        self.schedule_deadline();
+        self.maybe_request_bot_turn();
+        if events
+            .iter()
+            .any(|e| matches!(e, GameEvent::RoundCompleted { .. }))
+        {
+            self.schedule_round_reveal_advance();
+        }
+    }
+
+    fn schedule_round_reveal_advance(&mut self) {
+        if self.paused || self.engine.phase() != GamePhase::RoundScoring {
+            return;
+        }
+        self.round_advance_seq += 1;
+        let advance_id = self.round_advance_seq;
+        let tx = self.self_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(ROUND_REVEAL_DELAY).await;
+            let _ = tx
+                .send(ActorMessage::AdvanceAfterRoundReveal { advance_id })
+                .await;
+        });
+    }
+
+    async fn handle_advance_after_round_reveal(&mut self, advance_id: u64) {
+        if advance_id != self.round_advance_seq {
+            return;
+        }
+        if self.engine.phase() != GamePhase::RoundScoring {
+            return;
+        }
+        if self.paused {
+            // Reveal delay elapsed during pause; restart after resume.
+            return;
+        }
+
+        let previous = self.engine.state().clone();
+        let events = match self.engine.advance_from_round_scoring() {
+            Ok(events) => events,
+            Err(error) => {
+                tracing::error!(%error, "round scoring advance rejected");
+                return;
+            }
+        };
+        let action_id = ActionId::new();
+        if !Self::persist_accepted(
+            &self.store,
+            self.game_id,
+            action_id,
+            &events,
+            self.engine.state(),
+            &self.metrics,
+        )
+        .await
+        {
+            self.engine.replace_state(previous);
+            // Retry shortly so a transient DB blip does not stall the table.
+            self.schedule_round_reveal_advance();
+            return;
+        }
+        self.processed.insert(action_id, self.engine.version());
+        self.broadcast_snapshots();
+        self.emit_auto_cheers(&events);
+        self.after_engine_events(&events);
     }
 
     fn current_timer_event(&self) -> Option<TimerEvent> {

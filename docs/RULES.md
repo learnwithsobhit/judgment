@@ -141,6 +141,11 @@ rounds (desc) → total tricks missed `Σ|bid − won|` (asc) → shared rank
 
 ## Table engagement (cosmetic)
 
-Reactions, avatar flashes, emoji bursts, last-trick reveal pause, and surprise
-scoreboard UX (hiding running totals mid-game) are **presentation only**. They
-do not change legal bids, playable cards, trick winners, or scoring.
+Reactions, avatar flashes, emoji bursts, and surprise scoreboard UX (hiding
+running totals mid-game) are **presentation only**. They do not change legal
+bids, playable cards, trick winners, or scoring.
+
+After the last trick of a round, the server holds briefly in `RoundScoring`
+(~1.8s) so clients can show the completed trick before the next deal or
+game-over screen. Scoring for that round is already recorded; only the next
+deal / finish is delayed.

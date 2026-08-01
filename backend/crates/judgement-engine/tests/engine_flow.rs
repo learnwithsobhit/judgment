@@ -51,6 +51,11 @@ fn run_full_game(seed: u64) -> GameEngine {
             GamePhase::Playing => {
                 play_one_card(&mut engine);
             }
+            GamePhase::RoundScoring => {
+                engine
+                    .advance_from_round_scoring()
+                    .expect("advance after round scoring");
+            }
             other => panic!("unexpected phase {other:?}"),
         }
         engine.check_invariants().expect("invariants hold after every command");
@@ -154,6 +159,9 @@ fn play_out_round(engine: &mut GameEngine) {
             GamePhase::Playing => {
                 let card = engine.legal_cards(current)[0];
                 engine.play_card(current, card).unwrap();
+            }
+            GamePhase::RoundScoring => {
+                engine.advance_from_round_scoring().unwrap();
             }
             other => panic!("unexpected phase {other:?}"),
         }
@@ -347,13 +355,20 @@ fn round_completion_rotates_dealer_and_deals_next_round() {
         play_one_card(&mut engine);
     }
 
+    assert_eq!(engine.phase(), GamePhase::RoundScoring);
+    assert_eq!(
+        engine.state().score_table.rounds.len(),
+        1,
+        "round 1 scored exactly once before the next deal"
+    );
+    engine.advance_from_round_scoring().unwrap();
+
     let state = engine.state();
     let round = state.current_round.as_ref().unwrap();
     assert_eq!(round.round_index, 1);
     assert_eq!(round.cards_per_player, 7);
     assert_eq!(state.dealer, state.next_clockwise(first_dealer), "dealer rotates clockwise");
     assert_eq!(engine.phase(), GamePhase::Bidding);
-    assert_eq!(state.score_table.rounds.len(), 1, "round 1 scored exactly once");
 }
 
 #[test]
@@ -466,6 +481,45 @@ fn view_for_unknown_player_is_rejected() {
 }
 
 #[test]
+fn last_trick_of_round_pauses_in_round_scoring_with_reveal() {
+    let mut engine = GameEngine::new_with_seed(
+        9,
+        GameId::new(),
+        GameRules {
+            trump_rule: TrumpRule::rotating_from(Suit::Spades),
+            turn_timeout_seconds: None,
+            round_pattern: RoundPattern::Custom { rounds: vec![1, 1] },
+            ..GameRules::mvp_for_players(3)
+        },
+        (0..3)
+            .map(|seat| PlayerState::human(PlayerId::new(), format!("P{seat}"), seat))
+            .collect(),
+    )
+    .unwrap();
+    engine.start_game().unwrap();
+    bid_all(&mut engine);
+    while engine.phase() == GamePhase::Playing {
+        play_one_card(&mut engine);
+    }
+    assert_eq!(engine.phase(), GamePhase::RoundScoring);
+    let viewer = engine.state().player_ids()[0];
+    let view = engine.view_for(viewer).unwrap();
+    assert!(view.current_trick.is_empty());
+    assert!(
+        view.last_completed_trick.is_some(),
+        "clients need the last trick while RoundScoring holds"
+    );
+    assert_eq!(view.round.as_ref().unwrap().round_index, 0);
+
+    engine.advance_from_round_scoring().unwrap();
+    assert_eq!(engine.phase(), GamePhase::Bidding);
+    assert_eq!(
+        engine.state().current_round.as_ref().unwrap().round_index,
+        1
+    );
+}
+
+#[test]
 fn projection_keeps_last_completed_trick_until_next_lead() {
     let mut engine = engine_with_seed(21);
     engine.start_game().unwrap();
@@ -516,6 +570,9 @@ fn projection_exposes_round_history_and_leader() {
             GamePhase::Playing => {
                 play_one_card(&mut engine);
             }
+            GamePhase::RoundScoring => {
+                engine.advance_from_round_scoring().unwrap();
+            }
             _ => break,
         }
     }
@@ -543,6 +600,9 @@ fn projection_exposes_round_history_and_leader() {
             GamePhase::Bidding => bid_all(&mut engine),
             GamePhase::Playing => {
                 let _ = play_one_card(&mut engine);
+            }
+            GamePhase::RoundScoring => {
+                engine.advance_from_round_scoring().unwrap();
             }
             _ => break,
         }

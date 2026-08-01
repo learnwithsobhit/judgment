@@ -111,13 +111,25 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             .unwrap();
     }
     while !engine.is_finished() {
-        let turn = engine.state().current_round.as_ref().unwrap().current_turn;
-        let card = engine.legal_cards(turn)[0];
-        let events = engine.play_card(turn, card).unwrap();
-        store
-            .commit_command(&to_commit(game_id, ActionId::new(), &events, engine.state()))
-            .await
-            .unwrap();
+        match engine.phase() {
+            GamePhase::Playing => {
+                let turn = engine.state().current_round.as_ref().unwrap().current_turn;
+                let card = engine.legal_cards(turn)[0];
+                let events = engine.play_card(turn, card).unwrap();
+                store
+                    .commit_command(&to_commit(game_id, ActionId::new(), &events, engine.state()))
+                    .await
+                    .unwrap();
+            }
+            GamePhase::RoundScoring => {
+                let events = engine.advance_from_round_scoring().unwrap();
+                store
+                    .commit_command(&to_commit(game_id, ActionId::new(), &events, engine.state()))
+                    .await
+                    .unwrap();
+            }
+            other => panic!("unexpected phase while playing out: {other:?}"),
+        }
     }
 
     (game_id, focus, token)

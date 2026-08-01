@@ -117,6 +117,8 @@ pub fn simulate_game_with_players(
                 })?;
                 engine.play_card(current, card)
             }
+            // Tests/sims advance immediately; the server delays this for reveal UX.
+            GamePhase::RoundScoring => engine.advance_from_round_scoring(),
             other => unreachable!("simulation loop should never observe phase {other:?}"),
         }
         .map_err(|source| SimulationError::Rejected { seed, version: engine.version(), source })?;

@@ -403,13 +403,13 @@ flowchart TD
   deal[Deal and trump]
   bidding[Bidding dealer last]
   playing[Playing follow suit]
-  scoreRound[Score exact bid equals 10 plus bid else 0]
+  scoreRound[Score and RoundScoring reveal hold]
   nextRound{More rounds}
   finished[Finished ranking]
 
   lobbyPhase --> deal --> bidding --> playing --> scoreRound --> nextRound
-  nextRound -->|yes rotate dealer| deal
-  nextRound -->|no| finished
+  nextRound -->|yes after ~1.8s rotate dealer| deal
+  nextRound -->|no after ~1.8s| finished
 ```
 
 Rules reference: [`docs/RULES.md`](RULES.md). Optional dealer total restriction is **off by default** (host toggle at room create).

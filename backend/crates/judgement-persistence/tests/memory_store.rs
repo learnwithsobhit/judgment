@@ -107,14 +107,27 @@ async fn memory_store_finishes_game_and_records_history() {
             .unwrap();
     }
     while !engine.is_finished() {
-        let turn = engine.state().current_round.as_ref().unwrap().current_turn;
-        let card = engine.legal_cards(turn)[0];
-        let action_id = ActionId::new();
-        let events = engine.play_card(turn, card).unwrap();
-        store
-            .commit_command(&to_commit(game_id, action_id, &events, engine.state()))
-            .await
-            .unwrap();
+        match engine.phase() {
+            GamePhase::Playing => {
+                let turn = engine.state().current_round.as_ref().unwrap().current_turn;
+                let card = engine.legal_cards(turn)[0];
+                let action_id = ActionId::new();
+                let events = engine.play_card(turn, card).unwrap();
+                store
+                    .commit_command(&to_commit(game_id, action_id, &events, engine.state()))
+                    .await
+                    .unwrap();
+            }
+            GamePhase::RoundScoring => {
+                let action_id = ActionId::new();
+                let events = engine.advance_from_round_scoring().unwrap();
+                store
+                    .commit_command(&to_commit(game_id, action_id, &events, engine.state()))
+                    .await
+                    .unwrap();
+            }
+            other => panic!("unexpected phase while playing out: {other:?}"),
+        }
     }
 
     let history = store.load_game_history(game_id).await.unwrap().unwrap();

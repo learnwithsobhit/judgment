@@ -133,6 +133,9 @@ proptest! {
                     let card = cards[(seed as usize + remaining) % cards.len()];
                     engine.play_card(player, card).unwrap();
                 }
+                GamePhase::RoundScoring => {
+                    engine.advance_from_round_scoring().unwrap();
+                }
                 other => prop_assert!(false, "unexpected phase {:?}", other),
             }
             engine.check_invariants().map_err(TestCaseError::fail)?;

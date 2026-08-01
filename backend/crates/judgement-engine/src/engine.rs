@@ -384,7 +384,11 @@ impl GameEngine {
             track(&cards, &format!("completed trick {}", trick.trick_index))?;
         }
 
-        if matches!(state.phase, GamePhase::Bidding | GamePhase::Playing) && count != 52 {
+        if matches!(
+            state.phase,
+            GamePhase::Bidding | GamePhase::Playing | GamePhase::RoundScoring
+        ) && count != 52
+        {
             return Err(format!("expected 52 cards accounted for, found {count}"));
         }
 
@@ -468,6 +472,9 @@ impl GameEngine {
         events
     }
 
+    /// Score the finished round and pause in [`GamePhase::RoundScoring`] so
+    /// clients can reveal the last trick before the next deal (or game end).
+    /// Call [`Self::advance_from_round_scoring`] after the reveal delay.
     fn complete_round(&mut self) -> Vec<GameEvent> {
         self.state.phase = GamePhase::RoundScoring;
         let round = self.state.current_round.as_ref().expect("scoring requires a round");
@@ -488,9 +495,24 @@ impl GameEngine {
             .collect();
         self.state.score_table.record_round(entries);
 
-        let mut events = vec![GameEvent::RoundCompleted { round_index }];
+        vec![GameEvent::RoundCompleted { round_index }]
+    }
 
+    /// Continue after the end-of-round trick reveal: start the next round or
+    /// finish the game. Only valid while phase is [`GamePhase::RoundScoring`].
+    pub fn advance_from_round_scoring(&mut self) -> Result<Vec<GameEvent>, GameError> {
+        if self.state.phase != GamePhase::RoundScoring {
+            return Err(GameError::WrongPhase);
+        }
+        let round_index = self
+            .state
+            .current_round
+            .as_ref()
+            .expect("scoring requires a round")
+            .round_index;
         let total_rounds = self.state.rules.round_pattern.rounds().len();
+
+        let mut events = Vec::new();
         if round_index + 1 < total_rounds {
             let new_dealer = self.state.next_clockwise(self.state.dealer);
             self.state.dealer = new_dealer;
@@ -502,7 +524,8 @@ impl GameEngine {
             self.state.phase = GamePhase::Finished;
             events.push(GameEvent::GameCompleted { ranking });
         }
-        events
+        self.state.version += 1;
+        Ok(events)
     }
 
     /// Seat order starting from `first`, wrapping clockwise around the table.
