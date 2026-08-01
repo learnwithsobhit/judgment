@@ -3,7 +3,7 @@
 //! Phase 5: persist-before-broadcast with rollback.
 //! Presence: reconnect grace → vacant seat (claim via room code) or host end.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -108,6 +108,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         room_code: config.room_code,
         grace_ids: HashMap::new(),
         vacancy_ids: HashMap::new(),
+        dirty_clients: HashSet::new(),
         paused: false,
         ended: false,
         metrics: config.metrics,
@@ -139,6 +140,8 @@ struct GameActor {
     grace_ids: HashMap<PlayerId, u64>,
     /// player → active vacancy id.
     vacancy_ids: HashMap<PlayerId, u64>,
+    /// Clients whose outbound buffer dropped a snapshot — force resync.
+    dirty_clients: HashSet<PlayerId>,
     paused: bool,
     ended: bool,
     /// Rate-limit cosmetic emotes (player → last emit millis).
@@ -203,6 +206,7 @@ impl GameActor {
                     let _ = reply.send(result);
                 }
             }
+            self.flush_dirty_snapshots();
         }
     }
 
@@ -213,6 +217,7 @@ impl GameActor {
         rotated_token: Option<String>,
     ) {
         self.clients.insert(player_id, outbound);
+        self.dirty_clients.remove(&player_id);
         let previous_status = self
             .engine
             .state()
@@ -262,10 +267,14 @@ impl GameActor {
         }
         self.send_snapshot(player_id);
         self.send_timer(player_id);
-        for &other in self.clients.keys() {
-            if other != player_id {
-                self.send_snapshot(other);
-            }
+        let others: Vec<_> = self
+            .clients
+            .keys()
+            .copied()
+            .filter(|id| *id != player_id)
+            .collect();
+        for other in others {
+            self.send_snapshot(other);
         }
         if was_paused && !self.paused {
             self.broadcast(ServerMessage::GameResumed);
@@ -277,6 +286,7 @@ impl GameActor {
         if self.clients.remove(&player_id).is_none() {
             return;
         }
+        self.dirty_clients.remove(&player_id);
         let _ = self
             .engine
             .set_connection_status(player_id, ConnectionStatus::Disconnected);
@@ -601,17 +611,10 @@ impl GameActor {
                 return;
             }
             // Persist snapshot so mid-game avatar survives process restart.
-            if !Self::persist_accepted(
-                &self.store,
-                self.game_id,
-                action_id,
-                &[],
-                self.engine.state(),
-                &self.metrics,
-            )
-            .await
+            if !self
+                .persist_with_uncertainty(action_id, &[], previous)
+                .await
             {
-                self.engine.replace_state(previous);
                 self.reject(player_id, Some(action_id), RejectReason::PersistUnavailable);
                 return;
             }
@@ -712,17 +715,10 @@ impl GameActor {
 
         match result {
             Ok(events) => {
-                if !Self::persist_accepted(
-                    &self.store,
-                    self.game_id,
-                    action_id,
-                    &events,
-                    self.engine.state(),
-                    &self.metrics,
-                )
-                .await
+                if !self
+                    .persist_with_uncertainty(action_id, &events, previous)
+                    .await
                 {
-                    self.engine.replace_state(previous);
                     self.reject(player_id, Some(action_id), RejectReason::PersistUnavailable);
                     return;
                 }
@@ -854,7 +850,7 @@ impl GameActor {
         true
     }
 
-    fn emit_auto_cheers(&self, events: &[judgement_engine::GameEvent]) {
+    fn emit_auto_cheers(&mut self, events: &[judgement_engine::GameEvent]) {
         use judgement_engine::GameEvent;
         for event in events {
             match event {
@@ -912,6 +908,50 @@ impl GameActor {
         }
     }
 
+    /// Persist; on failure, only rollback if the action is not already durable.
+    async fn persist_with_uncertainty(
+        &mut self,
+        action_id: ActionId,
+        events: &[GameEvent],
+        previous: judgement_engine::InternalGameState,
+    ) -> bool {
+        if Self::persist_accepted(
+            &self.store,
+            self.game_id,
+            action_id,
+            events,
+            self.engine.state(),
+            &self.metrics,
+        )
+        .await
+        {
+            return true;
+        }
+        // Commit-uncertainty: timeout/error may still mean the DB committed.
+        if let Some(store) = &self.store {
+            match store.action_committed(self.game_id, action_id).await {
+                Ok(true) => {
+                    tracing::warn!(
+                        game = %self.game_id,
+                        %action_id,
+                        "persist reported failure but action is durable — keeping engine state"
+                    );
+                    return true;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        game = %self.game_id,
+                        "action_committed check failed after persist error"
+                    );
+                }
+            }
+        }
+        self.engine.replace_state(previous);
+        false
+    }
+
     async fn persist_accepted(
         store: &Option<Arc<dyn GameStore>>,
         game_id: GameId,
@@ -935,13 +975,14 @@ impl GameActor {
         let started = std::time::Instant::now();
         for attempt in 0..2u8 {
             let result = tokio::time::timeout(PERSIST_TIMEOUT, store.commit_command(&commit)).await;
+            let elapsed_ms = started.elapsed().as_millis() as u64;
             match result {
                 Ok(Ok(())) => {
-                    let elapsed = started.elapsed();
-                    if elapsed > Duration::from_millis(100) {
+                    metrics.observe_persist_ms(elapsed_ms);
+                    if started.elapsed() > Duration::from_millis(100) {
                         tracing::warn!(
                             game = %game_id,
-                            ?elapsed,
+                            elapsed_ms,
                             "slow persist commit"
                         );
                     }
@@ -960,6 +1001,7 @@ impl GameActor {
                     continue;
                 }
                 Ok(Err(error)) => {
+                    metrics.observe_persist_ms(elapsed_ms);
                     metrics
                         .db_write_failures
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -971,6 +1013,7 @@ impl GameActor {
                     continue;
                 }
                 Err(_elapsed) => {
+                    metrics.observe_persist_ms(elapsed_ms);
                     metrics
                         .db_write_failures
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1045,17 +1088,10 @@ impl GameActor {
         match result {
             Ok(events) => {
                 let action_id = ActionId::new();
-                if !Self::persist_accepted(
-                    &self.store,
-                    self.game_id,
-                    action_id,
-                    &events,
-                    self.engine.state(),
-                    &self.metrics,
-                )
-                .await
+                if !self
+                    .persist_with_uncertainty(action_id, &events, previous)
+                    .await
                 {
-                    self.engine.replace_state(previous);
                     return;
                 }
                 self.processed.insert(action_id, self.engine.version());
@@ -1131,17 +1167,10 @@ impl GameActor {
             }
         };
         let action_id = ActionId::new();
-        if !Self::persist_accepted(
-            &self.store,
-            self.game_id,
-            action_id,
-            &events,
-            self.engine.state(),
-            &self.metrics,
-        )
-        .await
+        if !self
+            .persist_with_uncertainty(action_id, &events, previous)
+            .await
         {
-            self.engine.replace_state(previous);
             // Retry shortly so a transient DB blip does not stall the table.
             self.schedule_round_reveal_advance();
             return;
@@ -1167,7 +1196,7 @@ impl GameActor {
         })
     }
 
-    fn reject(&self, player_id: PlayerId, action_id: Option<ActionId>, reason: RejectReason) {
+    fn reject(&mut self, player_id: PlayerId, action_id: Option<ActionId>, reason: RejectReason) {
         self.metrics
             .invalid_actions
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1184,13 +1213,13 @@ impl GameActor {
         );
     }
 
-    fn send_snapshot(&self, player_id: PlayerId) {
+    fn send_snapshot(&mut self, player_id: PlayerId) {
         if let Ok(view) = self.engine.view_for(player_id) {
             self.send_to(player_id, ServerMessage::StateSnapshot { view });
         }
     }
 
-    fn send_timer(&self, player_id: PlayerId) {
+    fn send_timer(&mut self, player_id: PlayerId) {
         if self.engine.is_finished() {
             return;
         }
@@ -1199,29 +1228,56 @@ impl GameActor {
         }
     }
 
-    fn broadcast_snapshots(&self) {
-        for &player_id in self.clients.keys() {
+    fn broadcast_snapshots(&mut self) {
+        let players: Vec<_> = self.clients.keys().copied().collect();
+        for player_id in players {
             self.send_snapshot(player_id);
         }
     }
 
-    fn broadcast(&self, message: ServerMessage) {
-        for outbound in self.clients.values() {
-            let _ = outbound.try_send(message.clone());
+    fn flush_dirty_snapshots(&mut self) {
+        let dirty: Vec<_> = self.dirty_clients.iter().copied().collect();
+        for player_id in dirty {
+            if !self.clients.contains_key(&player_id) {
+                self.dirty_clients.remove(&player_id);
+                continue;
+            }
+            self.dirty_clients.remove(&player_id);
+            self.send_snapshot(player_id);
+            self.send_timer(player_id);
         }
     }
 
-    fn broadcast_except(&self, skip: PlayerId, message: ServerMessage) {
-        for (player_id, outbound) in &self.clients {
-            if *player_id != skip {
-                let _ = outbound.try_send(message.clone());
+    fn broadcast(&mut self, message: ServerMessage) {
+        let players: Vec<_> = self.clients.keys().copied().collect();
+        for player_id in players {
+            self.send_to(player_id, message.clone());
+        }
+    }
+
+    fn broadcast_except(&mut self, skip: PlayerId, message: ServerMessage) {
+        let players: Vec<_> = self.clients.keys().copied().collect();
+        for player_id in players {
+            if player_id != skip {
+                self.send_to(player_id, message.clone());
             }
         }
     }
 
-    fn send_to(&self, player_id: PlayerId, message: ServerMessage) {
-        if let Some(outbound) = self.clients.get(&player_id) {
-            let _ = outbound.try_send(message);
+    fn send_to(&mut self, player_id: PlayerId, message: ServerMessage) {
+        let Some(outbound) = self.clients.get(&player_id) else {
+            return;
+        };
+        let is_snapshot = matches!(message, ServerMessage::StateSnapshot { .. });
+        if outbound.try_send(message).is_err() {
+            if is_snapshot {
+                self.dirty_clients.insert(player_id);
+                self.metrics
+                    .outbound_snapshot_drops
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        } else if is_snapshot {
+            self.dirty_clients.remove(&player_id);
         }
     }
 }

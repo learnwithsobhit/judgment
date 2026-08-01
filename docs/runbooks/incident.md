@@ -11,9 +11,19 @@
 ## Quick triage
 
 1. Check `/healthz` (process up) and `/readyz` (DB reachable).  
-2. Scrape `/metrics` — look at `judgement_db_write_failures_total`, `judgement_http_rate_limited_total`, `judgement_active_game_actors`.  
+2. Scrape `/metrics` — look at `judgement_db_write_failures_total`, `judgement_persist_commit_duration_milliseconds_*` (p95 via histogram), `judgement_http_rate_limited_total`, `judgement_active_game_actors`, `judgement_games_admission_rejected_total`, `judgement_actors_respawned_total`.  
 3. Check reverse-proxy / container logs for panic or OOM.  
 4. Confirm Postgres connectivity and disk.
+
+### Alert thresholds (practical)
+
+| Signal | Worry when |
+|--------|------------|
+| `judgement_db_write_failures_total` | Sustained increase over 5m |
+| Persist histogram | Most samples above `le="100"` (p95 ≫ 50ms) |
+| `/readyz` | Not 200 for >1m |
+| `judgement_games_admission_rejected_total` | Climbing while actors ≈ 100 — scale API or raise cap only after pool/DB healthy |
+| API OOM / restarts | Raise `judgment-api` memory (config target **1GB**) |
 
 ## Common incidents
 

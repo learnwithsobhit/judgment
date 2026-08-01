@@ -140,6 +140,105 @@ async fn memory_store_finishes_game_and_records_history() {
     assert!(dedup.iter().any(|(a, _)| *a == start_action));
 }
 
+/// Commit-uncertainty: after a durable commit, `action_committed` must be true
+/// even if a later client path thought the write failed.
+#[tokio::test]
+async fn action_committed_detects_durable_action_id() {
+    let store = MemoryStore::new();
+    let session_ids: Vec<_> = (0..4).map(|_| SessionId::new()).collect();
+    let players: Vec<PlayerState> = (0..4)
+        .map(|seat| PlayerState::human(PlayerId::new(), format!("P{seat}"), seat))
+        .collect();
+    let game_players: Vec<NewGamePlayer> = players
+        .iter()
+        .zip(session_ids.iter())
+        .map(|(p, &session_id)| NewGamePlayer {
+            player_id: p.id,
+            session_id,
+            nickname: p.nickname.clone(),
+            seat: p.seat,
+        })
+        .collect();
+    let room_id = RoomId::new();
+    store
+        .upsert_room(&StoredRoom {
+            room_id,
+            code: "TEST01".into(),
+            host_session_id: session_ids[0],
+            max_players: 4,
+            turn_timeout_seconds: None,
+            first_trump: Some(Suit::Clubs),
+            round_schedule: Default::default(),
+            dealer_total_restriction: false,
+            phase: "lobby".into(),
+            game_id: None,
+            players: game_players
+                .iter()
+                .map(|p| StoredRoomPlayer {
+                    session_id: p.session_id,
+                    player_id: p.player_id,
+                    nickname: p.nickname.clone(),
+                    seat: p.seat,
+                    ready: true,
+                    joined_at: Utc::now(),
+                    avatar_id: None,
+                })
+                .collect(),
+            created_at: Utc::now(),
+        })
+        .await
+        .unwrap();
+
+    let game_id = GameId::new();
+    let rules = GameRules {
+        trump_rule: TrumpRule::rotating_from(Suit::Clubs),
+        turn_timeout_seconds: None,
+        round_pattern: RoundPattern::Custom { rounds: vec![1] },
+        ..GameRules::mvp_for_players(4)
+    };
+    let mut engine = GameEngine::new_with_seed(1, game_id, rules.clone(), players).unwrap();
+    let events = engine.start_game().unwrap();
+    let start_action = ActionId::new();
+    store
+        .create_game(&NewGame {
+            game_id,
+            room_id,
+            rules,
+            seed: Some(1),
+            players: game_players,
+            initial_state: engine.state().clone(),
+            initial_events: events,
+            start_action_id: start_action,
+        })
+        .await
+        .unwrap();
+
+    assert!(store
+        .action_committed(game_id, start_action)
+        .await
+        .unwrap());
+    assert!(!store
+        .action_committed(game_id, ActionId::new())
+        .await
+        .unwrap());
+
+    let turn = engine.state().current_round.as_ref().unwrap().current_turn;
+    let bid = engine.legal_bids(turn)[0];
+    let action_id = ActionId::new();
+    let events = engine.place_bid(turn, bid).unwrap();
+    store
+        .commit_command(&to_commit(game_id, action_id, &events, engine.state()))
+        .await
+        .unwrap();
+    // Idempotent re-commit (simulates timeout retry after success).
+    store
+        .commit_command(&to_commit(game_id, action_id, &events, engine.state()))
+        .await
+        .unwrap();
+    assert!(store.action_committed(game_id, action_id).await.unwrap());
+    assert!(store.load_active_game(game_id).await.unwrap().is_some());
+}
+
 fn to_commit(
     game_id: GameId,
     action_id: ActionId,

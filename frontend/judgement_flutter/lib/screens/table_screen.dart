@@ -174,6 +174,32 @@ class _TableScreenState extends State<TableScreen> {
             child: Column(
               children: [
                 _TopBar(controller: controller, showScoreboardButton: !wide),
+                if (controller.savingInProgress)
+                  Material(
+                    color: const Color(0xFF243B3A),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      child: Row(
+                        children: [
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            controller.lastRejection ?? 'Saving table…',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 if (controller.pauseReason != null)
                   _PauseBanner(controller: controller),
                 Expanded(

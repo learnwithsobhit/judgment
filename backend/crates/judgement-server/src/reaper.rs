@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, Utc};
 
+use crate::restore::respawn_game_actor;
 use crate::state::{AppState, RoomStatus};
 
 /// Lobby rooms that never start are reaped after this TTL.
@@ -65,8 +66,8 @@ async fn reap_once(state: &AppState) {
         rooms_reaped += 1;
     }
 
-    // Drop closed game actor handles.
-    let abandoned: Vec<_> = {
+    // Dead actor channels: respawn from tip when the game is still active in DB.
+    let dead_actors: Vec<_> = {
         let games = state.games.lock().unwrap();
         games
             .iter()
@@ -74,9 +75,19 @@ async fn reap_once(state: &AppState) {
             .map(|(id, info)| (*id, info.room_id))
             .collect()
     };
-    for (game_id, _room_id) in abandoned {
+    for (game_id, _room_id) in dead_actors {
         state.games.lock().unwrap().remove(&game_id);
-        games_abandoned += 1;
+        match respawn_game_actor(state, game_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                // Game no longer active in DB — count as abandoned.
+                games_abandoned += 1;
+            }
+            Err(error) => {
+                tracing::warn!(%error, game = %game_id, "actor respawn failed");
+                games_abandoned += 1;
+            }
+        }
     }
 
     // TTL purge finished/aborted games, then orphan in_game rooms.

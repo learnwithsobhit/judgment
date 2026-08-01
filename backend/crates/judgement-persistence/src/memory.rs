@@ -169,6 +169,21 @@ impl GameStore for MemoryStore {
         Ok(())
     }
 
+    async fn action_committed(
+        &self,
+        game_id: GameId,
+        action_id: ActionId,
+    ) -> Result<bool, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let Some(game) = inner.games.get(&game_id) else {
+            return Ok(false);
+        };
+        Ok(game
+            .events
+            .iter()
+            .any(|e| e.action_id == Some(action_id)))
+    }
+
     async fn load_active_games(&self) -> Result<Vec<RestoredGame>, PersistError> {
         let inner = self.inner.lock().unwrap();
         let mut out = Vec::new();
@@ -194,6 +209,34 @@ impl GameStore for MemoryStore {
             });
         }
         Ok(out)
+    }
+
+    async fn load_active_game(
+        &self,
+        game_id: GameId,
+    ) -> Result<Option<RestoredGame>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let Some(game) = inner.games.get(&game_id) else {
+            return Ok(None);
+        };
+        if game.status != "active" {
+            return Ok(None);
+        }
+        let version = *game.snapshots.keys().max().unwrap_or(&0);
+        let state = game
+            .snapshots
+            .get(&version)
+            .cloned()
+            .ok_or_else(|| PersistError::NotFound(format!("snapshot for {game_id}")))?;
+        Ok(Some(RestoredGame {
+            game_id,
+            room_id: game.record.room_id,
+            rules: game.record.rules.clone(),
+            seed: game.record.seed,
+            state,
+            players: game.players.clone(),
+            processed_actions: dedup_from_events(&game.events),
+        }))
     }
 
     async fn load_processed_actions(

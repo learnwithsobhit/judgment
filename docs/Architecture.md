@@ -391,7 +391,9 @@ flowchart TB
   r1 --> store
 ```
 
-ADR: [`0001-actor-per-game.md`](adr/0001-actor-per-game.md). One sequential tokio task per active game avoids locks inside the engine. Horizontal scale beyond one machine needs sticky routing or a shared room bus (not in v1).
+ADR: [`0001-actor-per-game.md`](adr/0001-actor-per-game.md). One sequential tokio task per active game avoids locks inside the engine.
+
+**CAP stance:** the realtime path is **CP** — one writer per `game_id`, durable tip before clients see accepts. Availability is improved by pool headroom, `start_game` admission (`MAX_ACTIVE_GAMES`), client auto-resend on `PersistUnavailable`, actor respawn from tip, and outbound snapshot dirty-resync — not by multi-writer AP. Horizontal scale beyond one Fly machine needs game ownership leases + sticky routing (deferred until single-node metrics prove saturation). Keep API and Postgres colocated in the same region.
 
 ---
 

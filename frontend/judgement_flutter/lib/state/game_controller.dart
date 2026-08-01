@@ -62,6 +62,14 @@ class GameController extends ChangeNotifier {
   /// action_id of the command awaiting acknowledgement, if any.
   String? pendingActionId;
 
+  /// Payload for auto-resend on persist/queue rejects (same action_id).
+  Map<String, dynamic>? _pendingAction;
+  int _persistRetryCount = 0;
+  Timer? _persistRetryTimer;
+
+  /// True while auto-retrying a durable command after PersistUnavailable/QueueFull.
+  bool savingInProgress = false;
+
   /// Most recent rejection to surface to the user (cleared after display).
   String? lastRejection;
 
@@ -240,7 +248,7 @@ class GameController extends ChangeNotifier {
         _applySnapshot(view);
       case CommandAccepted(:final actionId):
         if (pendingActionId == actionId) {
-          pendingActionId = null;
+          _clearPendingCommand();
           _notify();
         }
       case CommandRejected(
@@ -250,23 +258,39 @@ class GameController extends ChangeNotifier {
           :final reasonKind,
           :final errorCode
         ):
-        if (actionId == null || actionId == pendingActionId) {
-          pendingActionId = null;
-        }
-        lastRejection = retryable ? '$message (retrying may help)' : message;
         lastRejectionCode = errorCode;
-        _notify();
-        if (retryable &&
-            (reasonKind == 'persist_unavailable' || reasonKind == 'queue_full')) {
-          // Brief pause then clear so the user can tap again; auto-resend of
-          // the same action_id is safe server-side (idempotent).
-          Future<void>.delayed(const Duration(milliseconds: 600), () {
-            if (!_disposed && lastRejection != null) {
-              lastRejection = '$message — tap again to retry';
-              _notify();
-            }
-          });
+        final mine = actionId == null || actionId == pendingActionId;
+        if (!mine) {
+          lastRejection = message;
+          _notify();
+          return;
         }
+        if (retryable &&
+            (reasonKind == 'persist_unavailable' || reasonKind == 'queue_full') &&
+            _pendingAction != null &&
+            pendingActionId != null) {
+          savingInProgress = true;
+          lastRejection = 'Saving table…';
+          _notify();
+          _schedulePersistRetry();
+          return;
+        }
+        // Version skew: resync then resend same action_id with new expected version.
+        if (_pendingAction != null &&
+            pendingActionId != null &&
+            (reasonKind == 'game' ||
+                (errorCode?.toLowerCase().contains('stale') ?? false) ||
+                message.toLowerCase().contains('stale'))) {
+          savingInProgress = true;
+          lastRejection = 'Syncing…';
+          _notify();
+          _sendAction({'type': 'request_state_sync'});
+          _schedulePersistRetry(delayMs: 350);
+          return;
+        }
+        _clearPendingCommand();
+        lastRejection = retryable ? '$message (retrying may help)' : message;
+        _notify();
       case TimerUpdated(:final timer):
         if (_timerDeadlineId != timer.deadlineId) {
           _timerDeadlineId = timer.deadlineId;
@@ -305,7 +329,7 @@ class GameController extends ChangeNotifier {
         endedReason = reason;
         gameAborted = aborted ?? true;
         pauseReason = _humanizePauseReason(reason);
-        pendingActionId = null;
+        _clearPendingCommand();
         _notify();
       case TokenRotated(:final token):
         api.token = token;
@@ -521,8 +545,55 @@ class GameController extends ChangeNotifier {
     if (v == null || pendingActionId != null) return;
     final actionId = _uuid.v4();
     pendingActionId = actionId;
+    _pendingAction = Map<String, dynamic>.from(action);
+    _persistRetryCount = 0;
+    savingInProgress = false;
     _notify();
     _send(actionId: actionId, stateVersion: v.stateVersion, action: action);
+  }
+
+  void _clearPendingCommand() {
+    pendingActionId = null;
+    _pendingAction = null;
+    _persistRetryCount = 0;
+    savingInProgress = false;
+    _persistRetryTimer?.cancel();
+    _persistRetryTimer = null;
+  }
+
+  void _schedulePersistRetry({int delayMs = 600}) {
+    _persistRetryTimer?.cancel();
+    _persistRetryTimer = Timer(Duration(milliseconds: delayMs), () {
+      if (_disposed) return;
+      _autoResendPending();
+    });
+  }
+
+  void _autoResendPending() {
+    final actionId = pendingActionId;
+    final action = _pendingAction;
+    if (actionId == null || action == null) return;
+    if (_persistRetryCount >= 5) {
+      _clearPendingCommand();
+      lastRejection = 'Could not save — tap again to retry';
+      _notify();
+      return;
+    }
+    final v = view;
+    if (v == null) {
+      _sendAction({'type': 'request_state_sync'});
+      _schedulePersistRetry(delayMs: 400);
+      return;
+    }
+    _persistRetryCount += 1;
+    savingInProgress = true;
+    lastRejection = 'Saving table…';
+    _notify();
+    _send(
+      actionId: actionId,
+      stateVersion: v.stateVersion,
+      action: action,
+    );
   }
 
   void _sendAction(Map<String, dynamic> action) {
@@ -558,6 +629,7 @@ class GameController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _persistRetryTimer?.cancel();
     _holdTimer?.cancel();
     _bannerTimer?.cancel();
     _subscription?.cancel();

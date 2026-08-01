@@ -24,9 +24,44 @@ pub struct Metrics {
     pub ai_requests: AtomicU64,
     pub ai_fallbacks: AtomicU64,
     pub rooms_reaped: AtomicU64,
+    /// Persist commit latency histogram helpers (Prometheus-style).
+    pub persist_commit_ms_sum: AtomicU64,
+    pub persist_commit_ms_count: AtomicU64,
+    pub persist_commit_ms_bucket_le_10: AtomicU64,
+    pub persist_commit_ms_bucket_le_50: AtomicU64,
+    pub persist_commit_ms_bucket_le_100: AtomicU64,
+    pub persist_commit_ms_bucket_le_500: AtomicU64,
+    pub persist_commit_ms_bucket_le_inf: AtomicU64,
+    pub games_admission_rejected: AtomicU64,
+    pub outbound_snapshot_drops: AtomicU64,
+    pub actors_respawned: AtomicU64,
 }
 
 impl Metrics {
+    /// Record a finished persist attempt (success or failure) in ms.
+    pub fn observe_persist_ms(&self, ms: u64) {
+        self.persist_commit_ms_sum.fetch_add(ms, Ordering::Relaxed);
+        self.persist_commit_ms_count.fetch_add(1, Ordering::Relaxed);
+        self.persist_commit_ms_bucket_le_inf
+            .fetch_add(1, Ordering::Relaxed);
+        if ms <= 10 {
+            self.persist_commit_ms_bucket_le_10
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 50 {
+            self.persist_commit_ms_bucket_le_50
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 100 {
+            self.persist_commit_ms_bucket_le_100
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if ms <= 500 {
+            self.persist_commit_ms_bucket_le_500
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     pub fn render_prometheus(&self, gauges: Gauges) -> String {
         let mut out = String::with_capacity(2048);
         macro_rules! counter {
@@ -59,6 +94,52 @@ impl Metrics {
         counter!("judgement_ai_requests_total", "AI / rules query requests", ai_requests);
         counter!("judgement_ai_fallbacks_total", "AI responses that used deterministic fallback", ai_fallbacks);
         counter!("judgement_rooms_reaped_total", "Abandoned rooms garbage-collected", rooms_reaped);
+        counter!(
+            "judgement_games_admission_rejected_total",
+            "start_game rejected because active actor cap reached",
+            games_admission_rejected
+        );
+        counter!(
+            "judgement_outbound_snapshot_drops_total",
+            "StateSnapshot try_send drops (client buffer full)",
+            outbound_snapshot_drops
+        );
+        counter!(
+            "judgement_actors_respawned_total",
+            "Dead game actors respawned from tip snapshot",
+            actors_respawned
+        );
+
+        out.push_str("# HELP judgement_persist_commit_duration_milliseconds Persist commit latency\n");
+        out.push_str("# TYPE judgement_persist_commit_duration_milliseconds histogram\n");
+        out.push_str(&format!(
+            "judgement_persist_commit_duration_milliseconds_bucket{{le=\"10\"}} {}\n",
+            self.persist_commit_ms_bucket_le_10.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "judgement_persist_commit_duration_milliseconds_bucket{{le=\"50\"}} {}\n",
+            self.persist_commit_ms_bucket_le_50.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "judgement_persist_commit_duration_milliseconds_bucket{{le=\"100\"}} {}\n",
+            self.persist_commit_ms_bucket_le_100.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "judgement_persist_commit_duration_milliseconds_bucket{{le=\"500\"}} {}\n",
+            self.persist_commit_ms_bucket_le_500.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "judgement_persist_commit_duration_milliseconds_bucket{{le=\"+Inf\"}} {}\n",
+            self.persist_commit_ms_bucket_le_inf.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "judgement_persist_commit_duration_milliseconds_sum {}\n",
+            self.persist_commit_ms_sum.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "judgement_persist_commit_duration_milliseconds_count {}\n",
+            self.persist_commit_ms_count.load(Ordering::Relaxed)
+        ));
 
         out.push_str("# HELP judgement_active_websockets Approximate active WS connections\n");
         out.push_str("# TYPE judgement_active_websockets gauge\n");

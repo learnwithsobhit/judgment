@@ -21,7 +21,8 @@ pub struct PostgresStore {
 impl PostgresStore {
     pub async fn connect(database_url: &str) -> Result<Self, PersistError> {
         let pool = PgPoolOptions::new()
-            .max_connections(5)
+            // Sized for a single API machine; leave headroom under PG max_connections.
+            .max_connections(10)
             .acquire_timeout(std::time::Duration::from_secs(2))
             .idle_timeout(std::time::Duration::from_secs(60))
             .max_lifetime(std::time::Duration::from_secs(30 * 60))
@@ -431,6 +432,25 @@ impl GameStore for PostgresStore {
         Ok(())
     }
 
+    async fn action_committed(
+        &self,
+        game_id: GameId,
+        action_id: ActionId,
+    ) -> Result<bool, PersistError> {
+        let row = sqlx::query(
+            r#"
+            SELECT 1 AS ok FROM game_events
+            WHERE game_id = $1 AND action_id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(game_id.0)
+        .bind(action_id.0)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
+
     async fn load_active_games(&self) -> Result<Vec<RestoredGame>, PersistError> {
         let game_rows = sqlx::query(
             r#"
@@ -444,55 +464,79 @@ impl GameStore for PostgresStore {
         let mut out = Vec::new();
         for row in game_rows {
             let game_id = GameId(row.get("game_id"));
-            let rules: GameRules = serde_json::from_value(row.get("rules"))?;
-            let seed: Option<i64> = row.get("seed");
-
-            let snapshot = sqlx::query(
-                r#"
-                SELECT state FROM game_snapshots
-                WHERE game_id = $1
-                ORDER BY state_version DESC
-                LIMIT 1
-                "#,
-            )
-            .bind(game_id.0)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| PersistError::NotFound(format!("snapshot for {game_id}")))?;
-
-            let state: InternalGameState = serde_json::from_value(snapshot.get("state"))?;
-
-            let players = sqlx::query(
-                r#"
-                SELECT player_id, session_id, nickname, seat
-                FROM game_players WHERE game_id = $1 ORDER BY seat
-                "#,
-            )
-            .bind(game_id.0)
-            .fetch_all(&self.pool)
-            .await?
-            .into_iter()
-            .map(|p| NewGamePlayer {
-                player_id: PlayerId(p.get("player_id")),
-                session_id: SessionId(p.get("session_id")),
-                nickname: p.get("nickname"),
-                seat: p.get::<i16, _>("seat") as u8,
-            })
-            .collect();
-
-            let processed_actions = self.load_processed_actions(game_id).await?;
-
-            out.push(RestoredGame {
-                game_id,
-                room_id: RoomId(row.get("room_id")),
-                rules,
-                seed: seed.map(|s| s as u64),
-                state,
-                players,
-                processed_actions,
-            });
+            if let Some(restored) = self.load_active_game(game_id).await? {
+                out.push(restored);
+            }
         }
         Ok(out)
+    }
+
+    async fn load_active_game(
+        &self,
+        game_id: GameId,
+    ) -> Result<Option<RestoredGame>, PersistError> {
+        let Some(row) = sqlx::query(
+            r#"
+            SELECT game_id, room_id, rules, seed, state_version
+            FROM games WHERE game_id = $1 AND status = 'active'
+            "#,
+        )
+        .bind(game_id.0)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
+
+        let rules: GameRules = serde_json::from_value(row.get("rules"))?;
+        let seed: Option<i64> = row.get("seed");
+
+        let Some(snapshot) = sqlx::query(
+            r#"
+            SELECT state FROM game_snapshots
+            WHERE game_id = $1
+            ORDER BY state_version DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(game_id.0)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Err(PersistError::NotFound(format!("snapshot for {game_id}")));
+        };
+
+        let state: InternalGameState = serde_json::from_value(snapshot.get("state"))?;
+
+        let players = sqlx::query(
+            r#"
+            SELECT player_id, session_id, nickname, seat
+            FROM game_players WHERE game_id = $1 ORDER BY seat
+            "#,
+        )
+        .bind(game_id.0)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|p| NewGamePlayer {
+            player_id: PlayerId(p.get("player_id")),
+            session_id: SessionId(p.get("session_id")),
+            nickname: p.get("nickname"),
+            seat: p.get::<i16, _>("seat") as u8,
+        })
+        .collect();
+
+        let processed_actions = self.load_processed_actions(game_id).await?;
+
+        Ok(Some(RestoredGame {
+            game_id,
+            room_id: RoomId(row.get("room_id")),
+            rules,
+            seed: seed.map(|s| s as u64),
+            state,
+            players,
+            processed_actions,
+        }))
     }
 
     async fn load_processed_actions(

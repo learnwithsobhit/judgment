@@ -38,7 +38,20 @@ pub trait GameStore: Send + Sync {
     /// round/game results). This is the commit point.
     async fn commit_command(&self, commit: &CommandCommit) -> Result<(), PersistError>;
 
+    /// True if `action_id` already has a durable event row (commit-uncertainty).
+    async fn action_committed(
+        &self,
+        game_id: GameId,
+        action_id: ActionId,
+    ) -> Result<bool, PersistError>;
+
     async fn load_active_games(&self) -> Result<Vec<RestoredGame>, PersistError>;
+
+    /// Load a single active game for actor respawn, if still `status = active`.
+    async fn load_active_game(
+        &self,
+        game_id: GameId,
+    ) -> Result<Option<RestoredGame>, PersistError>;
 
     async fn load_processed_actions(
         &self,

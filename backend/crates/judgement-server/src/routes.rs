@@ -39,6 +39,9 @@ use crate::error::ApiError;
 use crate::persist::{persist_new_game, stored_room, stored_session};
 use crate::state::{generate_room_code, AppState, GameInfo, Room, RoomSeat, RoomStatus};
 
+/// Load-shed new tables so existing actors keep DB pool headroom (CAP Availability).
+pub const MAX_ACTIVE_GAMES: usize = 100;
+
 pub async fn set_avatar(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -574,6 +577,19 @@ pub async fn start_game(
         return Err(ApiError::Forbidden(
             "deterministic seed is disabled (set JUDGEMENT_ALLOW_SEED=1 for non-prod)".into(),
         ));
+    }
+
+    {
+        let active = state.games.lock().unwrap().len();
+        if active >= MAX_ACTIVE_GAMES {
+            state
+                .metrics
+                .games_admission_rejected
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Err(ApiError::Conflict(format!(
+                "tables full ({active}/{MAX_ACTIVE_GAMES} active); try again shortly"
+            )));
+        }
     }
 
     let (
