@@ -10,7 +10,8 @@ use judgement_engine::{GamePhase, PlayerGameView};
 use judgement_persistence::MemoryStore;
 use judgement_protocol::{
     ClaimSeatResponse, ClientCommand, ClientEnvelope, CreateGuestSessionResponse,
-    CreateRoomResponse, JoinRoomResponse, ServerMessage, StartGameResponse, PROTOCOL_VERSION,
+    CreateRoomResponse, JoinRoomResponse, RestartGameResponse, RoomView, ServerMessage,
+    StartGameResponse, PROTOCOL_VERSION,
 };
 use judgement_server::restore::bootstrap;
 use judgement_server::{build_router, state::AppState};
@@ -368,4 +369,155 @@ async fn host_leave_promotes_another_seat() {
     }
     assert!(new_host.is_some());
     assert_ne!(new_host.unwrap(), clients[0].player_id);
+}
+
+#[tokio::test]
+async fn same_session_reclaim_via_ws_after_vacant() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, _code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    let vacant_player = clients[1].player_id;
+    clients[1].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[1].ws = None;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Same token reconnects — should reclaim vacant seat.
+    clients[1].connect_ws(&base, game_id).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut cleared = false;
+    while tokio::time::Instant::now() < deadline {
+        let ws = clients[0].ws.as_mut().unwrap();
+        if let Ok(Some(Ok(Message::Text(text)))) =
+            tokio::time::timeout(Duration::from_millis(100), ws.next()).await
+        {
+            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
+            if let ServerMessage::StateSnapshot { view } = msg {
+                let vacant = view.opponents.iter().any(|o| {
+                    o.player_id == vacant_player
+                        && o.connection_status == ConnectionStatus::Vacant
+                });
+                clients[0].last = Some(view);
+                if !vacant {
+                    cleared = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(cleared, "same-session WS reconnect should clear vacant");
+}
+
+#[tokio::test]
+async fn host_restart_drops_vacant_and_starts_new_game() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let state_ref = state.clone();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (old_game_id, code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, old_game_id).await;
+    }
+
+    // D leaves → vacant; 3 remain.
+    clients[3].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[3].ws = None;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let http = reqwest::Client::new();
+    let restarted: RestartGameResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/restart"))
+        .headers(clients[0].headers())
+        .json(&serde_json::json!({ "seed": 22 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(restarted.old_game_id, old_game_id);
+    assert_ne!(restarted.game_id, old_game_id);
+
+    // Old actor removed; room has 3 seats in new game.
+    assert!(!state_ref.games.lock().unwrap().contains_key(&old_game_id));
+    assert!(state_ref.games.lock().unwrap().contains_key(&restarted.game_id));
+
+    let room: RoomView = http
+        .get(format!("{base}/api/v1/rooms/{code}"))
+        .headers(clients[0].headers())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(room.seats.len(), 3);
+    assert_eq!(room.game_id, Some(restarted.game_id));
+
+    // Remaining players can connect to the new game.
+    clients[0].connect_ws(&base, restarted.game_id).await;
+    assert!(clients[0].last.is_some());
+}
+
+#[tokio::test]
+async fn host_end_removes_actor_and_returns_lobby() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let state_ref = state.clone();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    clients[1].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[1].ws = None;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let http = reqwest::Client::new();
+    let resp = http
+        .post(format!("{base}/api/v1/rooms/{code}/end"))
+        .headers(clients[0].headers())
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert!(
+        !state_ref.games.lock().unwrap().contains_key(&game_id),
+        "aborted game must leave active map"
+    );
+
+    let room: RoomView = http
+        .get(format!("{base}/api/v1/rooms/{code}"))
+        .headers(clients[0].headers())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(room.phase, judgement_protocol::RoomPhase::Lobby);
+    assert!(room.game_id.is_none());
+    assert_eq!(room.seats.len(), 3);
 }

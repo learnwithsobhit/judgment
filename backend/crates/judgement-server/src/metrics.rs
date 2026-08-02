@@ -16,6 +16,8 @@ pub struct Metrics {
     pub seat_vacancies: AtomicU64,
     pub seat_claims: AtomicU64,
     pub games_ended_vacancy: AtomicU64,
+    pub games_restarted: AtomicU64,
+    pub games_removed: AtomicU64,
     pub games_compacted: AtomicU64,
     pub games_purged: AtomicU64,
     pub games_abandoned: AtomicU64,
@@ -86,6 +88,8 @@ impl Metrics {
         counter!("judgement_seat_vacancies_total", "Seats marked vacant after grace/leave", seat_vacancies);
         counter!("judgement_seat_claims_total", "Vacant seats claimed by a new human", seat_claims);
         counter!("judgement_games_ended_vacancy_total", "Games ended by host or vacancy timeout", games_ended_vacancy);
+        counter!("judgement_games_restarted_total", "Games rematched via host restart", games_restarted);
+        counter!("judgement_games_removed_total", "Game actors removed from the active map after abort/restart", games_removed);
         counter!("judgement_games_compacted_total", "Finished games compacted (events pruned)", games_compacted);
         counter!("judgement_games_purged_total", "Terminal games hard-deleted by TTL", games_purged);
         counter!("judgement_games_abandoned_total", "In-memory abandoned game actors dropped", games_abandoned);

@@ -27,17 +27,20 @@ use judgement_protocol::{
     ClaimSeatRequest, ClaimSeatResponse, CoachingResponse, CreateGuestSessionRequest,
     CreateGuestSessionResponse, CreateRoomRequest, CreateRoomResponse, EndGameResponse,
     ExplanationResponse, GameHistoryResponse, GameResultResponse, HighlightsResponse,
-    JoinRoomRequest, JoinRoomResponse, ReadyRequest, RemovePlayerRequest, RoomView,
-    RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest, SetAvatarResponse,
-    StartGameRequest, StartGameResponse,
+    JoinRoomRequest, JoinRoomResponse, ReadyRequest, RemovePlayerRequest, RestartGameResponse,
+    RoomView, RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest,
+    SetAvatarResponse, StartGameRequest, StartGameResponse,
 };
 use crate::emotes::is_allowed_avatar;
 use tokio::sync::oneshot;
 
 use crate::actor::{self, ActorMessage, SpawnActor};
+use crate::cleanup::{
+    check_restart_rate_limit, make_aborted_hook, make_host_changed_hook, record_restart,
+};
 use crate::error::ApiError;
 use crate::persist::{persist_new_game, stored_room, stored_session};
-use crate::state::{generate_room_code, AppState, GameInfo, Room, RoomSeat, RoomStatus};
+use crate::state::{generate_room_code, AppState, GameInfo, Room, RoomSeat, RoomStatus, Session};
 
 /// Load-shed new tables so existing actors keep DB pool headroom (CAP Availability).
 pub const MAX_ACTIVE_GAMES: usize = 100;
@@ -417,6 +420,141 @@ pub async fn end_game(
     }))
 }
 
+/// Host rematch while vacant: abort leavers, lobby with remaining ≥3, start new game.
+pub async fn restart_game(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(room_ref): Path<String>,
+    body: Option<Json<StartGameRequest>>,
+) -> Result<Json<RestartGameResponse>, ApiError> {
+    let session = state.authenticate(&headers)?;
+    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let seed = body.and_then(|Json(b)| b.seed);
+    if seed.is_some() && !seed_allowed() {
+        return Err(ApiError::Forbidden(
+            "deterministic seed is disabled (set JUDGEMENT_ALLOW_SEED=1 for non-prod)".into(),
+        ));
+    }
+
+    let (old_game_id, player_id, commands) = {
+        let rooms = state.rooms.lock().unwrap();
+        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+        if room.host_session != session.id {
+            return Err(ApiError::Forbidden("only the host can restart the game".into()));
+        }
+        let RoomStatus::InGame(game_id) = room.status else {
+            return Err(ApiError::Conflict("no active game to restart".into()));
+        };
+        let seat = room
+            .seat_of(session.id)
+            .ok_or(ApiError::Forbidden("you are not seated in this room".into()))?;
+        let games = state.games.lock().unwrap();
+        let info = games
+            .get(&game_id)
+            .ok_or(ApiError::Conflict("game actor not found".into()))?;
+        (game_id, seat.player_id, info.commands.clone())
+    };
+
+    let (presence_tx, presence_rx) = oneshot::channel();
+    commands
+        .send(ActorMessage::QueryPresence {
+            reply: presence_tx,
+        })
+        .await
+        .map_err(|_| ApiError::Conflict("game actor unavailable".into()))?;
+    let presence = presence_rx
+        .await
+        .map_err(|_| ApiError::Conflict("presence reply dropped".into()))?;
+    if presence.ended {
+        return Err(ApiError::Conflict("game is already over".into()));
+    }
+    let remaining = presence
+        .seated_count
+        .saturating_sub(presence.vacant_player_ids.len());
+    if remaining < MIN_PLAYERS as usize {
+        return Err(ApiError::Conflict(format!(
+            "need at least {MIN_PLAYERS} players to restart, currently {remaining}"
+        )));
+    }
+    check_restart_rate_limit(&state, room_id).map_err(ApiError::TooManyRequests)?;
+
+    let (abort_tx, abort_rx) = oneshot::channel();
+    commands
+        .send(ActorMessage::AbortForRestart {
+            requesting_player_id: player_id,
+            reply: abort_tx,
+        })
+        .await
+        .map_err(|_| ApiError::Conflict("game actor unavailable".into()))?;
+    let cleanup = abort_rx
+        .await
+        .map_err(|_| ApiError::Conflict("restart abort reply dropped".into()))?
+        .map_err(ApiError::Conflict)?;
+
+    // Prepare lobby with remaining seats (ready for immediate start).
+    let lobby_snapshot = {
+        let mut rooms = state.rooms.lock().unwrap();
+        let room = rooms
+            .get_mut(&room_id)
+            .ok_or(ApiError::NotFound("room"))?;
+        room.seats
+            .retain(|s| !cleanup.vacant_player_ids.contains(&s.player_id));
+        room.seats.sort_by_key(|s| s.seat);
+        for (idx, seat) in room.seats.iter_mut().enumerate() {
+            seat.seat = idx as u8;
+            seat.ready = true;
+        }
+        if let Some(host_seat) = room
+            .seats
+            .iter()
+            .find(|s| s.player_id == cleanup.host_player_id)
+            .or_else(|| room.seats.first())
+        {
+            room.host_session = host_seat.session_id;
+        }
+        room.status = RoomStatus::Lobby;
+        stored_room(room)
+    };
+    state
+        .store
+        .upsert_room(&lobby_snapshot)
+        .await
+        .map_err(|e| ApiError::Conflict(format!("persist lobby: {e}")))?;
+
+    // Free admission slot; keep `commands` clone alive for GameRestarted notify.
+    state.games.lock().unwrap().remove(&old_game_id);
+    state
+        .metrics
+        .games_removed
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    let new_game_id = match start_game_inner(&state, &session, room_id, seed).await {
+        Ok(id) => id,
+        Err(err) => {
+            // Leave Lobby + ready seats; host can Start manually.
+            return Err(err);
+        }
+    };
+
+    let _ = commands
+        .send(ActorMessage::NotifyRestarted {
+            new_game_id,
+        })
+        .await;
+    drop(commands);
+
+    record_restart(&state, room_id);
+    state
+        .metrics
+        .games_restarted
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    Ok(Json(RestartGameResponse {
+        old_game_id,
+        game_id: new_game_id,
+    }))
+}
+
 pub async fn leave_room(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -578,7 +716,17 @@ pub async fn start_game(
             "deterministic seed is disabled (set JUDGEMENT_ALLOW_SEED=1 for non-prod)".into(),
         ));
     }
+    let game_id = start_game_inner(&state, &session, room_id, seed).await?;
+    Ok(Json(StartGameResponse { game_id }))
+}
 
+/// Shared by `start` and `restart` — room must already be Lobby with ready seats.
+async fn start_game_inner(
+    state: &Arc<AppState>,
+    session: &Session,
+    room_id: RoomId,
+    seed: Option<u64>,
+) -> Result<GameId, ApiError> {
     {
         let active = state.games.lock().unwrap().len();
         if active >= MAX_ACTIVE_GAMES {
@@ -601,58 +749,57 @@ pub async fn start_game(
         dealer_total_restriction,
         game_players,
     ) = {
-            let rooms = state.rooms.lock().unwrap();
-            let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+        let rooms = state.rooms.lock().unwrap();
+        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
 
-            if room.host_session != session.id {
-                return Err(ApiError::Forbidden("only the host can start the game".into()));
-            }
-            if room.status != RoomStatus::Lobby {
-                return Err(ApiError::Conflict("the game has already started".into()));
-            }
-            if (room.seats.len() as u8) < MIN_PLAYERS {
-                return Err(ApiError::Conflict(format!(
-                    "the game needs at least {MIN_PLAYERS} players, currently {}",
-                    room.seats.len()
-                )));
-            }
-            if !room.seats.iter().all(|s| s.ready) {
-                return Err(ApiError::Conflict("all players must be ready".into()));
-            }
+        if room.host_session != session.id {
+            return Err(ApiError::Forbidden("only the host can start the game".into()));
+        }
+        if room.status != RoomStatus::Lobby {
+            return Err(ApiError::Conflict("the game has already started".into()));
+        }
+        if (room.seats.len() as u8) < MIN_PLAYERS {
+            return Err(ApiError::Conflict(format!(
+                "the game needs at least {MIN_PLAYERS} players, currently {}",
+                room.seats.len()
+            )));
+        }
+        if !room.seats.iter().all(|s| s.ready) {
+            return Err(ApiError::Conflict("all players must be ready".into()));
+        }
 
-            let mut seats = room.seats.clone();
-            seats.sort_by_key(|s| s.seat);
-            let players: Vec<PlayerState> = seats
-                .iter()
-                .map(|s| {
-                    let mut p = PlayerState::human(s.player_id, s.nickname.clone(), s.seat);
-                    if let Some(avatar) = &s.avatar_id {
-                        p = p.with_avatar(avatar.clone());
-                    }
-                    p
-                })
-                .collect();
-            let mapping: HashMap<_, _> =
-                seats.iter().map(|s| (s.session_id, s.player_id)).collect();
-            let game_players: Vec<NewGamePlayer> = seats
-                .iter()
-                .map(|s| NewGamePlayer {
-                    player_id: s.player_id,
-                    session_id: s.session_id,
-                    nickname: s.nickname.clone(),
-                    seat: s.seat,
-                })
-                .collect();
-            (
-                players,
-                mapping,
-                room.turn_timeout_seconds,
-                room.first_trump,
-                room.round_schedule.clone(),
-                room.dealer_total_restriction,
-                game_players,
-            )
-        };
+        let mut seats = room.seats.clone();
+        seats.sort_by_key(|s| s.seat);
+        let players: Vec<PlayerState> = seats
+            .iter()
+            .map(|s| {
+                let mut p = PlayerState::human(s.player_id, s.nickname.clone(), s.seat);
+                if let Some(avatar) = &s.avatar_id {
+                    p = p.with_avatar(avatar.clone());
+                }
+                p
+            })
+            .collect();
+        let mapping: HashMap<_, _> = seats.iter().map(|s| (s.session_id, s.player_id)).collect();
+        let game_players: Vec<NewGamePlayer> = seats
+            .iter()
+            .map(|s| NewGamePlayer {
+                player_id: s.player_id,
+                session_id: s.session_id,
+                nickname: s.nickname.clone(),
+                seat: s.seat,
+            })
+            .collect();
+        (
+            players,
+            mapping,
+            room.turn_timeout_seconds,
+            room.first_trump,
+            room.round_schedule.clone(),
+            room.dealer_total_restriction,
+            game_players,
+        )
+    };
 
     let game_id = GameId::new();
     let seated = players.len() as u8;
@@ -725,6 +872,8 @@ pub async fn start_game(
         host_player_id,
         metrics: state.metrics.clone(),
         room_code,
+        on_host_changed: Some(make_host_changed_hook(state.clone(), room_id)),
+        on_aborted: Some(make_aborted_hook(state.clone(), room_id)),
     });
     state
         .metrics
@@ -739,14 +888,20 @@ pub async fn start_game(
             commands,
         },
     );
-    {
+    let in_game_snapshot = {
         let mut rooms = state.rooms.lock().unwrap();
         if let Some(room) = rooms.get_mut(&room_id) {
             room.status = RoomStatus::InGame(game_id);
+            Some(stored_room(room))
+        } else {
+            None
         }
+    };
+    if let Some(snapshot) = in_game_snapshot {
+        let _ = state.store.upsert_room(&snapshot).await;
     }
 
-    Ok(Json(StartGameResponse { game_id }))
+    Ok(game_id)
 }
 
 /// Auth: must be a seated player in this game (PLAN.md Phase 5 history).

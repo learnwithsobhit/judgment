@@ -125,6 +125,8 @@ pub enum ServerMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         aborted: Option<bool>,
     },
+    /// Host restarted: same room, new `game_id` — clients must switch WS.
+    GameRestarted { game_id: GameId },
     /// Legacy wire name; no longer emitted for live disconnect (kept for older clients).
     BotTookOver { player_id: PlayerId },
     PlayerResumedControl { player_id: PlayerId },

@@ -349,6 +349,8 @@ sealed class ServerMessage {
           reason: json['reason'] as String,
           aborted: json['aborted'] as bool?,
         );
+      case 'game_restarted':
+        return GameRestarted(gameId: json['game_id'] as String);
       case 'bot_took_over':
         return BotTookOver(playerId: json['player_id'] as String);
       case 'player_resumed_control':
@@ -442,6 +444,11 @@ class GameEnded extends ServerMessage {
   final String reason;
   final bool? aborted;
   GameEnded({required this.reason, this.aborted});
+}
+
+class GameRestarted extends ServerMessage {
+  final String gameId;
+  GameRestarted({required this.gameId});
 }
 
 class BotTookOver extends ServerMessage {

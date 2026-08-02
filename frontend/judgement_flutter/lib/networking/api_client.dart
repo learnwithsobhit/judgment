@@ -123,6 +123,15 @@ class ApiClient {
     await _post('/api/v1/rooms/$roomRef/end', {});
   }
 
+  /// Host rematch after a vacant seat: new `game_id`, same room.
+  Future<({String oldGameId, String gameId})> restartGame(String roomRef) async {
+    final json = await _post('/api/v1/rooms/$roomRef/restart', {});
+    return (
+      oldGameId: json['old_game_id'] as String,
+      gameId: json['game_id'] as String,
+    );
+  }
+
   Future<RoomView> getRoom(String roomRef) async =>
       RoomView.fromJson(await _get('/api/v1/rooms/$roomRef'));
 

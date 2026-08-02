@@ -10,10 +10,13 @@ use judgement_engine::GameEngine;
 use judgement_persistence::{GameStore, RestoredGame};
 
 use crate::actor::{spawn_game_actor, SpawnActor};
+use crate::cleanup::{make_aborted_hook, make_host_changed_hook};
 use crate::state::{AppState, GameInfo, Room, RoomSeat, RoomStatus, ScheduledEvent, Session};
 
 /// Reload durable state into memory and respawn actors for active games.
-pub async fn restore_from_store(state: &AppState) -> Result<usize, judgement_persistence::PersistError> {
+pub async fn restore_from_store(
+    state: &Arc<AppState>,
+) -> Result<usize, judgement_persistence::PersistError> {
     let sessions = state.store.load_sessions().await?;
     {
         let mut session_map = state.sessions.lock().unwrap();
@@ -94,7 +97,7 @@ pub async fn restore_from_store(state: &AppState) -> Result<usize, judgement_per
 
 /// Respawn a single active game actor from the tip snapshot (reaper / crash recovery).
 pub async fn respawn_game_actor(
-    state: &AppState,
+    state: &Arc<AppState>,
     game_id: GameId,
 ) -> Result<bool, judgement_persistence::PersistError> {
     let Some(game) = state.store.load_active_game(game_id).await? else {
@@ -110,7 +113,7 @@ pub async fn respawn_game_actor(
 }
 
 fn spawn_restored_actor(
-    state: &AppState,
+    state: &Arc<AppState>,
     game: RestoredGame,
 ) -> Result<(), judgement_persistence::PersistError> {
     let game_id = game.game_id;
@@ -151,6 +154,8 @@ fn spawn_restored_actor(
         host_player_id,
         metrics: state.metrics.clone(),
         room_code,
+        on_host_changed: Some(make_host_changed_hook(state.clone(), game.room_id)),
+        on_aborted: Some(make_aborted_hook(state.clone(), game.room_id)),
     });
 
     let players: HashMap<_, _> = game

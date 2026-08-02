@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use axum::http::HeaderMap;
 use rand::distr::Alphanumeric;
@@ -172,6 +173,8 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     /// Approximate active WebSocket count (Phase 9 gauges).
     pub active_websockets: std::sync::atomic::AtomicU64,
+    /// Per-room last host-restart time (load guard).
+    pub restart_limits: Mutex<HashMap<RoomId, Instant>>,
 }
 
 impl AppState {
@@ -192,6 +195,7 @@ impl AppState {
             http_limiter: HttpRateLimiter::new(HttpLimitConfig::default()),
             metrics: Arc::new(Metrics::default()),
             active_websockets: std::sync::atomic::AtomicU64::new(0),
+            restart_limits: Mutex::default(),
         }
     }
 

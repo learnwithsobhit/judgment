@@ -134,11 +134,10 @@ rounds (desc) → total tricks missed `Σ|bid − won|` (asc) → shared rank
 ## Disconnects (policy summary — implemented in Phase 6)
 
 - On disconnect: seat becomes **vacant immediately**; table pauses.
-- Another (or the same) player claims via room code; host may end if no claim.
+- Rejoin via same-session WS or claim with room code; host may **restart**
+  (remaining ≥ 3, new game same room) or **end**; else 10-minute vacancy TTL.
   (Legacy non-zero grace still possible via `reconnect_grace_seconds`.)
-- Player returns: control restored at a safe command boundary.
-- Permanent leave: the bot plays out the remainder of the game.
-- Host leave: longest-connected occupied seat becomes host.
+- Host leave: longest-connected occupied seat becomes host (`host_session` synced).
 
 ## Table engagement (cosmetic)
 

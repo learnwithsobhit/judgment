@@ -108,7 +108,11 @@ class _LandingScreenState extends State<LandingScreen> {
           gameId: gameId,
           myPlayerId: result.playerId,
           myNickname: session.nickname,
-        )..roomCode = result.room.code;
+        )
+          ..roomCode = result.room.code
+          ..amHost = result.room.seats.any(
+            (s) => s.playerId == result.playerId && s.isHost,
+          );
         controller.connect();
         Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => TableScreen(controller: controller),

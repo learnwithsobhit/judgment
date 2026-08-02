@@ -328,13 +328,23 @@ class _PauseBanner extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       vacant
-                          ? 'Table ends in ${secs}s if no one joins'
+                          ? 'Ends in ${secs}s if nobody rejoins'
                           : 'Resumes when they return · ${secs}s left',
                       style: TextStyle(
                         color: accent.withValues(alpha: 0.95),
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                  if (vacant && !controller.amHost) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Waiting for host or a rejoin',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.65),
+                        fontSize: 12,
                       ),
                     ),
                   ],
@@ -366,14 +376,31 @@ class _PauseBanner extends StatelessWidget {
                                 horizontal: 12, vertical: 8),
                           ),
                         ),
-                        TextButton(
-                          onPressed: () => controller.endGameAsHost(),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white70,
-                            visualDensity: VisualDensity.compact,
+                        if (controller.amHost && controller.canHostRestart)
+                          FilledButton(
+                            onPressed: controller.restartInFlight
+                                ? null
+                                : () => controller.restartGameAsHost(),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: accent,
+                              foregroundColor: const Color(0xFF0E1F1E),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: Text(
+                              controller.restartInFlight
+                                  ? 'Restarting…'
+                                  : 'Restart',
+                            ),
                           ),
-                          child: const Text('End game'),
-                        ),
+                        if (controller.amHost)
+                          TextButton(
+                            onPressed: () => controller.endGameAsHost(),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: const Text('End game'),
+                          ),
                       ],
                     ),
                   ],

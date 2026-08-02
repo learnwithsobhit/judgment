@@ -88,6 +88,13 @@ pub struct EndGameResponse {
     pub aborted: bool,
 }
 
+/// Host rematch: abort vacant seats, return to lobby briefly, start a new game.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestartGameResponse {
+    pub old_game_id: GameId,
+    pub game_id: GameId,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadyRequest {
     pub ready: bool,

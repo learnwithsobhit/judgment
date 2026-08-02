@@ -27,7 +27,7 @@ pub fn spawn_reaper(state: Arc<AppState>) {
     });
 }
 
-async fn reap_once(state: &AppState) {
+async fn reap_once(state: &Arc<AppState>) {
     let now = Utc::now();
     let mut rooms_reaped = 0u64;
     let mut games_abandoned = 0u64;

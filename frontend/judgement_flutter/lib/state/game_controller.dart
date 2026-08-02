@@ -47,7 +47,7 @@ class EmoteBurst {
 
 class GameController extends ChangeNotifier {
   final ApiClient api;
-  final String gameId;
+  String gameId;
   final String myPlayerId;
   final String myNickname;
 
@@ -55,6 +55,8 @@ class GameController extends ChangeNotifier {
   StreamSubscription<ServerMessage>? _subscription;
   bool _disposed = false;
   int _reconnectAttempts = 0;
+  /// Stop auto-reconnect after abort / intentional switch to a new game.
+  bool _suppressReconnect = false;
 
   PlayerGameView? view;
   GameConnectionState connection = GameConnectionState.connecting;
@@ -97,6 +99,12 @@ class GameController extends ChangeNotifier {
 
   /// Room code for share / end-game REST (set from lobby when known).
   String? roomCode;
+
+  /// Mid-game host flag (lobby `isHost` + `HostChanged`).
+  bool amHost = false;
+
+  /// True while a host restart request is in flight.
+  bool restartInFlight = false;
 
   /// Held last-trick cards for min 1.6s presentation pause.
   CompletedTrickView? heldCompletedTrick;
@@ -215,7 +223,23 @@ class GameController extends ChangeNotifier {
   bool get canManualReconnect =>
       connection == GameConnectionState.disconnected &&
       _reconnectAttempts >= _maxReconnectAttempts &&
+      !_suppressReconnect &&
+      !gameAborted &&
       !(view?.isFinished ?? false);
+
+  /// Connected seats excluding vacant (self + opponents).
+  int get remainingSeatCount {
+    final v = view;
+    if (v == null) return 0;
+    var n = 1; // self is connected while viewing the table
+    for (final o in v.opponents) {
+      if (o.connectionStatus != 'vacant') n += 1;
+    }
+    return n;
+  }
+
+  bool get canHostRestart =>
+      amHost && vacantPlayerId != null && remainingSeatCount >= 3;
 
   /// Reset attempt counter and reconnect after auto-retry exhaustion.
   Future<void> manualReconnect() async {
@@ -231,13 +255,15 @@ class GameController extends ChangeNotifier {
     pendingActionId = null;
     connection = GameConnectionState.disconnected;
     _notify();
-    if (_reconnectAttempts < _maxReconnectAttempts &&
-        !(view?.isFinished ?? false)) {
+    if (_suppressReconnect || gameAborted || (view?.isFinished ?? false)) {
+      return;
+    }
+    if (_reconnectAttempts < _maxReconnectAttempts) {
       _reconnectAttempts += 1;
       final delay =
           Duration(milliseconds: 500 * pow(2, _reconnectAttempts).toInt());
       Timer(delay, () {
-        if (!_disposed) connect();
+        if (!_disposed && !_suppressReconnect && !gameAborted) connect();
       });
     }
   }
@@ -315,7 +341,7 @@ class GameController extends ChangeNotifier {
         vacantRoomCode = roomCode;
         this.roomCode = roomCode;
         pauseReason =
-            '${nicknameOf(playerId)} left the table. Share code $roomCode so a friend can join their seat.';
+            '${nicknameOf(playerId)} left the table. Share code $roomCode so they (or a friend) can rejoin.';
         _notify();
       case SeatClaimed(:final playerId, :final nickname):
         if (vacantPlayerId == playerId) {
@@ -328,8 +354,15 @@ class GameController extends ChangeNotifier {
       case GameEnded(:final reason, :final aborted):
         endedReason = reason;
         gameAborted = aborted ?? true;
+        _suppressReconnect = true;
         pauseReason = _humanizePauseReason(reason);
         _clearPendingCommand();
+        _closeSocket();
+        _notify();
+      case GameRestarted(:final gameId):
+        unawaited(_switchToRestartedGame(gameId));
+      case HostChanged(:final newHost):
+        amHost = newHost == myPlayerId;
         _notify();
       case TokenRotated(:final token):
         api.token = token;
@@ -356,8 +389,7 @@ class GameController extends ChangeNotifier {
       case BotTookOver() ||
             PlayerResumedControl() ||
             PlayerConnected() ||
-            PlayerDisconnected() ||
-            HostChanged():
+            PlayerDisconnected():
         _notify();
       case UnknownMessage():
         break;
@@ -369,16 +401,90 @@ class GameController extends ChangeNotifier {
   }
 
   Future<void> endGameAsHost() async {
+    if (!amHost) {
+      lastRejection = 'Only the host can end the game';
+      lastRejectionCode = null;
+      _notify();
+      return;
+    }
     final code = roomCode ?? vacantRoomCode;
     if (code != null) {
       try {
         await api.endGame(code);
+        return;
+      } on ApiException catch (e) {
+        lastRejection = e.message;
+        lastRejectionCode = null;
+        _notify();
+        return;
       } catch (_) {
-        _sendCommand({'type': 'end_game'});
+        // Fall through to WS command.
       }
-      return;
     }
     _sendCommand({'type': 'end_game'});
+  }
+
+  Future<void> restartGameAsHost() async {
+    if (!canHostRestart) {
+      lastRejection = remainingSeatCount < 3
+          ? 'Need at least 3 players to restart'
+          : 'Only the host can restart the game';
+      lastRejectionCode = null;
+      _notify();
+      return;
+    }
+    final code = roomCode ?? vacantRoomCode;
+    if (code == null) {
+      lastRejection = 'Room code unavailable';
+      _notify();
+      return;
+    }
+    restartInFlight = true;
+    _notify();
+    try {
+      final result = await api.restartGame(code);
+      await _switchToRestartedGame(result.gameId);
+    } on ApiException catch (e) {
+      lastRejection = e.message;
+      lastRejectionCode = null;
+      restartInFlight = false;
+      _notify();
+    } catch (_) {
+      lastRejection = 'Could not restart the game';
+      restartInFlight = false;
+      _notify();
+    }
+  }
+
+  Future<void> _switchToRestartedGame(String newGameId) async {
+    if (_disposed) return;
+    if (newGameId == gameId && connection == GameConnectionState.connected) {
+      return;
+    }
+    _suppressReconnect = true;
+    _closeSocket();
+    gameId = newGameId;
+    gameAborted = false;
+    endedReason = null;
+    pauseReason = null;
+    pauseUntil = null;
+    vacantPlayerId = null;
+    vacantRoomCode = null;
+    view = null;
+    pendingActionId = null;
+    _pendingAction = null;
+    restartInFlight = false;
+    _suppressReconnect = false;
+    _reconnectAttempts = 0;
+    _notify();
+    await connect();
+  }
+
+  void _closeSocket() {
+    _subscription?.cancel();
+    _subscription = null;
+    _socket?.close();
+    _socket = null;
   }
 
   void _applySnapshot(PlayerGameView next) {
@@ -629,11 +735,11 @@ class GameController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _suppressReconnect = true;
     _persistRetryTimer?.cancel();
     _holdTimer?.cancel();
     _bannerTimer?.cancel();
-    _subscription?.cancel();
-    _socket?.close();
+    _closeSocket();
     super.dispose();
   }
 }

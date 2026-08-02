@@ -74,6 +74,36 @@ pub enum ActorMessage {
         reason: String,
         reply: oneshot::Sender<Result<(), String>>,
     },
+    /// Snapshot for restart gating (vacant seats / host).
+    QueryPresence {
+        reply: oneshot::Sender<PresenceSnapshot>,
+    },
+    /// Abort without `GameEnded` / room cleanup — routes finish rematch.
+    AbortForRestart {
+        requesting_player_id: PlayerId,
+        reply: oneshot::Sender<Result<AbortedCleanup, String>>,
+    },
+    /// Tell remaining WS clients the new `game_id` before actor teardown.
+    NotifyRestarted {
+        new_game_id: GameId,
+    },
+}
+
+/// Presence view used by restart / cleanup.
+#[derive(Debug, Clone)]
+pub struct PresenceSnapshot {
+    pub host_player_id: PlayerId,
+    pub vacant_player_ids: Vec<PlayerId>,
+    pub seated_count: usize,
+    pub ended: bool,
+}
+
+/// Data handed to the abort cleanup hook (or restart route).
+#[derive(Debug, Clone)]
+pub struct AbortedCleanup {
+    pub game_id: GameId,
+    pub vacant_player_ids: Vec<PlayerId>,
+    pub host_player_id: PlayerId,
 }
 
 pub struct SpawnActor {
@@ -85,6 +115,10 @@ pub struct SpawnActor {
     pub host_player_id: PlayerId,
     pub metrics: Arc<Metrics>,
     pub room_code: String,
+    /// Sync `Room.host_session` when in-game host migrates.
+    pub on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
+    /// Remove actor + return room to Lobby after terminal abort.
+    pub on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
 }
 
 pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
@@ -113,6 +147,8 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         ended: false,
         metrics: config.metrics,
         last_emote_at: HashMap::new(),
+        on_host_changed: config.on_host_changed,
+        on_aborted: config.on_aborted,
     };
     tokio::spawn(actor.run());
     tx
@@ -146,6 +182,8 @@ struct GameActor {
     ended: bool,
     /// Rate-limit cosmetic emotes (player → last emit millis).
     last_emote_at: HashMap<PlayerId, u64>,
+    on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
+    on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
 }
 
 impl GameActor {
@@ -201,9 +239,27 @@ impl GameActor {
                     reply,
                 } => {
                     let result = self
-                        .handle_end_game(requesting_player_id, reason)
+                        .handle_end_game(requesting_player_id, reason, true)
+                        .await
+                        .map(|_| ());
+                    let _ = reply.send(result);
+                }
+                ActorMessage::QueryPresence { reply } => {
+                    let _ = reply.send(self.presence_snapshot());
+                }
+                ActorMessage::AbortForRestart {
+                    requesting_player_id,
+                    reply,
+                } => {
+                    let result = self
+                        .handle_end_game(Some(requesting_player_id), "host restarted".into(), false)
                         .await;
                     let _ = reply.send(result);
+                }
+                ActorMessage::NotifyRestarted { new_game_id } => {
+                    self.broadcast(ServerMessage::GameRestarted {
+                        game_id: new_game_id,
+                    });
                 }
             }
             self.flush_dirty_snapshots();
@@ -230,30 +286,29 @@ impl GameActor {
             .set_connection_status(player_id, ConnectionStatus::Connected);
 
         let was_paused = self.paused;
-        // Returning from grace restores human control; vacant seats need claim path.
+        // Same-session reclaim: WS already authenticated to this player_id.
+        // New humans still use claim REST (different session → different mapping).
         self.grace_ids.remove(&player_id);
         if previous_status == Some(ConnectionStatus::Vacant) {
-            // WS connect alone cannot steal a vacant seat — use claim REST first.
-            let _ = self
-                .engine
-                .set_connection_status(player_id, ConnectionStatus::Vacant);
-            self.send_to(
+            self.vacancy_ids.remove(&player_id);
+            self.metrics
+                .seat_claims
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let nickname = self.nickname_of(player_id);
+            self.broadcast(ServerMessage::SeatClaimed {
                 player_id,
-                ServerMessage::CommandRejected {
-                    action_id: None,
-                    reason: RejectReason::UnsupportedCommand,
-                    retryable: false,
-                    message: "seat is vacant — claim via room code first".into(),
-                },
-            );
-            self.clients.remove(&player_id);
-            return;
+                nickname,
+            });
         }
         self.vacancy_ids.remove(&player_id);
         self.recompute_pause();
         if matches!(
             previous_status,
-            Some(ConnectionStatus::Disconnected | ConnectionStatus::BotControlled)
+            Some(
+                ConnectionStatus::Disconnected
+                    | ConnectionStatus::BotControlled
+                    | ConnectionStatus::Vacant
+            )
         ) {
             self.metrics
                 .reconnects
@@ -347,7 +402,7 @@ impl GameActor {
             return;
         }
         let _ = self
-            .handle_end_game(None, "vacancy timeout — no replacement joined".into())
+            .handle_end_game(None, "vacancy timeout — no replacement joined".into(), true)
             .await;
     }
 
@@ -435,11 +490,41 @@ impl GameActor {
         Ok(player_id)
     }
 
+    fn presence_snapshot(&self) -> PresenceSnapshot {
+        let vacant_player_ids: Vec<PlayerId> = self
+            .engine
+            .state()
+            .players
+            .iter()
+            .filter(|p| p.connection_status == ConnectionStatus::Vacant)
+            .map(|p| p.id)
+            .collect();
+        PresenceSnapshot {
+            host_player_id: self.host_player_id,
+            vacant_player_ids,
+            seated_count: self.engine.state().players.len(),
+            ended: self.ended || self.engine.is_finished(),
+        }
+    }
+
+    fn vacant_player_ids(&self) -> Vec<PlayerId> {
+        self.engine
+            .state()
+            .players
+            .iter()
+            .filter(|p| p.connection_status == ConnectionStatus::Vacant)
+            .map(|p| p.id)
+            .collect()
+    }
+
+    /// `emit_ended`: host/TTL terminal path (GameEnded + room cleanup hook).
+    /// Restart path sets this false and returns cleanup data for the route.
     async fn handle_end_game(
         &mut self,
         requesting_player_id: Option<PlayerId>,
         reason: String,
-    ) -> Result<(), String> {
+        emit_ended: bool,
+    ) -> Result<AbortedCleanup, String> {
         if self.ended || self.engine.is_finished() {
             return Err("game is already over".into());
         }
@@ -455,6 +540,12 @@ impl GameActor {
                 return Err("host must be connected to end the game".into());
             }
         }
+        let vacant_player_ids = self.vacant_player_ids();
+        let cleanup = AbortedCleanup {
+            game_id: self.game_id,
+            vacant_player_ids,
+            host_player_id: self.host_player_id,
+        };
         self.ended = true;
         self.paused = true;
         self.grace_ids.clear();
@@ -464,18 +555,27 @@ impl GameActor {
         if let Some(store) = &self.store {
             if let Err(error) = store.abort_game(self.game_id).await {
                 tracing::error!(%error, game = %self.game_id, "abort_game failed");
+            } else if let Err(error) = store.compact_finished_game(self.game_id).await {
+                tracing::warn!(%error, game = %self.game_id, "compact_finished_game failed");
             } else {
-                let _ = store.compact_finished_game(self.game_id).await;
+                self.metrics
+                    .games_compacted
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
-        self.metrics
-            .games_ended_vacancy
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.broadcast(ServerMessage::GameEnded {
-            reason,
-            aborted: Some(true),
-        });
-        Ok(())
+        if emit_ended {
+            self.metrics
+                .games_ended_vacancy
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.broadcast(ServerMessage::GameEnded {
+                reason,
+                aborted: Some(true),
+            });
+            if let Some(hook) = &self.on_aborted {
+                hook(cleanup.clone());
+            }
+        }
+        Ok(cleanup)
     }
 
     fn resume_timers(&mut self) {
@@ -523,6 +623,9 @@ impl GameActor {
         if let Some(new_host) = next {
             self.host_player_id = new_host;
             self.broadcast(ServerMessage::HostChanged { new_host });
+            if let Some(hook) = &self.on_host_changed {
+                hook(new_host);
+            }
         }
     }
 
@@ -561,8 +664,11 @@ impl GameActor {
         }
 
         if matches!(envelope.action, ClientCommand::EndGame) {
-            match self.handle_end_game(Some(player_id), "host ended the game".into()).await {
-                Ok(()) => {
+            match self
+                .handle_end_game(Some(player_id), "host ended the game".into(), true)
+                .await
+            {
+                Ok(_) => {
                     self.send_to(
                         player_id,
                         ServerMessage::CommandAccepted {

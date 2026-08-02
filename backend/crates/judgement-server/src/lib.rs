@@ -1,6 +1,7 @@
 //! Axum room service and per-game actors (PLAN.md Phase 3 + Phase 5 + Phase 9).
 
 pub mod actor;
+pub mod cleanup;
 pub mod cors;
 pub mod emotes;
 pub mod error;
@@ -40,6 +41,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/rooms/{room_ref}/join", post(routes::join_room))
         .route("/api/v1/rooms/{room_ref}/claim", post(routes::claim_seat))
         .route("/api/v1/rooms/{room_ref}/end", post(routes::end_game))
+        .route("/api/v1/rooms/{room_ref}/restart", post(routes::restart_game))
         .route("/api/v1/rooms/{room_ref}/leave", post(routes::leave_room))
         .route(
             "/api/v1/rooms/{room_ref}/remove-player",
