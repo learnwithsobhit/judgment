@@ -161,9 +161,10 @@ Migrations run automatically on API boot (`JUDGEMENT_MIGRATIONS_DIR`).
 5. Finish game → victory celebration → results tally + round matrix.
 6. Kill network briefly → confirm Reconnect / actions work after reconnect.
 7. Schedule event → open `/e/{slug}` in a fresh tab (SPA rewrite).
-8. Manage → Copy WhatsApp text → Firebase origin + sensible local time.
-9. `curl -fsS https://judgment-api.fly.dev/readyz` → 200.
-10. `fly logs -a judgment-api` — no CORS failures; **no** raw `DATABASE_URL` in logs.
+8. Lobby → Copy join link → open `/r/{CODE}` in a fresh tab → nickname → join.
+9. Manage → Copy WhatsApp text → Firebase origin + sensible local time.
+10. `curl -fsS https://judgment-api.fly.dev/readyz` → 200.
+11. `fly logs -a judgment-api` — no CORS failures; **no** raw `DATABASE_URL` in logs.
 
 ---
 

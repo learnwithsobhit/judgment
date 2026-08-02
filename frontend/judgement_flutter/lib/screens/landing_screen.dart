@@ -9,7 +9,17 @@ import 'schedule_event_screen.dart';
 import 'table_screen.dart';
 
 class LandingScreen extends StatefulWidget {
-  const LandingScreen({super.key});
+  /// Prefill join mode from a `/r/{CODE}` deep link.
+  final String? initialJoinCode;
+
+  /// True when `/r/...` was present but the code could not be parsed.
+  final bool invalidJoinLink;
+
+  const LandingScreen({
+    super.key,
+    this.initialJoinCode,
+    this.invalidJoinLink = false,
+  });
 
   @override
   State<LandingScreen> createState() => _LandingScreenState();
@@ -18,8 +28,27 @@ class LandingScreen extends StatefulWidget {
 class _LandingScreenState extends State<LandingScreen> {
   final _nickname = TextEditingController();
   final _roomCode = TextEditingController();
-  bool _joining = false; // false = create, true = join
+  late bool _joining; // false = create, true = join
   bool _busy = false;
+  bool get _fromLink => widget.initialJoinCode != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final code = widget.initialJoinCode;
+    _joining = code != null;
+    if (code != null) {
+      _roomCode.text = code;
+    }
+    if (widget.invalidJoinLink) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That join link was invalid')),
+        );
+      });
+    }
+  }
 
   // Room options (create mode, ADR 0003).
   int _maxPlayers = 6;
@@ -421,18 +450,42 @@ class _LandingScreenState extends State<LandingScreen> {
                     padding: const EdgeInsets.all(20),
                     child: Column(
                       children: [
-                        SegmentedButton<bool>(
-                          segments: const [
-                            ButtonSegment(value: false, label: Text('Create room')),
-                            ButtonSegment(value: true, label: Text('Join room')),
-                          ],
-                          selected: {_joining},
-                          onSelectionChanged: (selection) =>
-                              setState(() => _joining = selection.first),
-                        ),
+                        if (_fromLink) ...[
+                          Text(
+                            'Joining room ${_roomCode.text}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 2,
+                              color: goldAccent,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Enter a nickname to sit at the table',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.7),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ] else ...[
+                          SegmentedButton<bool>(
+                            segments: const [
+                              ButtonSegment(
+                                  value: false, label: Text('Create room')),
+                              ButtonSegment(
+                                  value: true, label: Text('Join room')),
+                            ],
+                            selected: {_joining},
+                            onSelectionChanged: (selection) =>
+                                setState(() => _joining = selection.first),
+                          ),
+                        ],
                         const SizedBox(height: 20),
                         TextField(
                           controller: _nickname,
+                          autofocus: _fromLink,
                           maxLength: 24,
                           decoration: const InputDecoration(
                             labelText: 'Nickname',
@@ -441,7 +494,7 @@ class _LandingScreenState extends State<LandingScreen> {
                           ),
                           onSubmitted: (_) => _submit(),
                         ),
-                        if (_joining) ...[
+                        if (_joining && !_fromLink) ...[
                           const SizedBox(height: 12),
                           TextField(
                             controller: _roomCode,
@@ -453,7 +506,7 @@ class _LandingScreenState extends State<LandingScreen> {
                             ),
                             onSubmitted: (_) => _submit(),
                           ),
-                        ] else
+                        ] else if (!_joining)
                           _roomOptions(),
                         const SizedBox(height: 20),
                         SizedBox(
@@ -467,22 +520,24 @@ class _LandingScreenState extends State<LandingScreen> {
                                     height: 22,
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
-                                : Text(_joining ? 'Join room' : 'Create room'),
+                                : Text(_joining ? 'Join game' : 'Create room'),
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => const ScheduleEventScreen(),
-                    ));
-                  },
-                  child: const Text('Schedule a game for later'),
-                ),
+                if (!_fromLink) ...[
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => const ScheduleEventScreen(),
+                      ));
+                    },
+                    child: const Text('Schedule a game for later'),
+                  ),
+                ],
               ],
             ),
           ),

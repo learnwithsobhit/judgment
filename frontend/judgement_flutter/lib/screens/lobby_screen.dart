@@ -8,6 +8,7 @@ import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
 import '../util/avatar_pack.dart';
+import '../util/room_share.dart';
 import '../widgets/avatar_picker.dart';
 import 'table_screen.dart';
 
@@ -222,28 +223,59 @@ class _LobbyScreenState extends State<LobbyScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Card(
-                  child: ListTile(
-                    title: Text(
-                      _room.code,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 8,
-                        color: goldAccent,
-                      ),
-                    ),
-                    subtitle: const Text('Share this code with your friends',
-                        textAlign: TextAlign.center),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.copy),
-                      tooltip: 'Copy room code',
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: _room.code));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Room code copied')),
-                        );
-                      },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 16),
+                    child: Column(
+                      children: [
+                        Text(
+                          _room.code,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 8,
+                            color: goldAccent,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Share the link — friends only need a nickname',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: () {
+                                final link = roomJoinUrl(_room.code);
+                                Clipboard.setData(ClipboardData(text: link));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Join link copied')),
+                                );
+                              },
+                              icon: const Icon(Icons.link, size: 18),
+                              label: const Text('Copy join link'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                Clipboard.setData(
+                                    ClipboardData(text: _room.code));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Room code copied')),
+                                );
+                              },
+                              icon: const Icon(Icons.copy, size: 18),
+                              label: const Text('Copy code'),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),

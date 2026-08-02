@@ -341,7 +341,7 @@ class GameController extends ChangeNotifier {
         vacantRoomCode = roomCode;
         this.roomCode = roomCode;
         pauseReason =
-            '${nicknameOf(playerId)} left the table. Share code $roomCode so they (or a friend) can rejoin.';
+            '${nicknameOf(playerId)} left the table. Share the join link so they (or a friend) can rejoin.';
         _notify();
       case SeatClaimed(:final playerId, :final nickname):
         if (vacantPlayerId == playerId) {

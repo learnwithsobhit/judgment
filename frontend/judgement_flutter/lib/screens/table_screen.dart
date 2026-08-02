@@ -8,6 +8,7 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
+import '../util/room_share.dart';
 import '../widgets/assistant_panel.dart';
 import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
@@ -356,6 +357,29 @@ class _PauseBanner extends StatelessWidget {
                       children: [
                         OutlinedButton.icon(
                           onPressed: () async {
+                            final link = roomJoinUrl(code);
+                            await Clipboard.setData(ClipboardData(text: link));
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Join link copied'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.link_rounded, size: 16),
+                          label: const Text('Copy join link'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: accent,
+                            side: BorderSide(color: accent.withValues(alpha: 0.55)),
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
                             await Clipboard.setData(ClipboardData(text: code));
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -366,15 +390,11 @@ class _PauseBanner extends StatelessWidget {
                               );
                             }
                           },
-                          icon: const Icon(Icons.copy_rounded, size: 16),
-                          label: Text('Copy $code'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: accent,
-                            side: BorderSide(color: accent.withValues(alpha: 0.55)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white70,
                             visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
                           ),
+                          child: Text(code),
                         ),
                         if (controller.amHost && controller.canHostRestart)
                           FilledButton(

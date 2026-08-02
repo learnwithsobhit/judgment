@@ -4,12 +4,13 @@ import '../networking/api_client.dart';
 import '../screens/event_invite_screen.dart';
 import '../screens/event_manage_screen.dart';
 import '../screens/landing_screen.dart';
+import '../util/room_share.dart';
 
 const feltGreen = Color(0xFF1B5E20);
 const feltGreenDark = Color(0xFF0D3311);
 const goldAccent = Color(0xFFFFC857);
 
-/// Parse `/e/{slug}` and `/e/{slug}/manage?token=` from the browser URL.
+/// Parse `/e/{slug}`, `/e/{slug}/manage?token=`, and `/r/{CODE}` from the browser URL.
 Widget initialHomeFromUri(Uri uri) {
   final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (segments.length >= 2 && segments[0] == 'e') {
@@ -26,6 +27,13 @@ Widget initialHomeFromUri(Uri uri) {
       }
     }
     return EventInviteScreen(slug: slug);
+  }
+  if (segments.length >= 2 && segments[0] == 'r') {
+    final code = normalizeRoomCode(segments[1]);
+    if (code != null) {
+      return LandingScreen(initialJoinCode: code);
+    }
+    return const LandingScreen(invalidJoinLink: true);
   }
   return const LandingScreen();
 }

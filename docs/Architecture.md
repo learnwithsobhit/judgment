@@ -29,7 +29,7 @@ flowchart TB
 
 | Piece | Host | Notes |
 |-------|------|--------|
-| Flutter Web SPA | Firebase Hosting (`judgment-lws-260731`) | SPA rewrites for `/e/{slug}` deep links |
+| Flutter Web SPA | Firebase Hosting (`judgment-lws-260731`) | SPA rewrites for `/e/{slug}` and `/r/{CODE}` deep links |
 | API + WebSocket | Fly.io (`judgment-api`) | Browser talks to Fly for WSS; Firebase does **not** proxy WS |
 | Postgres | Fly Postgres / Neon / Supabase | Events + snapshots; migrations on boot |
 | AI / RAG | Same API process | Optional; never mutates game state |
@@ -167,7 +167,7 @@ Root: `frontend/judgement_flutter/lib/`
 
 | Layer | Path | Role |
 |-------|------|------|
-| Entry / theme / deep links | `main.dart`, `app/app.dart` | Material shell; `/e/{slug}` routing |
+| Entry / theme / deep links | `main.dart`, `app/app.dart` | Material shell; `/e/{slug}`, `/r/{CODE}` routing |
 | Screens | `screens/` | Landing → lobby → table → results; event flows |
 | State | `state/game_controller.dart` | Snapshot mirror + command lifecycle |
 | Networking | `networking/api_client.dart`, `game_socket.dart` | REST + WSS |
@@ -349,7 +349,7 @@ flowchart TD
   createEvt --> rsvp --> openLobby --> room2 --> sameStart
 ```
 
-Deep links: `/e/{slug}` invite, `/e/{slug}/manage?token=` manage (Firebase SPA rewrite). ADR: [`0005-scheduled-game-events.md`](adr/0005-scheduled-game-events.md).
+Deep links: `/e/{slug}` invite, `/e/{slug}/manage?token=` manage, `/r/{CODE}` room join (Firebase SPA rewrite). ADR: [`0005-scheduled-game-events.md`](adr/0005-scheduled-game-events.md).
 
 ### 5.4 Presence, pause, bot takeover
 
@@ -558,6 +558,7 @@ flowchart TD
 
   uri -->|/e/slug/manage| manage
   uri -->|/e/slug| invite
+  uri -->|/r/CODE| landing
   uri -->|else| landing
   landing --> lobby --> table
   table --> victory --> result
