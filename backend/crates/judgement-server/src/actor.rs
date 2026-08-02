@@ -163,7 +163,7 @@ impl GameActor {
                     self.handle_connect(player_id, outbound, rotated_token);
                 }
                 ActorMessage::Disconnect { player_id } => {
-                    self.handle_disconnect(player_id);
+                    self.handle_disconnect(player_id).await;
                 }
                 ActorMessage::Command { player_id, envelope } => {
                     self.handle_command(player_id, envelope).await;
@@ -282,7 +282,7 @@ impl GameActor {
         }
     }
 
-    fn handle_disconnect(&mut self, player_id: PlayerId) {
+    async fn handle_disconnect(&mut self, player_id: PlayerId) {
         if self.clients.remove(&player_id).is_none() {
             return;
         }
@@ -291,6 +291,17 @@ impl GameActor {
             .engine
             .set_connection_status(player_id, ConnectionStatus::Disconnected);
         self.broadcast(ServerMessage::PlayerDisconnected { player_id });
+
+        // Host migration if the host seat dropped (locked decision 5).
+        if player_id == self.host_player_id {
+            self.migrate_host();
+        }
+
+        // Zero grace ⇒ open seat for claim/replace immediately (no wait).
+        if self.reconnect_grace.is_zero() {
+            self.mark_seat_vacant(player_id).await;
+            return;
+        }
 
         // Start reconnect grace; pause the table while any seat is in grace.
         self.grace_seq += 1;
@@ -321,11 +332,6 @@ impl GameActor {
                 })
                 .await;
         });
-
-        // Host migration if the host seat dropped (locked decision 5).
-        if player_id == self.host_player_id {
-            self.migrate_host();
-        }
     }
 
     async fn handle_grace_expired(&mut self, player_id: PlayerId, grace_id: u64) {

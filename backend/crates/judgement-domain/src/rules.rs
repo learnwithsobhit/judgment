@@ -327,7 +327,8 @@ impl GameRules {
             bidding_rule: BiddingRule::default(),
             scoring_rule: ScoringRule::default(),
             turn_timeout_seconds: Some(30),
-            reconnect_grace_seconds: 60,
+            // 0 ⇒ seat becomes vacant immediately on WS drop (claim / replace).
+            reconnect_grace_seconds: 0,
             allow_bots: true,
         }
     }

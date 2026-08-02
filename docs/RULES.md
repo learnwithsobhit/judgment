@@ -133,8 +133,9 @@ rounds (desc) → total tricks missed `Σ|bid − won|` (asc) → shared rank
 
 ## Disconnects (policy summary — implemented in Phase 6)
 
-- 0–60 s: game pauses, seat and hand preserved, secure reconnect allowed.
-- After 60 s: rule-based bot takes temporary control.
+- On disconnect: seat becomes **vacant immediately**; table pauses.
+- Another (or the same) player claims via room code; host may end if no claim.
+  (Legacy non-zero grace still possible via `reconnect_grace_seconds`.)
 - Player returns: control restored at a safe command boundary.
 - Permanent leave: the bot plays out the remainder of the game.
 - Host leave: longest-connected occupied seat becomes host.
