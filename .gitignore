@@ -41,3 +41,11 @@ Thumbs.db
 .cursor/
 *.log
 flutter_*.log
+
+# Load-test local artifacts (k6 summaries, HTML reports, metric scrapes)
+deployment/load/.artifacts/
+deployment/load/k6-summary*.json
+deployment/load/k6-report*.html
+deployment/load/metrics-*.txt
+/k6-summary*.json
+/k6-report*.html

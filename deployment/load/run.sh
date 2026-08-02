@@ -58,9 +58,14 @@ if ! curl -fsS --max-time 10 "${API_BASE}/readyz" | grep -qi ready; then
   exit 1
 fi
 
+ARTIFACTS_DIR="$ROOT/.artifacts"
+mkdir -p "$ARTIFACTS_DIR"
+SUMMARY_OUT="${K6_SUMMARY:-$ARTIFACTS_DIR/k6-summary.json}"
+mkdir -p "$(dirname "$SUMMARY_OUT")"
+
 K6_ARGS=(
   run
-  --summary-export="${K6_SUMMARY:-$ROOT/k6-summary.json}"
+  --summary-export="${SUMMARY_OUT}"
   -e "API_BASE=${API_BASE}"
   -e "THRESHOLDS_PROFILE=${THRESHOLDS_PROFILE}"
   -e "OMIT_SEED=${OMIT_SEED:-0}"
@@ -71,5 +76,6 @@ if [[ -n "${SEATS:-}" ]]; then K6_ARGS+=(-e "SEATS=${SEATS}"); fi
 K6_ARGS+=("$SCRIPT")
 
 k6 "${K6_ARGS[@]}"
+echo "Wrote k6 summary: ${SUMMARY_OUT}"
 
 echo "LOAD_OK scenario=${SCENARIO}"
