@@ -1,0 +1,53 @@
+name: Load prod smoke (manual)
+
+# Tiny 1×6 smoke against judgment-api.fly.dev.
+# Never runs on push/PR/schedule — workflow_dispatch only.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: load-prod-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke-prod:
+    name: smoke_prod → judgment-api.fly.dev
+    runs-on: ubuntu-latest
+    environment: prod-load
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+      - name: Preflight readyz
+        run: curl -fsS --max-time 15 https://judgment-api.fly.dev/readyz | grep -qi ready
+      - name: Metrics before
+        run: ./deployment/load/scrape_metrics.sh before /tmp/metrics-before.txt
+        env:
+          API_BASE: https://judgment-api.fly.dev
+      - name: k6 smoke_prod
+        run: ./deployment/load/run.sh smoke_prod
+        env:
+          API_BASE: https://judgment-api.fly.dev
+          ALLOW_PROD_LOAD: "1"
+          THRESHOLDS_PROFILE: prod_remote
+          OMIT_SEED: "1"
+          K6_SUMMARY: ${{ github.workspace }}/k6-summary-prod.json
+      - name: Metrics after / diff
+        if: always()
+        run: |
+          ./deployment/load/scrape_metrics.sh after /tmp/metrics-after.txt || true
+          if [[ -f /tmp/metrics-before.txt && -f /tmp/metrics-after.txt ]]; then
+            ./deployment/load/scrape_metrics.sh diff /tmp/metrics-before.txt /tmp/metrics-after.txt || true
+          fi
+        env:
+          API_BASE: https://judgment-api.fly.dev
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-prod-smoke
+          path: |
+            k6-summary-prod.json
+            /tmp/metrics-before.txt
+            /tmp/metrics-after.txt
+          if-no-files-found: ignore

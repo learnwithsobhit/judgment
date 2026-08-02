@@ -1,51 +1,30 @@
-name: CI
+name: Load nightly (ephemeral)
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  schedule:
+    # 02:15 UTC daily
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "k6 scenario (ephemeral only)"
+        required: true
+        default: comfort
+        type: choice
+        options:
+          - comfort
+          - target
+          - stress
+          - admission
+          - smoke_ws
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: load-nightly
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend (Rust)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend -> target
-      - name: Test workspace
-        run: cargo test --workspace
-
-  frontend:
-    name: Frontend (Flutter)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend/judgement_flutter
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Pub get
-        run: flutter pub get
-      - name: Analyze
-        run: flutter analyze
-      - name: Test
-        run: flutter test
-
-  load-smoke-ws:
-    name: Load (ephemeral k6 smoke_ws)
+  load-ephemeral:
+    name: Load ephemeral (${{ github.event.inputs.scenario || 'comfort' }})
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -95,28 +74,32 @@ jobs:
           echo "API failed to become ready" >&2
           cat /tmp/judgement-api.log >&2 || true
           exit 1
-      - name: HTTP smoke
-        run: ./deployment/load/smoke.sh
+      - name: Metrics before
+        run: ./deployment/load/scrape_metrics.sh before /tmp/metrics-before.txt
         env:
           API_BASE: http://127.0.0.1:8080
-      - name: k6 smoke_ws
-        run: ./deployment/load/run.sh smoke_ws
+      - name: k6 scenario
+        run: ./deployment/load/run.sh "${{ github.event.inputs.scenario || 'comfort' }}"
         env:
           API_BASE: http://127.0.0.1:8080
-          THRESHOLDS_PROFILE: ci
-          K6_SUMMARY: ${{ github.workspace }}/k6-summary-smoke.json
-      - name: Scrape metrics
+          THRESHOLDS_PROFILE: ${{ github.event.inputs.scenario == 'target' && 'strict' || 'ci' }}
+          K6_SUMMARY: ${{ github.workspace }}/k6-summary.json
+      - name: Metrics after / diff
         if: always()
-        run: ./deployment/load/scrape_metrics.sh snapshot
+        run: |
+          ./deployment/load/scrape_metrics.sh after /tmp/metrics-after.txt
+          ./deployment/load/scrape_metrics.sh diff /tmp/metrics-before.txt /tmp/metrics-after.txt
         env:
           API_BASE: http://127.0.0.1:8080
-      - name: Upload k6 summary
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: k6-summary-smoke-ws
+          name: k6-nightly-${{ github.event.inputs.scenario || 'comfort' }}
           path: |
-            k6-summary-smoke.json
+            k6-summary.json
+            /tmp/metrics-before.txt
+            /tmp/metrics-after.txt
             /tmp/judgement-api.log
           if-no-files-found: ignore
       - name: Stop API
