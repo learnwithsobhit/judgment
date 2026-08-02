@@ -34,11 +34,13 @@ fly apps create judgment-api --org personal   # skip if app exists
 
 # Managed Postgres (pick a region close to the app; sin = Singapore).
 # Minimum memory: 1GB — 256MB thrashing causes mid-game persist hangs.
-# Production currently runs performance CPU @ 4GB RAM (scale as needed).
+# Production currently runs performance CPU @ 2GB RAM (scale as needed).
 fly postgres create --name judgment-db --region sin --vm-size shared-cpu-1x --volume-size 1
 fly postgres attach judgment-db -a judgment-api   # sets DATABASE_URL secret
-# If the cluster was created at 256MB, scale immediately:
-#   fly machine update <pg-machine-id> -a judgment-db --vm-memory 1024
+# If the cluster was created at 256MB, scale immediately (floor ~1–2GB):
+#   fly machine update <pg-machine-id> -a judgment-db \
+#     --vm-cpus 1 --vm-cpu-kind performance --vm-memory 2048 --yes
+# Note: performance-2x requires ≥4GB; use performance-1x for 2GB.
 # Enable backups — required for production. Must run in an interactive terminal
 # to accept Tigris ToS (non-interactive fails without a TTY):
 #   fly pg backup enable -a judgment-db

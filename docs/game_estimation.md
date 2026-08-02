@@ -33,7 +33,7 @@ Related: [`LOAD.md`](LOAD.md), [`Architecture.md`](Architecture.md),
 |----------|---------------|--------|
 | Region | Fly `sin` (API + Postgres colocated) | `fly.toml`, deploy runbook |
 | API VM | 1× shared CPU, **1GB** RAM | `fly.toml` / `fly scale` |
-| Postgres | ~**4GB** performance RAM, **1GB** volume | ops |
+| Postgres | ~**2GB** performance RAM, **1GB** volume | ops |
 | sqlx pool | **max_connections = 10** | `judgement-persistence` `PostgresStore::connect` |
 | In-game start cap | **`MAX_ACTIVE_GAMES = 100`** | `routes.rs` |
 | Seats per table | **3–8** | `judgement-domain` `MIN_PLAYERS` / `MAX_PLAYERS` |
