@@ -65,7 +65,8 @@ jobs:
           API_BASE: ${{ vars.API_BASE }}
         run: |
           flutter pub get
-          flutter build web --release --pwa-strategy=none --dart-define=API_BASE="$API_BASE"
+          chmod +x tool/build_web_release.sh tool/stamp_web_build.sh
+          API_BASE="$API_BASE" ./tool/build_web_release.sh
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
       - name: Deploy Hosting

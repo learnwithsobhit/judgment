@@ -202,7 +202,9 @@ Full click-through: [`docs/runbooks/deploy.md`](docs/runbooks/deploy.md).
 3. Build web against the Fly URL and deploy Hosting:
    ```bash
    cd frontend/judgement_flutter
-   flutter build web --release --dart-define=API_BASE=https://judgment-api.fly.dev
+   cd frontend/judgement_flutter
+   chmod +x tool/build_web_release.sh tool/stamp_web_build.sh
+   API_BASE=https://judgment-api.fly.dev ./tool/build_web_release.sh
    firebase deploy --only hosting --project judgment-lws-260731
    ```
 4. Set Fly secrets `ALLOWED_ORIGINS` + `PUBLIC_WEB_ORIGIN` to the Firebase URL(s).

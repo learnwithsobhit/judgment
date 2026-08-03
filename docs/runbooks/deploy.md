@@ -79,9 +79,23 @@ Public API base (no trailing slash): `https://judgment-api.fly.dev`
 npm install -g firebase-tools
 firebase login
 cd frontend/judgement_flutter
-flutter build web --release --pwa-strategy=none --dart-define=API_BASE=https://judgment-api.fly.dev
+chmod +x tool/build_web_release.sh tool/stamp_web_build.sh
+API_BASE=https://judgment-api.fly.dev ./tool/build_web_release.sh
 firebase deploy --only hosting --project judgment-lws-260731
 ```
+
+`build_web_release.sh` stamps a unique `APP_BUILD_ID` into the JS (`--dart-define`) and into `version.json` / `flutter_bootstrap.js?v=…` so browsers pick up new deploys without clearing site data. Create/Join shows the running version and offers **Switch to latest version** when `version.json` differs.
+
+Verify cache headers after deploy:
+
+```bash
+curl -sI https://judgment-lws-260731.web.app/ | grep -i cache
+curl -sI https://judgment-lws-260731.web.app/r/TEST | grep -i cache
+curl -sI https://judgment-lws-260731.web.app/main.dart.js | grep -i cache
+curl -fsS https://judgment-lws-260731.web.app/version.json
+```
+
+Expect `no-cache` / `no-store` on HTML and entry JS. Deep links (`/r/**`, `/e/**`) must not be long-cached.
 
 Hosting URL: `https://judgment-lws-260731.web.app`
 

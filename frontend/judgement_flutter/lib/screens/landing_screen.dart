@@ -5,6 +5,7 @@ import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
 import '../util/table_media_session.dart';
+import '../widgets/app_version_bar.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
 import 'table_screen.dart';
@@ -562,16 +563,7 @@ class _LandingScreenState extends State<LandingScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          'Enables table sound and mic before you enter.',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.65),
-                              ),
-                        ),
+                        const AppVersionBar(),
                       ],
                     ),
                   ),

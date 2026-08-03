@@ -9,6 +9,7 @@ import '../networking/api_client.dart';
 import '../state/game_controller.dart';
 import '../util/avatar_pack.dart';
 import '../util/room_share.dart';
+import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
 import 'table_screen.dart';
 
@@ -370,6 +371,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                     ),
                   ),
+                const SizedBox(height: 20),
+                const AppVersionBar(),
               ],
             ),
           ),

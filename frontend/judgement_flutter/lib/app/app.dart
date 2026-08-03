@@ -4,6 +4,7 @@ import '../networking/api_client.dart';
 import '../screens/event_invite_screen.dart';
 import '../screens/event_manage_screen.dart';
 import '../screens/landing_screen.dart';
+import '../util/app_update.dart';
 import '../util/room_share.dart';
 
 const feltGreen = Color(0xFF1B5E20);
@@ -59,6 +60,9 @@ class JudgementApp extends StatelessWidget {
         snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
         cardTheme: const CardThemeData(surfaceTintColor: Colors.transparent),
       ),
+      builder: (context, child) {
+        return AppUpdateLifecycle(child: child ?? const SizedBox.shrink());
+      },
       home: home ?? initialHomeFromUri(Uri.base),
     );
   }
