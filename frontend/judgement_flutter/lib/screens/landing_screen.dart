@@ -4,6 +4,7 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
+import '../util/table_media_session.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
 import 'table_screen.dart';
@@ -111,6 +112,9 @@ class _LandingScreenState extends State<LandingScreen> {
     setState(() => _busy = true);
     final api = ApiClient();
     try {
+      // Sound + mic under this tap, fully settled before network (fixes iOS hang).
+      await TableMediaSession.prepareBeforeNetwork();
+
       final session = await api.createGuestSession(nickname);
       final ({RoomView room, String playerId}) result;
       String? capacityHint;
@@ -556,6 +560,17 @@ class _LandingScreenState extends State<LandingScreen> {
                                   )
                                 : Text(_joining ? 'Join game' : 'Create room'),
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Enables table sound and mic before you enter.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.65),
+                              ),
                         ),
                       ],
                     ),

@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
+import '../util/table_media_session.dart';
 import 'lobby_screen.dart';
 
 /// Public RSVP page for `/e/{slug}` (ADR 0005).
@@ -96,6 +97,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
     final nickname = _name.text.trim().isEmpty ? 'Player' : _name.text.trim();
     setState(() => _busy = true);
     try {
+      await TableMediaSession.prepareBeforeNetwork();
       final session = await _api.createGuestSession(nickname);
       final joined = await _api.joinRoom(code);
       if (!mounted) return;

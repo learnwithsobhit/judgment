@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import 'soundboard.dart';
 import 'table_audio_limits.dart';
+import 'table_media_session.dart';
 import 'web_audio_playback.dart';
 
 export 'table_audio_limits.dart';
@@ -176,5 +177,13 @@ class TableAudioPlayer {
     _queue.clear();
     nowPlaying = null;
     await _player.dispose();
+  }
+
+  /// Carry unlock from landing Create/Join into the table.
+  void applySessionUnlock() {
+    if (TableMediaSession.soundUnlocked) {
+      unlocked = true;
+      awaitingUnlock = false;
+    }
   }
 }

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../util/event_share.dart';
+import '../util/table_media_session.dart';
 import 'lobby_screen.dart';
 
 /// Host manage page for a scheduled event (ADR 0005).
@@ -77,6 +78,7 @@ class _EventManageScreenState extends State<EventManageScreen> {
   Future<void> _openLobby() async {
     setState(() => _busy = true);
     try {
+      await TableMediaSession.prepareBeforeNetwork();
       if (widget.api.token == null) {
         await widget.api.createGuestSession(widget.nickname);
       }

@@ -13,22 +13,48 @@ const _silentWavDataUrl =
 
 web.HTMLAudioElement? _sharedAudio;
 
-/// Must be awaited directly from a user gesture (button onPressed).
-Future<void> unlockWebAudio() async {
-  final audio = _sharedAudio ??= web.HTMLAudioElement()
+web.HTMLAudioElement _audioElement() {
+  final existing = _sharedAudio;
+  if (existing != null) return existing;
+  final audio = web.HTMLAudioElement()
     ..preload = 'auto'
-    ..volume = 0.01;
+    ..controls = false
+    ..volume = 1;
+  audio.setAttribute('playsinline', 'true');
+  audio.setAttribute('webkit-playsinline', 'true');
+  return _sharedAudio = audio;
+}
+
+/// Unlock autoplay from a user gesture.
+///
+/// Uses a **muted** play (resolves reliably on iOS), then pauses and settles so
+/// a pending `play()` promise cannot stall later network calls — that hang is
+/// what minimize/maximize was clearing on mobile Safari.
+Future<void> unlockWebAudio() async {
+  final audio = _audioElement();
+  audio.muted = true;
+  audio.volume = 0;
   audio.src = _silentWavDataUrl;
-  // This play() call establishes media engagement for later unmuted clips.
-  await audio.play().toDart;
-  audio.pause();
-  audio.volume = 1;
   try {
-    final ctx = web.AudioContext();
-    if (ctx.state == 'suspended') {
-      await ctx.resume().toDart;
-    }
+    await audio.play().toDart.timeout(const Duration(milliseconds: 500));
   } catch (_) {}
+  await settleWebAudioUnlock();
+}
+
+/// Pause/unmute after unlock so WebKit releases any stuck play() promise
+/// before Create/Join hits the network.
+Future<void> settleWebAudioUnlock() async {
+  final audio = _sharedAudio;
+  if (audio == null) return;
+  try {
+    audio.pause();
+  } catch (_) {}
+  try {
+    audio.muted = false;
+    audio.volume = 1;
+  } catch (_) {}
+  // Let rejected/fulfilled play() microtasks flush before fetch starts.
+  await Future<void>.delayed(Duration.zero);
 }
 
 Future<void> playWebAudioBytes({
@@ -43,9 +69,7 @@ Future<void> playWebAudioBytes({
     web.BlobPropertyBag(type: blobMime),
   );
   final url = web.URL.createObjectURL(blob);
-  final audio = _sharedAudio ??= web.HTMLAudioElement()
-    ..preload = 'auto'
-    ..volume = 1;
+  final audio = _audioElement()..volume = 1;
 
   final done = Completer<void>();
   void finish([Object? error]) {
@@ -85,9 +109,7 @@ Future<void> playWebAsset(String assetRelativePath, int durationMs) async {
   final src = assetRelativePath.startsWith('assets/')
       ? assetRelativePath
       : 'assets/$assetRelativePath';
-  final audio = _sharedAudio ??= web.HTMLAudioElement()
-    ..preload = 'auto'
-    ..volume = 1;
+  final audio = _audioElement()..volume = 1;
 
   final done = Completer<void>();
   final endedSub = audio.onEnded.listen((_) {

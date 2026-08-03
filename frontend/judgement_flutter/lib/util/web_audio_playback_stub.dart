@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 Future<void> unlockWebAudio() async {}
 
+Future<void> settleWebAudioUnlock() async {}
+
 Future<void> playWebAudioBytes({
   required Uint8List bytes,
   required String mime,

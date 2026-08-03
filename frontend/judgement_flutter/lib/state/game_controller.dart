@@ -146,6 +146,7 @@ class GameController extends ChangeNotifier {
     audio.onQueueAccepted = () {
       audioQueueFullHint = null;
     };
+    audio.applySessionUnlock();
   }
 
   bool get isPaused =>
