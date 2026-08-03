@@ -24,7 +24,7 @@
 | `/readyz` | Not 200 for >1m |
 | `judgement_capacity_full_rejected_total` | Climbing while actors ≈ 35 or WS ≈ 200 — expected under load; if sustained, scale API **1GB→2GB** (~+$5) before raising hard gate |
 | `judgement_games_admission_rejected_total` | Climbing while actors ≈ 100 — emergency backstop; scale API/DB only after measuring |
-| API OOM / restarts | Raise `judgment-api` memory (config target **1GB**; next step **2GB**) |
+| API OOM / restarts | Raise `judgment-api` memory (config target **4GB**; see `fly.toml`) |
 
 ## Common incidents
 

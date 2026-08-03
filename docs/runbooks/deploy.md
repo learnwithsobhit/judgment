@@ -48,7 +48,7 @@ fly postgres attach judgment-db -a judgment-api   # sets DATABASE_URL secret
 # Optional one-time data GC after launch / retention change:
 #   fly postgres connect -a judgment-db < deployment/scripts/purge_finished_games.sql
 #
-# API VM: fly.toml targets 1GB shared CPU. After deploy, confirm:
+# API VM: fly.toml targets 4GB shared CPU. After deploy, confirm:
 #   fly scale show -a judgment-api
 
 # App secrets / env (see deployment/fly.env.example)

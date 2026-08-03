@@ -29,7 +29,8 @@ primary_region = 'sin'
     method = 'GET'
     path = '/healthz'
 
+# 4GB requires performance CPU on Fly (shared-cpu-1x caps at 2GB).
 [[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
+  memory = '4gb'
+  cpu_kind = 'performance'
   cpus = 1
