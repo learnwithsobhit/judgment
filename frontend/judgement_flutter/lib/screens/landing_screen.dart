@@ -4,8 +4,10 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
+import '../util/legal_consent.dart';
 import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
+import '../widgets/legal_consent_checkbox.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
 import 'table_screen.dart';
@@ -32,11 +34,13 @@ class _LandingScreenState extends State<LandingScreen> {
   final _roomCode = TextEditingController();
   late bool _joining; // false = create, true = join
   bool _busy = false;
+  bool _legalAccepted = false;
   bool get _fromLink => widget.initialJoinCode != null;
 
   @override
   void initState() {
     super.initState();
+    _legalAccepted = hasAcceptedCurrentLegalAgreement();
     final code = widget.initialJoinCode;
     _joining = code != null;
     if (code != null) {
@@ -96,6 +100,10 @@ class _LandingScreenState extends State<LandingScreen> {
     final nickname = _nickname.text.trim();
     if (nickname.isEmpty) {
       _showError('Pick a nickname first');
+      return;
+    }
+    if (!_legalAccepted) {
+      _showError('Please agree to the Terms of Use and Privacy Policy');
       return;
     }
     if (_joining && _roomCode.text.trim().isEmpty) {
@@ -547,12 +555,17 @@ class _LandingScreenState extends State<LandingScreen> {
                           ),
                         ] else if (!_joining)
                           _roomOptions(),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 16),
+                        LegalConsentCheckbox(
+                          value: _legalAccepted,
+                          onChanged: (v) => setState(() => _legalAccepted = v),
+                        ),
+                        const SizedBox(height: 16),
                         SizedBox(
                           width: double.infinity,
                           height: 48,
                           child: FilledButton(
-                            onPressed: _busy ? null : _submit,
+                            onPressed: (_busy || !_legalAccepted) ? null : _submit,
                             child: _busy
                                 ? const SizedBox(
                                     width: 22,
@@ -568,6 +581,7 @@ class _LandingScreenState extends State<LandingScreen> {
                     ),
                   ),
                 ),
+                const LegalFooterLinks(),
                 if (!_fromLink) ...[
                   const SizedBox(height: 16),
                   TextButton(

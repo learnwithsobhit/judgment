@@ -1,6 +1,6 @@
 # Security checklist (Phase 9)
 
-Last reviewed: 2026-07-31
+Last reviewed: 2026-08-03
 
 ## Authentication & sessions
 
@@ -31,6 +31,10 @@ Last reviewed: 2026-07-31
 - [x] Daily backup + restore verification scripts under `deployment/scripts/`
 - [x] Managed DB automated backups — enable Fly Postgres continuous backups
   (or provider equivalent); confirm before first public launch
+- [x] Client legal gate: Create/Join (and event join/open lobby) require
+  versioned Terms + Privacy acceptance (`kLegalAgreementVersion` in
+  `frontend/judgement_flutter/lib/util/legal_consent.dart`; stored in
+  browser `localStorage`). RSVP contact opt-in defaults off.
 
 ## AI boundaries (ADR 0002)
 

@@ -3,7 +3,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
+import '../screens/legal/legal_screens.dart';
+import '../util/legal_consent.dart';
 import '../util/table_media_session.dart';
+import '../widgets/legal_consent_checkbox.dart';
 import 'lobby_screen.dart';
 
 /// Public RSVP page for `/e/{slug}` (ADR 0005).
@@ -25,13 +28,16 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
   String? _rsvpToken;
   String? _rsvpStatus;
   int? _waitlistPosition;
-  bool _consent = true;
+  /// Optional contact about this scheduled game only (default off).
+  bool _contactConsent = false;
+  bool _legalAccepted = false;
   bool _busy = false;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    _legalAccepted = hasAcceptedCurrentLegalAgreement();
     _load();
   }
 
@@ -65,7 +71,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
         widget.slug,
         displayName: name,
         mobile: mobile,
-        contactConsent: _consent,
+        contactConsent: _contactConsent,
       );
       if (!mounted) return;
       setState(() {
@@ -92,6 +98,10 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
   }
 
   Future<void> _joinLobby() async {
+    if (!_legalAccepted) {
+      _toast('Please agree to the Terms of Use and Privacy Policy');
+      return;
+    }
     final code = _event?.roomCode;
     if (code == null) return;
     final nickname = _name.text.trim().isEmpty ? 'Player' : _name.text.trim();
@@ -195,12 +205,17 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
               const SizedBox(height: 12),
               Text('Lobby open — code ${event.roomCode}',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
-              if (_rsvpStatus == 'going' || _rsvpStatus == null)
+              if (_rsvpStatus == 'going' || _rsvpStatus == null) ...[
+                LegalConsentCheckbox(
+                  value: _legalAccepted,
+                  onChanged: (v) => setState(() => _legalAccepted = v),
+                ),
+                const SizedBox(height: 8),
                 FilledButton(
-                  onPressed: _busy ? null : _joinLobby,
+                  onPressed: (_busy || !_legalAccepted) ? null : _joinLobby,
                   child: const Text('Join lobby'),
-                )
-              else
+                ),
+              ] else
                 const Text(
                   'Waitlisted guests join only if promoted into a seat.',
                   style: TextStyle(color: Colors.white54),
@@ -227,11 +242,26 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
               ),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
-                value: _consent,
-                onChanged: (v) => setState(() => _consent = v ?? false),
+                controlAffinity: ListTileControlAffinity.leading,
+                value: _contactConsent,
+                onChanged: (v) =>
+                    setState(() => _contactConsent = v ?? false),
                 title: const Text(
-                  'Contact me about this game',
+                  'Optional: contact me about this scheduled game only',
                   style: TextStyle(fontSize: 13),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PrivacyPolicyScreen(),
+                      ),
+                    );
+                  },
+                  child: const Text('Privacy Policy'),
                 ),
               ),
               FilledButton(
@@ -253,6 +283,8 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
                       : 'You’re in. Keep the calendar invite handy.',
                 ),
               ),
+            const SizedBox(height: 8),
+            const LegalFooterLinks(),
           ],
         ),
       ),

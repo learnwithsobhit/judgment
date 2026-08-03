@@ -5,7 +5,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../util/event_share.dart';
+import '../util/legal_consent.dart';
 import '../util/table_media_session.dart';
+import '../widgets/legal_consent_checkbox.dart';
 import 'lobby_screen.dart';
 
 /// Host manage page for a scheduled event (ADR 0005).
@@ -32,10 +34,12 @@ class _EventManageScreenState extends State<EventManageScreen> {
   String? _error;
   bool _loading = true;
   bool _busy = false;
+  bool _legalAccepted = false;
 
   @override
   void initState() {
     super.initState();
+    _legalAccepted = hasAcceptedCurrentLegalAgreement();
     _refresh();
   }
 
@@ -76,6 +80,15 @@ class _EventManageScreenState extends State<EventManageScreen> {
   }
 
   Future<void> _openLobby() async {
+    if (!_legalAccepted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please agree to the Terms of Use and Privacy Policy'),
+        ),
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
       await TableMediaSession.prepareBeforeNetwork();
@@ -217,6 +230,13 @@ class _EventManageScreenState extends State<EventManageScreen> {
           ),
         ),
         const SizedBox(height: 12),
+        if (event.status == 'open') ...[
+          LegalConsentCheckbox(
+            value: _legalAccepted,
+            onChanged: (v) => setState(() => _legalAccepted = v),
+          ),
+          const SizedBox(height: 8),
+        ],
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -233,8 +253,11 @@ class _EventManageScreenState extends State<EventManageScreen> {
             ),
             if (event.status == 'open')
               FilledButton.tonalIcon(
-                onPressed:
-                    _busy || event.goingCount < 3 ? null : _openLobby,
+                onPressed: _busy ||
+                        !_legalAccepted ||
+                        event.goingCount < 3
+                    ? null
+                    : _openLobby,
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('Open lobby'),
               ),
@@ -245,6 +268,8 @@ class _EventManageScreenState extends State<EventManageScreen> {
               ),
           ],
         ),
+        const SizedBox(height: 8),
+        const LegalFooterLinks(),
         const SizedBox(height: 16),
         Text('Going', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
