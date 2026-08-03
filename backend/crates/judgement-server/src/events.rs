@@ -20,6 +20,7 @@ use rand::distr::Alphanumeric;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
+use crate::capacity::{level_for, CapacityLevel, CAPACITY_FULL_MESSAGE};
 use crate::error::ApiError;
 use crate::persist::stored_room;
 use crate::state::{generate_room_code, AppState, Room, RoomSeat, RoomStatus, ScheduledEvent};
@@ -606,6 +607,20 @@ pub async fn open_lobby(
 ) -> Result<Json<OpenLobbyResponse>, ApiError> {
     let token = extract_manage_token(&headers, query.token.as_deref())?;
     let session = state.authenticate(&headers)?;
+    let capacity = level_for(&state);
+    if capacity == CapacityLevel::Full {
+        state
+            .metrics
+            .capacity_full_rejected
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(ApiError::CapacityFull(CAPACITY_FULL_MESSAGE.into()));
+    }
+    if capacity == CapacityLevel::Busy {
+        state
+            .metrics
+            .capacity_busy
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
 
     let (event_id, max_players, turn_timeout_seconds, first_trump, round_schedule) = {
         let events = state.events.lock().unwrap();
@@ -702,6 +717,10 @@ pub async fn open_lobby(
         event: event_view,
         room: room_view,
         player_id,
+        capacity: match capacity {
+            CapacityLevel::Busy => Some("busy".into()),
+            CapacityLevel::Comfort | CapacityLevel::Full => None,
+        },
     }))
 }
 

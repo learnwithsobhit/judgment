@@ -113,6 +113,7 @@ class _LandingScreenState extends State<LandingScreen> {
     try {
       final session = await api.createGuestSession(nickname);
       final ({RoomView room, String playerId}) result;
+      String? capacityHint;
       if (_joining) {
         final joined = await api.joinRoom(_roomCode.text.trim().toUpperCase());
         result = (room: joined.room, playerId: joined.playerId);
@@ -128,8 +129,20 @@ class _LandingScreenState extends State<LandingScreen> {
           dealerTotalRestriction: _dealerTotalRestriction,
         );
         result = (room: created.room, playerId: created.playerId);
+        capacityHint = created.capacity;
       }
       if (!mounted) return;
+      if (capacityHint == 'busy') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Lots of games are in progress right now. '
+              'You can still make a room — starting may take a moment.',
+            ),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
       final gameId = result.room.gameId;
       if (result.room.phase == 'in_game' && gameId != null) {
         final controller = GameController(
@@ -157,7 +170,11 @@ class _LandingScreenState extends State<LandingScreen> {
         ));
       }
     } on ApiException catch (error) {
-      _showError(error.message);
+      if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
+        _showCapacityFull(error.message);
+      } else {
+        _showError(error.message);
+      }
     } catch (_) {
       _showError('Could not reach the server. Is it running?');
     } finally {
@@ -169,6 +186,23 @@ class _LandingScreenState extends State<LandingScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showCapacityFull(String message) {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Tables are full'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _roomOptions() {

@@ -446,11 +446,12 @@ class GameController extends ChangeNotifier {
       await _switchToRestartedGame(result.gameId);
     } on ApiException catch (e) {
       lastRejection = e.message;
-      lastRejectionCode = null;
+      lastRejectionCode = e.code;
       restartInFlight = false;
       _notify();
     } catch (_) {
       lastRejection = 'Could not restart the game';
+      lastRejectionCode = null;
       restartInFlight = false;
       _notify();
     }

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use judgement_domain::{PlayerId, RoomId};
+use judgement_domain::{GameId, PlayerId, RoomId};
 
 use crate::actor::AbortedCleanup;
 use crate::persist::stored_room;
@@ -43,6 +43,18 @@ pub fn make_aborted_hook(
 ) -> Arc<dyn Fn(AbortedCleanup) + Send + Sync> {
     Arc::new(move |info: AbortedCleanup| {
         apply_aborted_cleanup(&state, room_id, &info);
+    })
+}
+
+/// Drop actor map entry after natural finish (keeps room/result; frees admission).
+pub fn make_finished_hook(state: Arc<AppState>) -> Arc<dyn Fn(GameId) + Send + Sync> {
+    Arc::new(move |game_id: GameId| {
+        if state.games.lock().unwrap().remove(&game_id).is_some() {
+            state
+                .metrics
+                .games_removed
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
     })
 }
 

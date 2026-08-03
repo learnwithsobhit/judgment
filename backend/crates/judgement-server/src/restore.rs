@@ -10,7 +10,7 @@ use judgement_engine::GameEngine;
 use judgement_persistence::{GameStore, RestoredGame};
 
 use crate::actor::{spawn_game_actor, SpawnActor};
-use crate::cleanup::{make_aborted_hook, make_host_changed_hook};
+use crate::cleanup::{make_aborted_hook, make_finished_hook, make_host_changed_hook};
 use crate::state::{AppState, GameInfo, Room, RoomSeat, RoomStatus, ScheduledEvent, Session};
 
 /// Reload durable state into memory and respawn actors for active games.
@@ -156,6 +156,7 @@ fn spawn_restored_actor(
         room_code,
         on_host_changed: Some(make_host_changed_hook(state.clone(), game.room_id)),
         on_aborted: Some(make_aborted_hook(state.clone(), game.room_id)),
+        on_finished: Some(make_finished_hook(state.clone())),
     });
 
     let players: HashMap<_, _> = game

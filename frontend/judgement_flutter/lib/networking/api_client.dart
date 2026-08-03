@@ -76,7 +76,7 @@ class ApiClient {
   /// [turnTimeoutSeconds] null ⇒ no turn timer; [firstTrump] null ⇒
   /// revealed-card trump, otherwise rotation from that suit (ADR 0003).
   /// [roundSchedule] null ⇒ automatic descending max→1.
-  Future<({RoomView room, String playerId})> createRoom({
+  Future<({RoomView room, String playerId, String? capacity})> createRoom({
     int? maxPlayers,
     int? turnTimeoutSeconds,
     String? firstTrump,
@@ -93,6 +93,7 @@ class ApiClient {
     return (
       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
       playerId: json['player_id'] as String,
+      capacity: json['capacity'] as String?,
     );
   }
 

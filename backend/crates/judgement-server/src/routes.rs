@@ -35,8 +35,10 @@ use crate::emotes::is_allowed_avatar;
 use tokio::sync::oneshot;
 
 use crate::actor::{self, ActorMessage, SpawnActor};
+use crate::capacity::{level_for, CapacityLevel, CAPACITY_FULL_MESSAGE};
 use crate::cleanup::{
-    check_restart_rate_limit, make_aborted_hook, make_host_changed_hook, record_restart,
+    check_restart_rate_limit, make_aborted_hook, make_finished_hook, make_host_changed_hook,
+    record_restart,
 };
 use crate::error::ApiError;
 use crate::persist::{persist_new_game, stored_room, stored_session};
@@ -44,6 +46,18 @@ use crate::state::{generate_room_code, AppState, GameInfo, Room, RoomSeat, RoomS
 
 /// Load-shed new tables so existing actors keep DB pool headroom (CAP Availability).
 pub const MAX_ACTIVE_GAMES: usize = 100;
+
+fn reject_if_capacity_full(state: &AppState) -> Result<CapacityLevel, ApiError> {
+    let level = level_for(state);
+    if level == CapacityLevel::Full {
+        state
+            .metrics
+            .capacity_full_rejected
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(ApiError::CapacityFull(CAPACITY_FULL_MESSAGE.into()));
+    }
+    Ok(level)
+}
 
 pub async fn set_avatar(
     State(state): State<Arc<AppState>>,
@@ -116,6 +130,13 @@ pub async fn create_room(
     Json(body): Json<CreateRoomRequest>,
 ) -> Result<Json<CreateRoomResponse>, ApiError> {
     let session = state.authenticate(&headers)?;
+    let capacity = reject_if_capacity_full(&state)?;
+    if capacity == CapacityLevel::Busy {
+        state
+            .metrics
+            .capacity_busy
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
 
     let max_players = body.max_players.unwrap_or(6);
     if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&max_players) {
@@ -172,7 +193,14 @@ pub async fn create_room(
         .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
     state.rooms.lock().unwrap().insert(room_id, room);
 
-    Ok(Json(CreateRoomResponse { room: view, player_id }))
+    Ok(Json(CreateRoomResponse {
+        room: view,
+        player_id,
+        capacity: match capacity {
+            CapacityLevel::Busy => Some("busy".into()),
+            CapacityLevel::Comfort | CapacityLevel::Full => None,
+        },
+    }))
 }
 
 pub async fn get_room(
@@ -727,6 +755,7 @@ async fn start_game_inner(
     room_id: RoomId,
     seed: Option<u64>,
 ) -> Result<GameId, ApiError> {
+    reject_if_capacity_full(state)?;
     {
         let active = state.games.lock().unwrap().len();
         if active >= MAX_ACTIVE_GAMES {
@@ -874,6 +903,7 @@ async fn start_game_inner(
         room_code,
         on_host_changed: Some(make_host_changed_hook(state.clone(), room_id)),
         on_aborted: Some(make_aborted_hook(state.clone(), room_id)),
+        on_finished: Some(make_finished_hook(state.clone())),
     });
     state
         .metrics

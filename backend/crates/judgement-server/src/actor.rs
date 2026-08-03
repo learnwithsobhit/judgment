@@ -119,6 +119,8 @@ pub struct SpawnActor {
     pub on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     /// Remove actor + return room to Lobby after terminal abort.
     pub on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
+    /// Remove actor from the active map after natural GameCompleted.
+    pub on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
 }
 
 pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
@@ -149,6 +151,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         last_emote_at: HashMap::new(),
         on_host_changed: config.on_host_changed,
         on_aborted: config.on_aborted,
+        on_finished: config.on_finished,
     };
     tokio::spawn(actor.run());
     tx
@@ -184,6 +187,7 @@ struct GameActor {
     last_emote_at: HashMap<PlayerId, u64>,
     on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
+    on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
 }
 
 impl GameActor {
@@ -1239,6 +1243,10 @@ impl GameActor {
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 });
+            }
+            // Free admission slot promptly; room/results remain for history UI.
+            if let Some(hook) = &self.on_finished {
+                hook(self.game_id);
             }
         }
     }

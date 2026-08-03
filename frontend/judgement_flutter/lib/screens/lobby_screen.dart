@@ -178,7 +178,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
       final gameId = await widget.api.startGame(_room.roomId);
       _enterGame(gameId);
     } on ApiException catch (error) {
-      _showError(error.message);
+      if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
+        _showCapacityFull(error.message);
+      } else {
+        _showError(error.message);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -197,6 +201,23 @@ class _LobbyScreenState extends State<LobbyScreen> {
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showCapacityFull(String message) {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Tables are full'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Try again later'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

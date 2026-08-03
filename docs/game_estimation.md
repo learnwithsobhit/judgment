@@ -14,16 +14,19 @@ Related: [`LOAD.md`](LOAD.md), [`Architecture.md`](Architecture.md),
 
 | Metric | Ballpark (current prod) |
 |--------|-------------------------|
-| Soft max **in-game tables** at once | **100** (`MAX_ACTIVE_GAMES`) |
+| Product **comfort** band | **0–24** active tables (normal UX) |
+| Product **busy** band | **25–34** tables — create OK with notice |
+| Product **hard** gate | **≥35** tables **or** **≥200** WS — reject new create/start (`CAPACITY_FULL`) |
+| Emergency code cap | **100** (`MAX_ACTIVE_GAMES`) — ops backstop only |
 | Healthy concurrent tables (6-seat) | **~25–40** |
-| Theoretical max seated players | **300–800** (3–8 seats × 100 tables) |
 | Practical concurrent connected players | **~200** (LOAD WebSocket target) |
 | Comfortable India/UAE mix | **~120–180** players on **~20–30** tables |
-| Concurrent lobbies (not started) | **~50–150** practical; not hard-capped like games |
+| Concurrent lobbies (not started) | Practical; gated by product hard when actors/WS full |
 | Bid/play perceived latency (healthy DB) | India **~100–200ms** p50; UAE **~150–250ms** p50 |
 | Persist p95 target | **&lt; 50ms** |
 | Availability class | Single-node **CP**; ~**99.0–99.5%** class if Fly/DB healthy (not a contract) |
-| Binding limit today | **WebSocket / API memory comfort (~200)** before the 100-actor start cap fills usefully |
+| Binding limit today | **WebSocket / API memory (~200)** — product hard gate matches this |
+| Cheapest scale-up | API **1GB → 2GB** (~+$5/mo), then raise hard gate — **not** a 2nd API writer yet |
 
 ---
 
@@ -64,7 +67,8 @@ flowchart TB
 
 | Limit | Value | Effect |
 |-------|-------|--------|
-| `MAX_ACTIVE_GAMES` | 100 | Further `POST …/start` → conflict (“tables full”) |
+| Product hard gate | 35 actors or 200 WS | New create/start/restart → `CAPACITY_FULL` (503); live games untouched |
+| `MAX_ACTIVE_GAMES` | 100 | Emergency shed only (raw conflict) |
 | Seats / table | 3–8 | Cap seated if all 100 tables full: **800**; at 6p: **600** |
 | LOAD WS target | 200 | Practical concurrent connected players before comfort/OOM risk |
 | sqlx pool | 10 | At most ~10 concurrent DB commits; contention under load |
@@ -145,17 +149,17 @@ Availability levers already in place: pool sizing, start admission, persist unce
 | 30 tables × ~0.3 actions/s | **~9 commits/s** → large headroom if DB stays fast |
 | 100 tables × ~0.3 actions/s | **~30 commits/s** — still fine for pool math; **WS/memory** fails first |
 
-### If we scale further (unverified projections)
+### Cost-first scale ladder (ops)
 
-| Change | Projected effect | Caveat |
-|--------|------------------|--------|
-| Raise `MAX_ACTIVE_GAMES` to 150–200 | More starts allowed | Useless without higher WS/RAM budget |
-| API → **2GB** shared | Maybe **~300–400** concurrent WS comfort | Still one machine SPOF |
-| Second API + ownership leases | Survive API host loss; more CPU | Engineering + sticky/session design required |
-| DB → 8GB+ | Helps only if persist p95 already bad | Costly; measure first |
-| Move API+DB together to `bom` | Better India RTT; UAE may worsen | Latency UX, not CAP |
+| Step | When | Extra cost (ballpark) | Notes |
+|------|------|----------------------|--------|
+| Product hard @ 35 / 200 WS | Always (shipped) | $0 | Protects in-progress players |
+| API **1GB → 2GB** shared | Full rejects frequent; persist OK | **~+$5/mo** | Then raise hard to ~50 / ~300 WS |
+| Postgres RAM bump | Persist p95 / write failures under &lt;30 tables | **~+$10–20/mo** | Measure first; does not fix WS |
+| Second API machine | Only after **ownership leases + sticky WS** | **~+$6/mo** + eng | Unsafe today — deferred Phase B |
 
 Do **not** move DB alone to another cloud/region — adds persist RTT and hurts Availability.
+Do **not** autoscale API machine count without leases (split-brain).
 
 ---
 

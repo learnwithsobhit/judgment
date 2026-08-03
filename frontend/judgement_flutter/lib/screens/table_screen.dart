@@ -67,6 +67,22 @@ class _TableScreenState extends State<TableScreen> {
     final reasonCode = controller.lastRejectionCode;
     if (rejection != null && mounted) {
       controller.clearRejection();
+      if (reasonCode == 'CAPACITY_FULL') {
+        showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Tables are full'),
+            content: Text(rejection),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(rejection),
         backgroundColor: const Color(0xFF8B2E2E),

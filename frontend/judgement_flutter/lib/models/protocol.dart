@@ -798,13 +798,15 @@ class OpenLobbyResult {
   final GameEventPublicView event;
   final RoomView room;
   final String playerId;
+  final String? capacity;
 
   OpenLobbyResult.fromJson(Map<String, dynamic> json)
       : event = GameEventPublicView.fromJson(
           json['event'] as Map<String, dynamic>,
         ),
         room = RoomView.fromJson(json['room'] as Map<String, dynamic>),
-        playerId = json['player_id'] as String;
+        playerId = json['player_id'] as String,
+        capacity = json['capacity'] as String?;
 }
 
 /// Response from `POST /api/v1/ai/rules/query` (PLAN.md §18.1).

@@ -83,6 +83,17 @@ class _EventManageScreenState extends State<EventManageScreen> {
       final result =
           await widget.api.openEventLobby(widget.slug, widget.manageToken);
       if (!mounted) return;
+      if (result.capacity == 'busy') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Lots of games are in progress right now. '
+              'Starting may take a moment.',
+            ),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
       Navigator.of(context).pushReplacement(MaterialPageRoute(
         builder: (_) => LobbyScreen(
           api: widget.api,
@@ -93,8 +104,24 @@ class _EventManageScreenState extends State<EventManageScreen> {
       ));
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      if (e.code == 'CAPACITY_FULL' || e.statusCode == 503) {
+        showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Tables are full'),
+            content: Text(e.message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

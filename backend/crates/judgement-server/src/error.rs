@@ -21,6 +21,9 @@ pub enum ApiError {
     BadRequest(String),
     #[error("{0}")]
     TooManyRequests(String),
+    /// Product capacity gate — new rooms/starts rejected; live games untouched.
+    #[error("{0}")]
+    CapacityFull(String),
 }
 
 impl ApiError {
@@ -32,6 +35,7 @@ impl ApiError {
             ApiError::Conflict(_) => StatusCode::CONFLICT,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
+            ApiError::CapacityFull(_) => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -43,6 +47,7 @@ impl ApiError {
             ApiError::Conflict(_) => "CONFLICT",
             ApiError::BadRequest(_) => "BAD_REQUEST",
             ApiError::TooManyRequests(_) => "RATE_LIMITED",
+            ApiError::CapacityFull(_) => "CAPACITY_FULL",
         }
     }
 }

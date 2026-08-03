@@ -35,6 +35,8 @@ pub struct Metrics {
     pub persist_commit_ms_bucket_le_500: AtomicU64,
     pub persist_commit_ms_bucket_le_inf: AtomicU64,
     pub games_admission_rejected: AtomicU64,
+    pub capacity_busy: AtomicU64,
+    pub capacity_full_rejected: AtomicU64,
     pub outbound_snapshot_drops: AtomicU64,
     pub actors_respawned: AtomicU64,
 }
@@ -100,8 +102,18 @@ impl Metrics {
         counter!("judgement_rooms_reaped_total", "Abandoned rooms garbage-collected", rooms_reaped);
         counter!(
             "judgement_games_admission_rejected_total",
-            "start_game rejected because active actor cap reached",
+            "start_game rejected because emergency MAX_ACTIVE_GAMES cap reached",
             games_admission_rejected
+        );
+        counter!(
+            "judgement_capacity_busy_total",
+            "Creates that succeeded while in the busy capacity band",
+            capacity_busy
+        );
+        counter!(
+            "judgement_capacity_full_rejected_total",
+            "Creates/starts rejected by the product capacity hard gate",
+            capacity_full_rejected
         );
         counter!(
             "judgement_outbound_snapshot_drops_total",

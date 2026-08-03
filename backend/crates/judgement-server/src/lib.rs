@@ -1,6 +1,7 @@
 //! Axum room service and per-game actors (PLAN.md Phase 3 + Phase 5 + Phase 9).
 
 pub mod actor;
+pub mod capacity;
 pub mod cleanup;
 pub mod cors;
 pub mod emotes;

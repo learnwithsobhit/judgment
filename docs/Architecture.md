@@ -393,7 +393,7 @@ flowchart TB
 
 ADR: [`0001-actor-per-game.md`](adr/0001-actor-per-game.md). One sequential tokio task per active game avoids locks inside the engine.
 
-**CAP stance:** the realtime path is **CP** — one writer per `game_id`, durable tip before clients see accepts. Availability is improved by pool headroom, `start_game` admission (`MAX_ACTIVE_GAMES`), client auto-resend on `PersistUnavailable`, actor respawn from tip, and outbound snapshot dirty-resync — not by multi-writer AP. Horizontal scale beyond one Fly machine needs game ownership leases + sticky routing (deferred until single-node metrics prove saturation). Keep API and Postgres colocated in the same region.
+**CAP stance:** the realtime path is **CP** — one writer per `game_id`, durable tip before clients see accepts. Availability is improved by pool headroom, product capacity gates (busy notice at 25 tables; `CAPACITY_FULL` at 35 tables or 200 WS), emergency `MAX_ACTIVE_GAMES` (100), client auto-resend on `PersistUnavailable`, actor respawn from tip, and outbound snapshot dirty-resync — not by multi-writer AP. Horizontal scale beyond one Fly machine needs game ownership leases + sticky routing (deferred; see `docs/game_estimation.md` cost ladder). Keep API and Postgres colocated in the same region.
 
 ---
 
