@@ -64,10 +64,13 @@ class _EmoteBarState extends State<EmoteBar> {
                   ),
                 IconButton(
                   tooltip: 'Soundboard',
-                  onPressed: () => setState(() {
-                    _soundsOpen = !_soundsOpen;
-                    if (_soundsOpen) _expanded = false;
-                  }),
+                  onPressed: () {
+                    unawaited(widget.controller.audio.unlock());
+                    setState(() {
+                      _soundsOpen = !_soundsOpen;
+                      if (_soundsOpen) _expanded = false;
+                    });
+                  },
                   icon: Icon(
                     _soundsOpen ? Icons.music_off : Icons.music_note,
                     size: 18,
@@ -106,9 +109,13 @@ class _EmoteBarState extends State<EmoteBar> {
                   tooltip: widget.controller.muteReactions
                       ? 'Unmute table noise'
                       : 'Mute table noise',
-                  onPressed: () => widget.controller.setMuteTableNoise(
-                    !widget.controller.muteReactions,
-                  ),
+                  onPressed: () {
+                    final next = !widget.controller.muteReactions;
+                    widget.controller.setMuteTableNoise(next);
+                    if (!next) {
+                      unawaited(widget.controller.audio.unlock());
+                    }
+                  },
                   icon: Icon(
                     widget.controller.muteReactions
                         ? Icons.volume_off
@@ -120,6 +127,26 @@ class _EmoteBarState extends State<EmoteBar> {
               ],
             ),
           ),
+          if (widget.controller.audio.awaitingUnlock)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.amber.withValues(alpha: 0.15),
+                ),
+                onPressed: () async {
+                  // Await unlock so the first clip plays inside this gesture.
+                  await widget.controller.audio.unlock();
+                  widget.controller.audioQueueFullHint = null;
+                  if (mounted) setState(() {});
+                },
+                icon: const Icon(Icons.volume_up, size: 16, color: Colors.amberAccent),
+                label: const Text(
+                  'Tap to enable table sound',
+                  style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+                ),
+              ),
+            ),
           if (_localHint != null || widget.controller.audioQueueFullHint != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
@@ -146,6 +173,7 @@ class _EmoteBarState extends State<EmoteBar> {
                         backgroundColor: Colors.black38,
                         labelStyle: const TextStyle(color: Colors.white),
                         onPressed: () {
+                          unawaited(widget.controller.audio.unlock());
                           widget.controller.sendSoundboard(clip.id);
                           setState(() => _localHint = null);
                         },

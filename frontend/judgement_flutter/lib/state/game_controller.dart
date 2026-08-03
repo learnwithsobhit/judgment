@@ -143,6 +143,9 @@ class GameController extends ChangeNotifier {
     required this.myNickname,
   }) {
     audio.onChanged = _notify;
+    audio.onQueueAccepted = () {
+      audioQueueFullHint = null;
+    };
   }
 
   bool get isPaused =>
@@ -603,16 +606,13 @@ class GameController extends ChangeNotifier {
   }) {
     if (muteReactions && kind != 'auto_cheer') return;
     if (kind == 'soundboard' && soundId != null) {
-      final ok = audio.enqueue(TableAudioItem(
+      audio.enqueue(TableAudioItem(
         id: _uuid.v4(),
         from: from,
         kind: TableAudioKind.soundboard,
         soundId: soundId,
         durationMs: ttlMs,
       ));
-      if (!ok) {
-        audioQueueFullHint = 'Audio queue full';
-      }
       _notify();
       return;
     }
@@ -657,7 +657,7 @@ class GameController extends ChangeNotifier {
     if (muteReactions) return;
     try {
       final bytes = base64Decode(audioB64);
-      final ok = audio.enqueue(TableAudioItem(
+      audio.enqueue(TableAudioItem(
         id: _uuid.v4(),
         from: from,
         kind: TableAudioKind.voice,
@@ -665,9 +665,6 @@ class GameController extends ChangeNotifier {
         bytes: bytes,
         durationMs: durationMs > 0 ? durationMs : ttlMs,
       ));
-      if (!ok) {
-        audioQueueFullHint = 'Audio queue full';
-      }
     } catch (_) {
       // Ignore corrupt payloads.
     }
@@ -705,6 +702,9 @@ class GameController extends ChangeNotifier {
   void setMuteTableNoise(bool muted) {
     muteReactions = muted;
     audio.muted = muted;
+    if (!muted) {
+      unawaited(audio.unlock());
+    }
     _notify();
   }
 

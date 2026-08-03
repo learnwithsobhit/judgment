@@ -4,4 +4,4 @@ library;
 const int maxVoiceDurationMs = 6000;
 const int minVoiceDurationMs = 400;
 const int maxVoiceB64Bytes = 40000;
-const int maxAudioQueueDepth = 3;
+const int maxAudioQueueDepth = 6;
