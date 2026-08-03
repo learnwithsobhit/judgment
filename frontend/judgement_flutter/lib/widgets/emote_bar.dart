@@ -8,7 +8,7 @@ import '../util/soundboard.dart';
 import '../util/table_audio.dart';
 import 'cartoon_text_blast.dart';
 
-/// Quick reacts + soundboard + short vibe text + hold-to-talk voice.
+/// Quick reacts + soundboard + short vibe text + tap-to-talk voice.
 class EmoteBar extends StatefulWidget {
   final GameController controller;
 
@@ -24,6 +24,7 @@ class _EmoteBarState extends State<EmoteBar> {
   var _expanded = false;
   var _soundsOpen = false;
   var _recording = false;
+  var _busy = false;
   DateTime? _recordStarted;
   Timer? _recordTicker;
   String? _localHint;
@@ -73,20 +74,15 @@ class _EmoteBarState extends State<EmoteBar> {
                     color: Colors.lightBlueAccent,
                   ),
                 ),
-                Listener(
-                  onPointerDown: (_) => _beginRecord(),
-                  onPointerUp: (_) => _endRecord(),
-                  onPointerCancel: (_) => _cancelRecord(),
-                  child: IconButton(
-                    tooltip: _recording
-                        ? 'Recording… ${(elapsed / 1000).toStringAsFixed(1)}s'
-                        : 'Hold to talk (max 6s)',
-                    onPressed: () {},
-                    icon: Icon(
-                      _recording ? Icons.mic : Icons.mic_none,
-                      size: 18,
-                      color: _recording ? Colors.redAccent : Colors.white70,
-                    ),
+                IconButton(
+                  tooltip: _recording
+                      ? 'Tap to send (${(elapsed / 1000).toStringAsFixed(1)}s)'
+                      : 'Tap to record voice (max 6s)',
+                  onPressed: _busy ? null : () => unawaited(_toggleRecord()),
+                  icon: Icon(
+                    _recording ? Icons.stop_circle : Icons.mic_none,
+                    size: 18,
+                    color: _recording ? Colors.redAccent : Colors.white70,
                   ),
                 ),
                 IconButton(
@@ -231,41 +227,74 @@ class _EmoteBarState extends State<EmoteBar> {
     setState(() {});
   }
 
+  Future<void> _toggleRecord() async {
+    if (_busy) return;
+    if (_recording) {
+      await _finishRecord();
+    } else {
+      await _beginRecord();
+    }
+  }
+
   Future<void> _beginRecord() async {
-    if (_recording) return;
-    setState(() {
-      _localHint = null;
-      widget.controller.audioQueueFullHint = null;
-    });
+    // Do not setState/await anything before start() — prod Chrome drops the
+    // user gesture and getUserMedia then fails (localhost is more lenient).
+    _busy = true;
+    _localHint = null;
+    widget.controller.audioQueueFullHint = null;
     try {
-      await widget.controller.audio.unlock();
       await _recorder.start();
       _recordStarted = DateTime.now();
-      setState(() => _recording = true);
+      if (!mounted) return;
+      setState(() {
+        _recording = true;
+        _busy = false;
+        _localHint = 'Recording… tap mic again to send';
+      });
       _recordTicker?.cancel();
       _recordTicker = Timer.periodic(const Duration(milliseconds: 200), (_) {
         if (!mounted) return;
         final ms = DateTime.now().difference(_recordStarted!).inMilliseconds;
         if (ms >= maxVoiceDurationMs) {
-          unawaited(_endRecord());
+          unawaited(_finishRecord());
         } else {
           setState(() {});
         }
       });
-    } catch (_) {
-      setState(() => _localHint = 'Mic unavailable');
+      unawaited(widget.controller.audio.unlock());
+    } catch (error) {
+      final msg = error.toString().toLowerCase();
+      final denied = msg.contains('permission') ||
+          msg.contains('notallowed') ||
+          msg.contains('denied') ||
+          msg.contains('notallowederror');
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _recording = false;
+          _localHint = denied
+              ? 'Allow microphone in the site lock icon, then tap mic again'
+              : 'Mic blocked — Chrome/Edge, HTTPS, allow mic for this site';
+        });
+      }
     }
   }
 
-  Future<void> _endRecord() async {
-    if (!_recording) return;
+  Future<void> _finishRecord() async {
+    if (!_recording || _busy) return;
     _recordTicker?.cancel();
-    setState(() => _recording = false);
+    setState(() {
+      _busy = true;
+      _recording = false;
+    });
     try {
       final note = await _recorder.stop();
       _recordStarted = null;
       if (note == null) {
-        setState(() => _localHint = 'Hold a bit longer (or use Chrome for voice)');
+        setState(() {
+          _busy = false;
+          _localHint = 'Speak ~1s+ (Chrome/Edge; Opus required)';
+        });
         return;
       }
       await widget.controller.sendVoiceNote(
@@ -273,18 +302,20 @@ class _EmoteBarState extends State<EmoteBar> {
         durationMs: note.durationMs,
         audioB64: note.audioB64,
       );
-      setState(() => _localHint = null);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _localHint = null;
+        });
+      }
     } catch (_) {
       _recordStarted = null;
-      setState(() => _localHint = 'Could not send voice note');
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _localHint = 'Could not send voice note';
+        });
+      }
     }
-  }
-
-  Future<void> _cancelRecord() async {
-    if (!_recording) return;
-    _recordTicker?.cancel();
-    _recordStarted = null;
-    setState(() => _recording = false);
-    await _recorder.cancel();
   }
 }

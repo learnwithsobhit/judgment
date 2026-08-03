@@ -6,15 +6,12 @@ import 'dart:convert';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'package:record/record.dart';
 
 import 'soundboard.dart';
+import 'table_audio_limits.dart';
 
-const int maxVoiceDurationMs = 6000;
-const int minVoiceDurationMs = 400;
-const int maxVoiceB64Bytes = 40000;
-const int maxAudioQueueDepth = 3;
+export 'table_audio_limits.dart';
+export 'voice_recorder.dart';
 
 enum TableAudioKind { soundboard, voice }
 
@@ -131,88 +128,4 @@ class TableAudioPlayer {
     nowPlaying = null;
     await _player.dispose();
   }
-}
-
-class VoiceRecorder {
-  final AudioRecorder _recorder = AudioRecorder();
-  DateTime? _startedAt;
-
-  bool get isRecording => _startedAt != null;
-
-  Future<bool> hasPermission() => _recorder.hasPermission();
-
-  Future<void> start() async {
-    if (!await _recorder.hasPermission()) {
-      throw StateError('Microphone permission denied');
-    }
-    final opusOk = await _recorder.isEncoderSupported(AudioEncoder.opus);
-    final config = RecordConfig(
-      encoder: opusOk ? AudioEncoder.opus : AudioEncoder.wav,
-      bitRate: 24000,
-      sampleRate: 16000,
-      numChannels: 1,
-    );
-    // Path required on IO; ignored on web.
-    await _recorder.start(config, path: 'judgement-voice-note');
-    _startedAt = DateTime.now();
-  }
-
-  /// Stops and returns `(mime, durationMs, base64)` or null if too short / failed.
-  Future<({String mime, int durationMs, String audioB64})?> stop() async {
-    final started = _startedAt;
-    _startedAt = null;
-    final path = await _recorder.stop();
-    if (started == null || path == null) return null;
-    var durationMs = DateTime.now().difference(started).inMilliseconds;
-    if (durationMs < minVoiceDurationMs) return null;
-    durationMs = durationMs.clamp(minVoiceDurationMs, maxVoiceDurationMs);
-
-    final bytes = await _bytesFromPath(path);
-    if (bytes == null || bytes.isEmpty) return null;
-    final b64 = base64Encode(bytes);
-    if (b64.length > maxVoiceB64Bytes) return null;
-
-    final isWebm = bytes.length >= 4 &&
-        bytes[0] == 0x1A &&
-        bytes[1] == 0x45 &&
-        bytes[2] == 0xDF &&
-        bytes[3] == 0xA3;
-    final isOgg =
-        bytes.length >= 4 && String.fromCharCodes(bytes.take(4)) == 'OggS';
-    if (!isWebm && !isOgg) {
-      // WAV fallback from unsupported Opus browsers won't pass the server;
-      // surface as null so the UI can show a hint.
-      return null;
-    }
-    final mime =
-        isOgg ? 'audio/ogg;codecs=opus' : 'audio/webm;codecs=opus';
-    return (mime: mime, durationMs: durationMs, audioB64: b64);
-  }
-
-  Future<Uint8List?> _bytesFromPath(String path) async {
-    try {
-      if (path.startsWith('blob:') || path.startsWith('http')) {
-        final response = await http.get(Uri.parse(path));
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          return response.bodyBytes;
-        }
-        return null;
-      }
-      // Non-web file paths are not used in the hosted Flutter web client.
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> cancel() async {
-    _startedAt = null;
-    try {
-      if (await _recorder.isRecording()) {
-        await _recorder.cancel();
-      }
-    } catch (_) {}
-  }
-
-  Future<void> dispose() => _recorder.dispose();
 }
