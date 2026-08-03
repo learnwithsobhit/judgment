@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../networking/game_socket.dart';
+import '../util/score_reveal.dart';
 import '../util/soundboard.dart';
 import '../util/table_audio.dart';
 
@@ -560,7 +561,16 @@ class GameController extends ChangeNotifier {
           .map((e) =>
               '${nicknameOf(e.playerId)} ${e.score} (bid ${e.bid}→${e.tricksWon})')
           .join(' · ');
-      roundResultBanner = 'Round ${last.roundIndex + 1} scores: $lines';
+      final prevTotals = prev == null
+          ? false
+          : ScoreReveal.fromView(prev).showTotals;
+      final nextTotals = ScoreReveal.fromView(next).showTotals;
+      if (!prevTotals && nextTotals) {
+        roundResultBanner =
+            'Halftime standings — totals are now visible. Round ${last.roundIndex + 1}: $lines';
+      } else {
+        roundResultBanner = 'Round ${last.roundIndex + 1} scores: $lines';
+      }
       _bannerTimer?.cancel();
       _bannerTimer = Timer(const Duration(seconds: 5), () {
         roundResultBanner = null;

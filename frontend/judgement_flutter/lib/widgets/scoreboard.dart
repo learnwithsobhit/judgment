@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
+import '../util/score_reveal.dart';
 import 'player_avatar.dart';
 
-/// Simple scoreboard: current bid/won, then round scores (rounds × players).
-/// Running totals stay hidden until the game finishes (result screen owns them).
+/// Scoreboard: current bid/won, round scores, and cumulative totals after
+/// halftime (⌈M/2⌉) or once the ≤3-card phase begins.
 class Scoreboard extends StatelessWidget {
   final GameController controller;
 
@@ -18,7 +19,8 @@ class Scoreboard extends StatelessWidget {
     if (view == null) return const SizedBox.shrink();
 
     final bidsByPlayer = {for (final b in view.bids) b.playerId: b.bid};
-    final showTotals = view.isFinished;
+    final reveal = ScoreReveal.fromView(view);
+    final showTotals = reveal.showTotals;
     final history = view.roundHistory;
     final leaderId = view.leader?.playerId;
 
@@ -109,10 +111,10 @@ class Scoreboard extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
           )
-        else
+        else ...[
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: _RoundScoreMatrix(
               players: players,
               history: history,
@@ -121,6 +123,21 @@ class Scoreboard extends StatelessWidget {
               currentTurn: view.currentTurn,
             ),
           ),
+          if (!showTotals)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+              child: Text(
+                'Totals unlock after round ${reveal.unlockAfterRound} of ${reveal.totalRounds}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.white.withValues(alpha: 0.55),
+                ),
+                textAlign: TextAlign.center,
+              ),
+            )
+          else
+            const SizedBox(height: 8),
+        ],
       ],
     );
   }

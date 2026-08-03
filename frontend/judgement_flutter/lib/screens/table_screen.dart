@@ -9,6 +9,7 @@ import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
 import '../util/room_share.dart';
+import '../util/score_reveal.dart';
 import '../widgets/assistant_panel.dart';
 import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
@@ -688,12 +689,7 @@ class _TableArea extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  view.leader!.margin == 0 &&
-                          view.roundHistory.isNotEmpty
-                      ? 'Tied on round scores'
-                      : view.leader!.playerId == controller.myPlayerId
-                          ? 'You’re ahead on round scores'
-                          : '${controller.nicknameOf(view.leader!.playerId)} ahead on round scores',
+                  _leaderChipLabel(controller, view),
                   style: const TextStyle(fontSize: 12, color: goldAccent),
                 ),
               ),
@@ -746,6 +742,24 @@ class _TableArea extends StatelessWidget {
       ),
     );
   }
+}
+
+String _leaderChipLabel(GameController controller, PlayerGameView view) {
+  final leader = view.leader;
+  if (leader == null) return '';
+  final totalsVisible = ScoreReveal.fromView(view).showTotals;
+  if (!totalsVisible) {
+    if (leader.margin == 0) return 'Tied on round scores';
+    if (leader.playerId == controller.myPlayerId) {
+      return 'You’re ahead on round scores';
+    }
+    return '${controller.nicknameOf(leader.playerId)} ahead on round scores';
+  }
+  if (leader.margin == 0) return 'Tied for the lead';
+  if (leader.playerId == controller.myPlayerId) {
+    return 'You’re leading by ${leader.margin}';
+  }
+  return '${controller.nicknameOf(leader.playerId)} leads by ${leader.margin}';
 }
 
 class _OpponentSeat extends StatelessWidget {

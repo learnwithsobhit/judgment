@@ -568,7 +568,7 @@ flowchart TD
   landing --> schedule[ScheduleEventScreen]
 ```
 
-Cosmetic engagement (avatars, reactions, cartoon text blasts) is presentation-only; mid-game scoreboard shows round history without a Totals row until the game finishes.
+Cosmetic engagement (avatars, reactions, cartoon text blasts) is presentation-only; mid-game scoreboard hides the Totals row until halftime (`⌈total_rounds/2⌉`) or the ≤3-card phase, then keeps totals visible.
 
 ---
 

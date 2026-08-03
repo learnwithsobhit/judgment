@@ -141,9 +141,13 @@ rounds (desc) → total tricks missed `Σ|bid − won|` (asc) → shared rank
 
 ## Table engagement (cosmetic)
 
-Reactions, avatar flashes, emoji bursts, and surprise scoreboard UX (hiding
-running totals mid-game) are **presentation only**. They do not change legal
-bids, playable cards, trick winners, or scoring.
+Reactions, avatar flashes, emoji bursts, and scoreboard UX are **presentation
+only**. They do not change legal bids, playable cards, trick winners, or
+scoring. Running **TOTAL** scores stay hidden until **halftime** of the
+schedule (`⌈total_rounds / 2⌉` completed rounds), or once the table reaches
+the ≤3-card phase; after that they stay visible for the rest of the game.
+Works the same for Automatic and host-edited Manual schedules (`total_rounds`
+is the expanded deal count).
 
 After the last trick of a round, the server holds briefly in `RoundScoring`
 (~1.8s) so clients can show the completed trick before the next deal or
