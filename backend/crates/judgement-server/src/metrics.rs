@@ -39,6 +39,9 @@ pub struct Metrics {
     pub capacity_full_rejected: AtomicU64,
     pub outbound_snapshot_drops: AtomicU64,
     pub actors_respawned: AtomicU64,
+    pub soundboard_broadcast: AtomicU64,
+    pub voice_notes_broadcast: AtomicU64,
+    pub audio_rejected: AtomicU64,
 }
 
 impl Metrics {
@@ -124,6 +127,21 @@ impl Metrics {
             "judgement_actors_respawned_total",
             "Dead game actors respawned from tip snapshot",
             actors_respawned
+        );
+        counter!(
+            "judgement_soundboard_broadcast_total",
+            "Curated soundboard clips broadcast to a table",
+            soundboard_broadcast
+        );
+        counter!(
+            "judgement_voice_notes_broadcast_total",
+            "Ephemeral voice notes broadcast to a table",
+            voice_notes_broadcast
+        );
+        counter!(
+            "judgement_audio_rejected_total",
+            "Soundboard/voice commands rejected (cooldown, size, mime, allow-list)",
+            audio_rejected
         );
 
         out.push_str("# HELP judgement_persist_commit_duration_milliseconds Persist commit latency\n");

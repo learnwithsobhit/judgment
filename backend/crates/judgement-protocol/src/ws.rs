@@ -1,5 +1,7 @@
 //! WebSocket message schema (PLAN.md §13.3–§13.5).
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use judgement_domain::{ActionId, GameError, GameId, PlayerId};
@@ -43,6 +45,14 @@ pub enum ClientCommand {
     SendEmoteText { text: String },
     /// Manual avatar flash mood: cheer | laugh | facepalm | fire
     AvatarFlash { mood: String },
+    /// Curated soundboard clip (asset id only; clients hold the bytes).
+    SendSoundboard { sound_id: String },
+    /// Short ephemeral voice note (Opus/WebM base64; not persisted).
+    SendVoiceNote {
+        mime: String,
+        duration_ms: u32,
+        audio_b64: String,
+    },
 }
 
 /// Why a command was rejected: either a domain rule or a protocol-level
@@ -147,6 +157,18 @@ pub enum ServerMessage {
         /// Curated cartoon sticker id for hybrid text blasts (cosmetic).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sticker_id: Option<String>,
+        /// Curated soundboard id (`kind == "soundboard"`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sound_id: Option<String>,
+        ttl_ms: u32,
+    },
+    /// Ephemeral freeform voice note. Not stored in engine or DB.
+    VoiceNote {
+        from: PlayerId,
+        mime: String,
+        duration_ms: u32,
+        /// Shared across fan-out clones to avoid N× payload copies.
+        audio_b64: Arc<str>,
         ttl_ms: u32,
     },
 }
@@ -200,6 +222,14 @@ mod tests {
             },
             ClientCommand::AvatarFlash {
                 mood: "cheer".into(),
+            },
+            ClientCommand::SendSoundboard {
+                sound_id: "laugh".into(),
+            },
+            ClientCommand::SendVoiceNote {
+                mime: "audio/webm;codecs=opus".into(),
+                duration_ms: 1200,
+                audio_b64: "AAAA".into(),
             },
         ];
         for command in commands {

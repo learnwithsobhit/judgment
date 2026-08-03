@@ -5,6 +5,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -13,6 +14,8 @@ import 'package:uuid/uuid.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../networking/game_socket.dart';
+import '../util/soundboard.dart';
+import '../util/table_audio.dart';
 
 enum GameConnectionState {
   connecting,
@@ -122,7 +125,12 @@ class GameController extends ChangeNotifier {
   /// playerId → latest flash mood for avatar bounce.
   final Map<String, String> avatarFlashes = {};
 
+  /// Mutes emoji blasts + table audio (soundboard / voice).
   bool muteReactions = false;
+
+  final TableAudioPlayer audio = TableAudioPlayer();
+  bool voiceRecording = false;
+  String? audioQueueFullHint;
 
   final _uuid = const Uuid();
 
@@ -133,7 +141,9 @@ class GameController extends ChangeNotifier {
     required this.gameId,
     required this.myPlayerId,
     required this.myNickname,
-  });
+  }) {
+    audio.onChanged = _notify;
+  }
 
   bool get isPaused =>
       pauseUntil != null && DateTime.now().isBefore(pauseUntil!);
@@ -374,6 +384,7 @@ class GameController extends ChangeNotifier {
           :final text,
           :final mood,
           :final stickerId,
+          :final soundId,
           :final ttlMs
         ):
         _onTableEvent(
@@ -384,6 +395,21 @@ class GameController extends ChangeNotifier {
           text: text,
           mood: mood,
           stickerId: stickerId,
+          soundId: soundId,
+          ttlMs: ttlMs,
+        );
+      case VoiceNoteMessage(
+          :final from,
+          :final mime,
+          :final durationMs,
+          :final audioB64,
+          :final ttlMs
+        ):
+        _onVoiceNote(
+          from: from,
+          mime: mime,
+          durationMs: durationMs,
+          audioB64: audioB64,
           ttlMs: ttlMs,
         );
       case BotTookOver() ||
@@ -572,9 +598,24 @@ class GameController extends ChangeNotifier {
     required String? text,
     required String? mood,
     required String? stickerId,
+    required String? soundId,
     required int ttlMs,
   }) {
     if (muteReactions && kind != 'auto_cheer') return;
+    if (kind == 'soundboard' && soundId != null) {
+      final ok = audio.enqueue(TableAudioItem(
+        id: _uuid.v4(),
+        from: from,
+        kind: TableAudioKind.soundboard,
+        soundId: soundId,
+        durationMs: ttlMs,
+      ));
+      if (!ok) {
+        audioQueueFullHint = 'Audio queue full';
+      }
+      _notify();
+      return;
+    }
     if (mood != null) {
       avatarFlashes[from] = '$mood-${DateTime.now().millisecondsSinceEpoch}';
     }
@@ -606,6 +647,33 @@ class GameController extends ChangeNotifier {
     _notify();
   }
 
+  void _onVoiceNote({
+    required String from,
+    required String mime,
+    required int durationMs,
+    required String audioB64,
+    required int ttlMs,
+  }) {
+    if (muteReactions) return;
+    try {
+      final bytes = base64Decode(audioB64);
+      final ok = audio.enqueue(TableAudioItem(
+        id: _uuid.v4(),
+        from: from,
+        kind: TableAudioKind.voice,
+        mime: mime,
+        bytes: bytes,
+        durationMs: durationMs > 0 ? durationMs : ttlMs,
+      ));
+      if (!ok) {
+        audioQueueFullHint = 'Audio queue full';
+      }
+    } catch (_) {
+      // Ignore corrupt payloads.
+    }
+    _notify();
+  }
+
   void placeBid(int bid) {
     _sendCommand({'type': 'place_bid', 'bid': bid});
   }
@@ -632,6 +700,41 @@ class GameController extends ChangeNotifier {
 
   void sendAvatarFlash(String mood) {
     _sendAction({'type': 'avatar_flash', 'mood': mood});
+  }
+
+  void setMuteTableNoise(bool muted) {
+    muteReactions = muted;
+    audio.muted = muted;
+    _notify();
+  }
+
+  Future<void> sendSoundboard(String soundId) async {
+    await audio.unlock();
+    _sendAction({'type': 'send_soundboard', 'sound_id': soundId});
+  }
+
+  Future<void> sendVoiceNote({
+    required String mime,
+    required int durationMs,
+    required String audioB64,
+  }) async {
+    await audio.unlock();
+    _sendAction({
+      'type': 'send_voice_note',
+      'mime': mime,
+      'duration_ms': durationMs,
+      'audio_b64': audioB64,
+    });
+  }
+
+  String? audioNowPlayingLabel() {
+    final item = audio.nowPlaying;
+    if (item == null) return null;
+    final who = nicknameOf(item.from);
+    if (item.kind == TableAudioKind.soundboard) {
+      return '$who · ${soundboardLabel(item.soundId ?? '')}';
+    }
+    return '$who · voice';
   }
 
   /// Why a card is not currently playable, for user feedback
@@ -740,6 +843,7 @@ class GameController extends ChangeNotifier {
     _persistRetryTimer?.cancel();
     _holdTimer?.cancel();
     _bannerTimer?.cancel();
+    unawaited(audio.dispose());
     _closeSocket();
     super.dispose();
   }

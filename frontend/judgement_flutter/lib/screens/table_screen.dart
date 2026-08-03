@@ -255,6 +255,34 @@ class _TableScreenState extends State<TableScreen> {
                       ),
                     ),
                   ),
+                if (controller.audioNowPlayingLabel() != null ||
+                    controller.audio.queueLength > 1)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          child: Text(
+                            '🎧 ${controller.audioNowPlayingLabel() ?? 'Queued'}'
+                            '${controller.audio.queueLength > 1 ? ' · +${controller.audio.queueLength - 1}' : ''}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 EmoteBar(controller: controller),
                 _ActionArea(controller: controller),
                 _HandArea(controller: controller),

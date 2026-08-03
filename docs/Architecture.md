@@ -143,6 +143,7 @@ Key files under `backend/crates/judgement-server/src/`:
 | `state.rs` | Sessions, rooms, games, tokens, store handle |
 | `persist.rs` / `restore.rs` | Runtime ↔ store mapping; boot restore |
 | `emotes.rs` | Allow-lists and text→emoji lexicon |
+| `audio.rs` | Soundboard allow-list + voice-note size/mime caps |
 | `cors.rs` / `http_limit.rs` | Origins and abuse controls |
 
 ### 2.3 Frontend layers
@@ -216,7 +217,7 @@ See [`docs/runbooks/deploy.md`](runbooks/deploy.md) and [`deployment/fly.env.exa
 | Transport | Use |
 |-----------|-----|
 | **REST** | Guest session, rooms/lobby (incl. host remove-player before start), avatar (lobby), scheduled events, AI rules query, coach/highlights, history |
-| **WebSocket** | Live bids/plays, snapshots, presence, timers, pause/resume, bot takeover, in-game avatar, table emotes |
+| **WebSocket** | Live bids/plays, snapshots, presence, timers, pause/resume, bot takeover, in-game avatar, table emotes, soundboard, short voice notes |
 
 Lobby freshness uses **HTTP polling** (~2s). Live play uses **full personalized snapshots** after each accepted mutation (no client-side deltas).
 
@@ -292,7 +293,7 @@ sequenceDiagram
 
 **Client envelope fields:** `protocol_version`, `action_id` (UUID, idempotent), `game_id`, `expected_state_version`, `action`.
 
-**Server messages (selected):** `CommandAccepted` / `CommandRejected`, `StateSnapshot`, presence, `GamePaused` / `GameResumed`, `BotTookOver` / `PlayerResumedControl`, `TokenRotated`, `TimerUpdated`, `TableEvent` (emotes).
+**Server messages (selected):** `CommandAccepted` / `CommandRejected`, `StateSnapshot`, presence, `GamePaused` / `GameResumed`, `BotTookOver` / `PlayerResumedControl`, `TokenRotated`, `TimerUpdated`, `TableEvent` (emotes / soundboard), `VoiceNote` (ephemeral Opus ≤6s, not persisted).
 
 Hardening: max message 64 KiB; ping 15s; liveness 45s; command queue capacity 256.
 
@@ -515,6 +516,8 @@ flowchart TB
 | REST | JSON | `Authorization: Bearer {token}` |
 | WS | JSON envelopes | Query `?token=` then rotated token on wire |
 | Emotes | WS `TableEvent` | Ephemeral; not persisted as engine events |
+| Soundboard | WS `TableEvent` kind `soundboard` | Asset id only; clients play local `assets/sounds/`; 10s audio cooldown |
+| Voice notes | WS `VoiceNote` | Short Opus/WebM base64 ≤40KB / ≤6s; fan-out only; not stored; shared audio cooldown + client FIFO queue |
 | Metrics | Prometheus text | Public `/metrics` |
 
 ---

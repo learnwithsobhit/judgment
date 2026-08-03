@@ -180,6 +180,27 @@ void main() {
       expect(event.mood, 'roast');
       expect(event.stickerId, 'slam');
     });
+
+    test('table_event soundboard', () {
+      final message = parse(
+        '{"type":"table_event","kind":"soundboard","from":"p1","sound_id":"laugh","ttl_ms":1800}',
+      );
+      final event = message as TableEventMessage;
+      expect(event.kind, 'soundboard');
+      expect(event.soundId, 'laugh');
+    });
+
+    test('voice_note', () {
+      final message = parse(
+        '{"type":"voice_note","from":"p1","mime":"audio/webm;codecs=opus",'
+        '"duration_ms":1200,"audio_b64":"GkXfowAAAAA=","ttl_ms":1600}',
+      );
+      expect(message, isA<VoiceNoteMessage>());
+      final note = message as VoiceNoteMessage;
+      expect(note.from, 'p1');
+      expect(note.durationMs, 1200);
+      expect(note.audioB64, 'GkXfowAAAAA=');
+    });
   });
 
   group('RoomView', () {

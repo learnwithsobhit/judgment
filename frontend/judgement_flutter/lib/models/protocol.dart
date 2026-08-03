@@ -366,7 +366,16 @@ sealed class ServerMessage {
           text: json['text'] as String?,
           mood: json['mood'] as String?,
           stickerId: json['sticker_id'] as String?,
+          soundId: json['sound_id'] as String?,
           ttlMs: json['ttl_ms'] as int? ?? 1600,
+        );
+      case 'voice_note':
+        return VoiceNoteMessage(
+          from: json['from'] as String,
+          mime: json['mime'] as String? ?? 'audio/webm',
+          durationMs: json['duration_ms'] as int? ?? 0,
+          audioB64: json['audio_b64'] as String? ?? '',
+          ttlMs: json['ttl_ms'] as int? ?? 0,
         );
       default:
         return UnknownMessage(type: json['type'] as String);
@@ -474,6 +483,7 @@ class TableEventMessage extends ServerMessage {
   final String? text;
   final String? mood;
   final String? stickerId;
+  final String? soundId;
   final int ttlMs;
 
   TableEventMessage({
@@ -484,6 +494,23 @@ class TableEventMessage extends ServerMessage {
     required this.text,
     required this.mood,
     required this.stickerId,
+    required this.soundId,
+    required this.ttlMs,
+  });
+}
+
+class VoiceNoteMessage extends ServerMessage {
+  final String from;
+  final String mime;
+  final int durationMs;
+  final String audioB64;
+  final int ttlMs;
+
+  VoiceNoteMessage({
+    required this.from,
+    required this.mime,
+    required this.durationMs,
+    required this.audioB64,
     required this.ttlMs,
   });
 }

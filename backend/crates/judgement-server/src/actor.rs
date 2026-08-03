@@ -15,6 +15,7 @@ use judgement_protocol::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+use crate::audio::{sound_ttl_ms, validate_voice_note, AUDIO_COOLDOWN_MS};
 use crate::emotes::{
     is_allowed_avatar, is_allowed_emoji, is_allowed_mood, resolve_emote_text, MAX_EMOTE_TEXT_LEN,
     REACTION_COOLDOWN_MS,
@@ -149,6 +150,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         ended: false,
         metrics: config.metrics,
         last_emote_at: HashMap::new(),
+        last_audio_at: HashMap::new(),
         on_host_changed: config.on_host_changed,
         on_aborted: config.on_aborted,
         on_finished: config.on_finished,
@@ -185,6 +187,8 @@ struct GameActor {
     ended: bool,
     /// Rate-limit cosmetic emotes (player → last emit millis).
     last_emote_at: HashMap<PlayerId, u64>,
+    /// Rate-limit soundboard + voice notes (shared bucket per player).
+    last_audio_at: HashMap<PlayerId, u64>,
     on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
     on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
@@ -702,6 +706,13 @@ impl GameActor {
             self.handle_table_emote(player_id, envelope);
             return;
         }
+        if matches!(
+            envelope.action,
+            ClientCommand::SendSoundboard { .. } | ClientCommand::SendVoiceNote { .. }
+        ) {
+            self.handle_table_audio(player_id, envelope);
+            return;
+        }
 
         if let ClientCommand::SetAvatar { avatar_id } = &envelope.action {
             let avatar_id = avatar_id.clone();
@@ -826,7 +837,9 @@ impl GameActor {
             | ClientCommand::SetAvatar { .. }
             | ClientCommand::SendReaction { .. }
             | ClientCommand::SendEmoteText { .. }
-            | ClientCommand::AvatarFlash { .. } => unreachable!(),
+            | ClientCommand::AvatarFlash { .. }
+            | ClientCommand::SendSoundboard { .. }
+            | ClientCommand::SendVoiceNote { .. } => unreachable!(),
         };
 
         match result {
@@ -893,6 +906,7 @@ impl GameActor {
                     text: None,
                     mood: None,
                     sticker_id: None,
+                    sound_id: None,
                     ttl_ms: 1800,
                 }
             }
@@ -917,6 +931,7 @@ impl GameActor {
                     text: Some(trimmed.to_string()),
                     mood: Some(style.mood),
                     sticker_id: style.sticker_id,
+                    sound_id: None,
                     ttl_ms: 2200,
                 }
             }
@@ -939,7 +954,100 @@ impl GameActor {
                     text: None,
                     mood: Some(mood),
                     sticker_id: None,
+                    sound_id: None,
                     ttl_ms: 1600,
+                }
+            }
+            _ => unreachable!(),
+        };
+
+        self.send_to(
+            player_id,
+            ServerMessage::CommandAccepted {
+                action_id,
+                new_state_version: self.engine.version(),
+            },
+        );
+        self.broadcast(event);
+    }
+
+    fn handle_table_audio(&mut self, player_id: PlayerId, envelope: ClientEnvelope) {
+        let action_id = envelope.action_id;
+        if !self.clients.contains_key(&player_id) {
+            return;
+        }
+        if !self.allow_audio(player_id) {
+            self.metrics
+                .audio_rejected
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.reject(
+                player_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "slow down — voice notes are rate limited".into(),
+                },
+            );
+            return;
+        }
+
+        let event = match envelope.action {
+            ClientCommand::SendSoundboard { sound_id } => {
+                let Some(ttl_ms) = sound_ttl_ms(&sound_id) else {
+                    self.metrics
+                        .audio_rejected
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    // Roll back cooldown so a typo does not lock the player out.
+                    self.last_audio_at.remove(&player_id);
+                    self.reject(
+                        player_id,
+                        Some(action_id),
+                        RejectReason::MalformedMessage {
+                            detail: "sound not allowed".into(),
+                        },
+                    );
+                    return;
+                };
+                self.metrics
+                    .soundboard_broadcast
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                ServerMessage::TableEvent {
+                    kind: "soundboard".into(),
+                    from: player_id,
+                    target: None,
+                    emojis: Vec::new(),
+                    text: None,
+                    mood: None,
+                    sticker_id: None,
+                    sound_id: Some(sound_id),
+                    ttl_ms,
+                }
+            }
+            ClientCommand::SendVoiceNote {
+                mime,
+                duration_ms,
+                audio_b64,
+            } => {
+                if let Err(detail) = validate_voice_note(&mime, duration_ms, &audio_b64) {
+                    self.metrics
+                        .audio_rejected
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.last_audio_at.remove(&player_id);
+                    self.reject(
+                        player_id,
+                        Some(action_id),
+                        RejectReason::MalformedMessage { detail },
+                    );
+                    return;
+                }
+                self.metrics
+                    .voice_notes_broadcast
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                ServerMessage::VoiceNote {
+                    from: player_id,
+                    mime,
+                    duration_ms,
+                    audio_b64: Arc::<str>::from(audio_b64),
+                    ttl_ms: duration_ms.saturating_add(400),
                 }
             }
             _ => unreachable!(),
@@ -966,6 +1074,17 @@ impl GameActor {
         true
     }
 
+    fn allow_audio(&mut self, player_id: PlayerId) -> bool {
+        let now = now_ms();
+        if let Some(&last) = self.last_audio_at.get(&player_id) {
+            if now.saturating_sub(last) < AUDIO_COOLDOWN_MS {
+                return false;
+            }
+        }
+        self.last_audio_at.insert(player_id, now);
+        true
+    }
+
     fn emit_auto_cheers(&mut self, events: &[judgement_engine::GameEvent]) {
         use judgement_engine::GameEvent;
         for event in events {
@@ -979,6 +1098,7 @@ impl GameActor {
                         text: None,
                         mood: Some("cheer".into()),
                         sticker_id: Some("laugh".into()),
+                        sound_id: None,
                         ttl_ms: 1600,
                     });
                 }
@@ -1001,6 +1121,7 @@ impl GameActor {
                             text: None,
                             mood: Some("cheer".into()),
                             sticker_id: Some("crown".into()),
+                            sound_id: None,
                             ttl_ms: 2000,
                         });
                     }
@@ -1015,6 +1136,7 @@ impl GameActor {
                             text: None,
                             mood: Some("fire".into()),
                             sticker_id: Some("fire".into()),
+                            sound_id: None,
                             ttl_ms: 2500,
                         });
                     }
