@@ -83,7 +83,7 @@ jobs:
             echo "FIREBASE_PROJECT_ID variable missing — skip hosting deploy"
             exit 1
           fi
-          firebase deploy --only hosting \
+          firebase deploy --only hosting:prod \
             --project "$FIREBASE_PROJECT_ID" \
             --token "$FIREBASE_TOKEN" \
             --non-interactive

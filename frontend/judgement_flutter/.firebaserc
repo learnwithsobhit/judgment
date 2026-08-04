@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "judgment-lws-260731"
-  }
+  },
+  "targets": {
+    "judgment-lws-260731": {
+      "hosting": {
+        "prod": [
+          "judgment-lws-260731"
+        ],
+        "railway-test": [
+          "judgment-railway-test"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
