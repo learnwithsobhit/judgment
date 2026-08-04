@@ -116,6 +116,33 @@ jobs:
               200|301|302) ;;
               *) echo "Unexpected status"; exit 1 ;;
             esac
+
+            assert_cache() {
+              local path="$1"
+              local expect="$2"
+              local hdr
+              hdr=$(curl -fsSI "$WEB_ORIGIN$path" | tr -d '\r' | awk -F': ' 'tolower($1)=="cache-control"{print tolower($2); exit}')
+              echo "$path Cache-Control: ${hdr:-<missing>}"
+              case "$hdr" in
+                *"$expect"*) ;;
+                *)
+                  echo "Expected Cache-Control containing '$expect' for $path"
+                  exit 1
+                  ;;
+              esac
+            }
+
+            assert_cache "/" "no-store"
+            assert_cache "/index.html" "no-store"
+            assert_cache "/flutter_bootstrap.js" "no-store"
+            assert_cache "/main.dart.js" "no-store"
+            assert_cache "/version.json" "no-store"
+            assert_cache "/assets/AssetManifest.bin" "no-store"
+
+            echo "Checking $WEB_ORIGIN/version.json build_id"
+            body=$(curl -fsS "$WEB_ORIGIN/version.json")
+            echo "$body"
+            echo "$body" | grep -q '"build_id"'
           else
             echo "PUBLIC_WEB_ORIGIN unset — skip web smoke"
           fi

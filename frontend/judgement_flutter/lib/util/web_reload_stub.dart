@@ -1,3 +1,2 @@
-Future<void> clearWebCachesAndReload() async {
-  // Non-web: nothing to do.
-}
+/// Non-web: nothing to do.
+Future<void> clearWebCachesAndReload({String? buildId}) async {}

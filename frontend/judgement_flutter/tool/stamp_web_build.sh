@@ -24,12 +24,16 @@ fi
 
 INDEX="$WEB/index.html"
 if [[ -f "$INDEX" ]]; then
+  # Prefer stamping WINDOW_APP_BUILD_ID; bootstrap JS uses that variable.
+  if grep -q "WINDOW_APP_BUILD_ID = 'BUILD_ID'" "$INDEX"; then
+    sed -i.bak "s/WINDOW_APP_BUILD_ID = 'BUILD_ID'/WINDOW_APP_BUILD_ID = '${BUILD_ID}'/g" "$INDEX"
+  elif grep -q "WINDOW_APP_BUILD_ID = '" "$INDEX"; then
+    sed -i.bak "s/WINDOW_APP_BUILD_ID = '[^']*'/WINDOW_APP_BUILD_ID = '${BUILD_ID}'/g" "$INDEX"
+  fi
+
+  # Legacy / alternate templates that hardcode bootstrap ?v=BUILD_ID.
   if grep -q 'flutter_bootstrap\.js?v=BUILD_ID' "$INDEX"; then
     sed -i.bak "s/flutter_bootstrap\.js?v=BUILD_ID/flutter_bootstrap.js?v=${BUILD_ID}/g" "$INDEX"
-  elif grep -q 'flutter_bootstrap\.js?v=' "$INDEX"; then
-    sed -i.bak "s/flutter_bootstrap\.js?v=[^\"]*/flutter_bootstrap.js?v=${BUILD_ID}/g" "$INDEX"
-  elif grep -q 'flutter_bootstrap\.js"' "$INDEX"; then
-    sed -i.bak "s/flutter_bootstrap\.js\"/flutter_bootstrap.js?v=${BUILD_ID}\"/g" "$INDEX"
   fi
   rm -f "${INDEX}.bak"
 fi
@@ -56,4 +60,4 @@ path.write_text(json.dumps(data))
 print(f"stamped version.json build_id={build_id} version={data.get('version')}")
 PY
 
-echo "stamped bootstrap ?v=$BUILD_ID"
+echo "stamped WINDOW_APP_BUILD_ID + version.json build_id=$BUILD_ID"

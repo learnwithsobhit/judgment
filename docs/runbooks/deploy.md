@@ -84,7 +84,7 @@ API_BASE=https://judgment-api.fly.dev ./tool/build_web_release.sh
 firebase deploy --only hosting --project judgment-lws-260731
 ```
 
-`build_web_release.sh` stamps a unique `APP_BUILD_ID` into the JS (`--dart-define`) and into `version.json` / `flutter_bootstrap.js?v=…` so browsers pick up new deploys without clearing site data. Create/Join shows the running version and offers **Switch to latest version** when `version.json` differs.
+`build_web_release.sh` stamps a unique `APP_BUILD_ID` into the JS (`--dart-define`), `version.json`, and `WINDOW_APP_BUILD_ID` in `index.html`. On load, the HTML boot gate compares that id to `/version.json` and cache-bust navigates (`_b=…`) if stale. Create/Join and event join are blocked until current; landing auto-reloads when an update is detected.
 
 Verify cache headers after deploy:
 
@@ -92,10 +92,11 @@ Verify cache headers after deploy:
 curl -sI https://judgment-lws-260731.web.app/ | grep -i cache
 curl -sI https://judgment-lws-260731.web.app/r/TEST | grep -i cache
 curl -sI https://judgment-lws-260731.web.app/main.dart.js | grep -i cache
+curl -sI https://judgment-lws-260731.web.app/assets/AssetManifest.bin | grep -i cache
 curl -fsS https://judgment-lws-260731.web.app/version.json
 ```
 
-Expect `no-cache` / `no-store` on HTML and entry JS. Deep links (`/r/**`, `/e/**`) must not be long-cached.
+Expect `no-cache` / `no-store` on HTML, entry JS, `version.json`, and `/assets/AssetManifest*`. `/assets/**` packs use short TTL (`max-age=3600`). Deep links (`/r/**`, `/e/**`) must not be long-cached.
 
 Hosting URL: `https://judgment-lws-260731.web.app`
 

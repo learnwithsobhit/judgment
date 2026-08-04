@@ -28,6 +28,8 @@ class AppUpdateController extends ChangeNotifier {
   String? latestVersion;
   String? latestBuildId;
   bool checking = false;
+  bool initialCheckComplete = false;
+  bool _reloading = false;
   Timer? _timer;
 
   String get runningLabel {
@@ -53,8 +55,16 @@ class AppUpdateController extends ChangeNotifier {
     return remote != kAppBuildId;
   }
 
+  /// True while the first version check is in flight (web only).
+  bool get awaitingInitialCheck =>
+      kIsWeb && kAppBuildId != 'local' && !initialCheckComplete;
+
   void start({Duration interval = const Duration(seconds: 60)}) {
     unawaited(check());
+    // Catch a deploy that lands just after the first poll.
+    Future<void>.delayed(const Duration(seconds: 5), () {
+      if (_timer != null) unawaited(check());
+    });
     _timer?.cancel();
     _timer = Timer.periodic(interval, (_) => unawaited(check()));
   }
@@ -67,6 +77,7 @@ class AppUpdateController extends ChangeNotifier {
   Future<void> check() async {
     if (checking) return;
     checking = true;
+    notifyListeners();
     try {
       final uri = Uri.base.resolve('version.json').replace(
         queryParameters: {
@@ -79,16 +90,42 @@ class AppUpdateController extends ChangeNotifier {
       if (data is! Map) return;
       latestVersion = data['version']?.toString();
       latestBuildId = data['build_id']?.toString();
-      notifyListeners();
     } catch (_) {
       // Offline / blocked — keep last known state.
     } finally {
       checking = false;
+      if (!initialCheckComplete) {
+        initialCheckComplete = true;
+      }
+      notifyListeners();
     }
   }
 
   Future<void> switchToLatest() async {
-    await clearWebCachesAndReload();
+    if (_reloading) return;
+    _reloading = true;
+    notifyListeners();
+    final target = latestBuildId;
+    await clearWebCachesAndReload(
+      buildId: (target != null && target.isNotEmpty) ? target : kAppBuildId,
+    );
+  }
+
+  /// Returns `true` if the running build is current and entry may proceed.
+  /// If a newer deploy exists, starts a cache-busting navigation and returns
+  /// `false` (caller must not continue Create/Join).
+  Future<bool> ensureFreshOrReload() async {
+    if (!kIsWeb || kAppBuildId == 'local') return true;
+    if (!initialCheckComplete) {
+      await check();
+    } else if (!updateAvailable) {
+      await check();
+    }
+    if (updateAvailable) {
+      await switchToLatest();
+      return false;
+    }
+    return true;
   }
 }
 

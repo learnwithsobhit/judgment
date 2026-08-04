@@ -4,9 +4,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../screens/legal/legal_screens.dart';
+import '../util/app_update.dart';
 import '../util/avatar_pack.dart';
 import '../util/legal_consent.dart';
 import '../util/table_media_session.dart';
+import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/legal_consent_checkbox.dart';
 import 'lobby_screen.dart';
@@ -107,6 +109,8 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
     }
     final code = _event?.roomCode;
     if (code == null) return;
+    final fresh = await AppUpdateController.instance.ensureFreshOrReload();
+    if (!fresh || !mounted) return;
     final nickname = _name.text.trim().isEmpty ? 'Player' : _name.text.trim();
     setState(() => _busy = true);
     try {
@@ -230,9 +234,24 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
                   onChanged: (v) => setState(() => _legalAccepted = v),
                 ),
                 const SizedBox(height: 8),
-                FilledButton(
-                  onPressed: (_busy || !_legalAccepted) ? null : _joinLobby,
-                  child: const Text('Join lobby'),
+                ListenableBuilder(
+                  listenable: AppUpdateController.instance,
+                  builder: (context, _) {
+                    final updates = AppUpdateController.instance;
+                    final blocked = _busy ||
+                        !_legalAccepted ||
+                        updates.awaitingInitialCheck ||
+                        updates.updateAvailable;
+                    return FilledButton(
+                      onPressed: blocked ? null : _joinLobby,
+                      child: const Text('Join lobby'),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                const AppVersionBar(
+                  autoReload: true,
+                  blockWhenStale: true,
                 ),
               ] else
                 const Text(

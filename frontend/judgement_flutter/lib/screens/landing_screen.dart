@@ -4,6 +4,7 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
+import '../util/app_update.dart';
 import '../util/avatar_pack.dart';
 import '../util/legal_consent.dart';
 import '../util/table_media_session.dart';
@@ -120,6 +121,9 @@ class _LandingScreenState extends State<LandingScreen> {
         return;
       }
     }
+
+    final fresh = await AppUpdateController.instance.ensureFreshOrReload();
+    if (!fresh || !mounted) return;
 
     setState(() => _busy = true);
     final api = ApiClient();
@@ -579,22 +583,39 @@ class _LandingScreenState extends State<LandingScreen> {
                           onChanged: (v) => setState(() => _legalAccepted = v),
                         ),
                         const SizedBox(height: 16),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 48,
-                          child: FilledButton(
-                            onPressed: (_busy || !_legalAccepted) ? null : _submit,
-                            child: _busy
-                                ? const SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : Text(_joining ? 'Join game' : 'Create room'),
-                          ),
+                        ListenableBuilder(
+                          listenable: AppUpdateController.instance,
+                          builder: (context, _) {
+                            final updates = AppUpdateController.instance;
+                            final blocked = _busy ||
+                                !_legalAccepted ||
+                                updates.awaitingInitialCheck ||
+                                updates.updateAvailable;
+                            return SizedBox(
+                              width: double.infinity,
+                              height: 48,
+                              child: FilledButton(
+                                onPressed: blocked ? null : _submit,
+                                child: _busy
+                                    ? const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Text(
+                                        _joining ? 'Join game' : 'Create room',
+                                      ),
+                              ),
+                            );
+                          },
                         ),
                         const SizedBox(height: 8),
-                        const AppVersionBar(),
+                        const AppVersionBar(
+                          autoReload: true,
+                          blockWhenStale: true,
+                        ),
                       ],
                     ),
                   ),
