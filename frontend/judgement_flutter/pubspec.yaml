@@ -68,6 +68,7 @@ flutter:
     - assets/cards/
     - assets/emotes/
     - assets/sounds/
+    - assets/avatars/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

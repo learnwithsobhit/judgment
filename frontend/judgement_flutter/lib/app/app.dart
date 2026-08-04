@@ -6,6 +6,7 @@ import '../screens/event_manage_screen.dart';
 import '../screens/landing_screen.dart';
 import '../util/app_update.dart';
 import '../util/room_share.dart';
+import '../util/share_analytics.dart';
 
 const feltGreen = Color(0xFF1B5E20);
 const feltGreenDark = Color(0xFF0D3311);
@@ -13,6 +14,7 @@ const goldAccent = Color(0xFFFFC857);
 
 /// Parse `/e/{slug}`, `/e/{slug}/manage?token=`, and `/r/{CODE}` from the browser URL.
 Widget initialHomeFromUri(Uri uri) {
+  captureUtmFromUri(uri);
   final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (segments.length >= 2 && segments[0] == 'e') {
     final slug = segments[1];

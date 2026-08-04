@@ -3,8 +3,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
+import '../models/protocol.dart';
 import '../state/game_controller.dart';
+import '../util/social_share.dart';
 import 'player_avatar.dart';
+import 'share_sheet.dart';
 
 /// Full-screen party beat after the game ends — crackers + dancing avatars —
 /// before the player opens the score sheet.
@@ -179,17 +182,39 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
                         vertical: 14,
                       ),
                     ),
-                    onPressed: widget.onViewResults,
-                    icon: const Icon(Icons.emoji_events),
+                    onPressed: () => _openShare(
+                      context,
+                      ranking,
+                      campaign: ShareCampaign.resultWin,
+                      title: 'Share your win',
+                    ),
+                    icon: const Icon(Icons.ios_share),
                     label: const Text(
-                      'View results',
+                      'Share win',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => _openShare(
+                      context,
+                      ranking,
+                      campaign: ShareCampaign.resultChallenge,
+                      title: 'Challenge friends',
+                    ),
+                    icon: const Icon(Icons.sports_kabaddi),
+                    label: const Text('Challenge friends'),
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton.tonalIcon(
+                    onPressed: widget.onViewResults,
+                    icon: const Icon(Icons.emoji_events),
+                    label: const Text('View results'),
+                  ),
+                  const SizedBox(height: 8),
                   TextButton(
                     onPressed: widget.onViewResults,
                     child: Text(
@@ -205,6 +230,35 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
           ),
         ],
       ),
+    );
+  }
+
+  void _openShare(
+    BuildContext context,
+    List<RankedPlayer> ranking, {
+    required ShareCampaign campaign,
+    required String title,
+  }) {
+    final c = widget.controller;
+    final list = ranking.isNotEmpty ? ranking : (c.view?.finalRanking ?? const []);
+    final text = buildResultsShareText(
+      nicknameOf: c.nicknameOf,
+      myPlayerId: c.myPlayerId,
+      ranking: list,
+      roomCode: c.roomCode,
+      campaign: campaign,
+    );
+    final url = (c.roomCode != null && c.roomCode!.isNotEmpty)
+        ? roomInviteUrl(c.roomCode!, campaign: ShareCampaign.resultChallenge)
+        : playHomeUrl(campaign: campaign);
+    showSocialShareSheet(
+      context: context,
+      title: title,
+      text: text,
+      url: url,
+      campaign: campaign,
+      controller: c,
+      ranking: list,
     );
   }
 }

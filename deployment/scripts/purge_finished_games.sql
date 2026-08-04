@@ -1,32 +1,17 @@
--- One-time / ops backfill: compact then delete terminal games older than 24h.
+-- Ops backstop: hard-delete leftover finished/aborted games older than 4h.
+-- Primary path deletes on finish/abort; this catches stragglers.
 -- Run via: fly postgres connect -a judgment-db
 --   or: psql "$DATABASE_URL" -f deployment/scripts/purge_finished_games.sql
 
 BEGIN;
 
--- Drop mid-game event history for finished/aborted games (keep latest snapshot).
-DELETE FROM game_events ge
-USING games g
-WHERE ge.game_id = g.game_id
-  AND g.status IN ('finished', 'aborted');
-
-DELETE FROM game_snapshots gs
-USING games g
-WHERE gs.game_id = g.game_id
-  AND g.status IN ('finished', 'aborted')
-  AND gs.state_version < (
-      SELECT COALESCE(MAX(s2.state_version), 0)
-      FROM game_snapshots s2
-      WHERE s2.game_id = gs.game_id
-  );
-
--- Hard-delete games finished/aborted more than 24 hours ago (cascades children).
+-- Hard-delete leftover terminal games (cascades events/snapshots/results).
 WITH doomed AS (
   SELECT game_id, room_id
   FROM games
   WHERE status IN ('finished', 'aborted')
     AND finished_at IS NOT NULL
-    AND finished_at < now() - interval '24 hours'
+    AND finished_at < now() - interval '4 hours'
 )
 DELETE FROM games g
 USING doomed d

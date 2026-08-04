@@ -120,7 +120,7 @@ pub struct SpawnActor {
     pub on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     /// Remove actor + return room to Lobby after terminal abort.
     pub on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
-    /// Remove actor from the active map after natural GameCompleted.
+    /// Remove actor + return room to Lobby after natural GameCompleted.
     pub on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
 }
 
@@ -563,11 +563,11 @@ impl GameActor {
         if let Some(store) = &self.store {
             if let Err(error) = store.abort_game(self.game_id).await {
                 tracing::error!(%error, game = %self.game_id, "abort_game failed");
-            } else if let Err(error) = store.compact_finished_game(self.game_id).await {
-                tracing::warn!(%error, game = %self.game_id, "compact_finished_game failed");
+            } else if let Err(error) = store.delete_game(self.game_id).await {
+                tracing::warn!(%error, game = %self.game_id, "delete aborted game failed");
             } else {
                 self.metrics
-                    .games_compacted
+                    .games_purged
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -1353,20 +1353,21 @@ impl GameActor {
             .iter()
             .any(|e| matches!(e, GameEvent::GameCompleted { .. }))
         {
+            // Client already has the final WS snapshot; drop tip + row immediately.
             if let Some(store) = self.store.clone() {
                 let game_id = self.game_id;
                 let metrics = self.metrics.clone();
                 tokio::spawn(async move {
-                    if let Err(error) = store.compact_finished_game(game_id).await {
-                        tracing::warn!(%error, game = %game_id, "compact_finished_game failed");
+                    if let Err(error) = store.delete_game(game_id).await {
+                        tracing::warn!(%error, game = %game_id, "delete finished game failed");
                     } else {
                         metrics
-                            .games_compacted
+                            .games_purged
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 });
             }
-            // Free admission slot promptly; room/results remain for history UI.
+            // Free admission slot; return room to Lobby for rematch.
             if let Some(hook) = &self.on_finished {
                 hook(self.game_id);
             }

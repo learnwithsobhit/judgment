@@ -4,9 +4,11 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
+import '../util/avatar_pack.dart';
 import '../util/legal_consent.dart';
 import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
+import '../widgets/avatar_picker.dart';
 import '../widgets/legal_consent_checkbox.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
@@ -35,6 +37,7 @@ class _LandingScreenState extends State<LandingScreen> {
   late bool _joining; // false = create, true = join
   bool _busy = false;
   bool _legalAccepted = false;
+  String _selectedAvatarId = defaultAvatarId;
   bool get _fromLink => widget.initialJoinCode != null;
 
   @override
@@ -125,6 +128,7 @@ class _LandingScreenState extends State<LandingScreen> {
       await TableMediaSession.prepareBeforeNetwork();
 
       final session = await api.createGuestSession(nickname);
+      await api.setAvatar(_selectedAvatarId);
       final ({RoomView room, String playerId}) result;
       String? capacityHint;
       if (_joining) {
@@ -540,6 +544,20 @@ class _LandingScreenState extends State<LandingScreen> {
                             counterText: '',
                           ),
                           onSubmitted: (_) => _submit(),
+                        ),
+                        const SizedBox(height: 16),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Your avatar',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        AvatarPicker(
+                          selectedId: _selectedAvatarId,
+                          onSelected: (id) =>
+                              setState(() => _selectedAvatarId = id),
                         ),
                         if (_joining && !_fromLink) ...[
                           const SizedBox(height: 12),

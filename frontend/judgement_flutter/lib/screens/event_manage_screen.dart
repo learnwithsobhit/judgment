@@ -6,6 +6,7 @@ import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../util/event_share.dart';
 import '../util/legal_consent.dart';
+import '../util/social_share.dart';
 import '../util/table_media_session.dart';
 import '../widgets/legal_consent_checkbox.dart';
 import 'lobby_screen.dart';
@@ -64,13 +65,28 @@ class _EventManageScreenState extends State<EventManageScreen> {
   Future<void> _copyShare() async {
     final event = _view?.event;
     if (event == null) return;
-    // Compose on the client: server share_text uses PUBLIC_WEB_ORIGIN (often
-    // :3000) and UTC clock labels that misread the event timezone.
-    final text = eventShareText(event);
-    await Clipboard.setData(ClipboardData(text: text));
+    final inviteUrl = '${Uri.base.origin}/e/${widget.slug}';
+    final body = eventShareText(event);
+    final text = buildEventInviteShareText(body, inviteUrl);
+    final url = withUtm(
+      inviteUrl,
+      campaign: ShareCampaign.eventInvite,
+      medium: 'whatsapp',
+    );
+    final opened = await shareToChannel(
+      channel: ShareChannel.whatsapp,
+      text: text,
+      url: url,
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('WhatsApp message copied')),
+      SnackBar(
+        content: Text(
+          opened == ShareChannel.whatsapp
+              ? 'Opening WhatsApp…'
+              : 'Invite text copied',
+        ),
+      ),
     );
   }
 
@@ -244,7 +260,7 @@ class _EventManageScreenState extends State<EventManageScreen> {
             FilledButton.icon(
               onPressed: _copyShare,
               icon: const Icon(Icons.share),
-              label: const Text('Copy WhatsApp text'),
+              label: const Text('Share on WhatsApp'),
             ),
             OutlinedButton.icon(
               onPressed: _openCalendar,

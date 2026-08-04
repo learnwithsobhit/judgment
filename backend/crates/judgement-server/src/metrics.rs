@@ -95,8 +95,8 @@ impl Metrics {
         counter!("judgement_games_ended_vacancy_total", "Games ended by host or vacancy timeout", games_ended_vacancy);
         counter!("judgement_games_restarted_total", "Games rematched via host restart", games_restarted);
         counter!("judgement_games_removed_total", "Game actors removed from the active map after abort/restart", games_removed);
-        counter!("judgement_games_compacted_total", "Finished games compacted (events pruned)", games_compacted);
-        counter!("judgement_games_purged_total", "Terminal games hard-deleted by TTL", games_purged);
+        counter!("judgement_games_compacted_total", "Finished games compacted (ops/backfill)", games_compacted);
+        counter!("judgement_games_purged_total", "Terminal games hard-deleted on finish/abort or reaper backstop", games_purged);
         counter!("judgement_games_abandoned_total", "In-memory abandoned game actors dropped", games_abandoned);
         counter!("judgement_invalid_actions_total", "Rejected game commands", invalid_actions);
         counter!("judgement_db_write_failures_total", "Persist commit failures", db_write_failures);

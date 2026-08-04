@@ -216,7 +216,7 @@ See [`docs/runbooks/deploy.md`](runbooks/deploy.md) and [`deployment/fly.env.exa
 
 | Transport | Use |
 |-----------|-----|
-| **REST** | Guest session, rooms/lobby (incl. host remove-player before start), avatar (lobby), scheduled events, AI rules query, coach/highlights, history |
+| **REST** | Guest session, rooms/lobby (incl. host remove-player before start), avatar (`POST /me/avatar` at create/join + lobby), scheduled events, AI rules query, coach/highlights, history |
 | **WebSocket** | Live bids/plays, snapshots, presence, timers, pause/resume, bot takeover, in-game avatar, table emotes, soundboard, short voice notes |
 
 Lobby freshness uses **HTTP polling** (~2s). Live play uses **full personalized snapshots** after each accepted mutation (no client-side deltas).
@@ -313,7 +313,7 @@ flowchart TD
   table[TableScreen WS]
   play[Bid and play loop]
   victory[Victory celebration]
-  results[Results coach highlights]
+  results[ResultScreen client standings]
 
   startNode --> guest --> room --> lobby --> startGame --> table --> play
   play -->|GameCompleted| victory --> results
@@ -531,17 +531,19 @@ flowchart LR
   faq[FAQ and templates]
   ragOpt[Optional RAG]
   llmOpt[Optional LLM tone]
-  coach[Post-game coach]
 
   gameplay -.->|never waits on| side
   side --> faq --> ragOpt --> llmOpt
-  side --> coach
 ```
 
 ADR: [`0002-rig-for-ai-and-rag.md`](adr/0002-rig-for-ai-and-rag.md).
 
 - AI never mutates engine state and must not receive hidden hands or shuffle seeds.
-- Coach/highlights run only for finished games from durable scores.
+- Result screen is **client-only standings** from the final WS `PlayerGameView`
+  (podium, matrix, personal summary). Finished games are deleted on finish —
+  no post-game coach dependency on durable tip/history.
+- Optional coach/highlights REST may still exist for experiments but is off the
+  product path; durable finished rows are not kept for it.
 - Bots (`judgement-bot`) are rule strategies, not LLM.
 
 ---
@@ -568,7 +570,7 @@ flowchart TD
   landing --> schedule[ScheduleEventScreen]
 ```
 
-Cosmetic engagement (avatars, reactions, cartoon text blasts) is presentation-only; mid-game scoreboard hides the Totals row until halftime (`⌈total_rounds/2⌉`) or the ≤3-card phase, then keeps totals visible.
+Cosmetic engagement (avatars, reactions, cartoon text blasts) is presentation-only. Character avatars are a curated static pack (`assets/avatars/face_*.png`, Notionists CC0 pre-export; wire field still `avatar_id`); picked on landing/event join and changeable in lobby — client-rendered, no runtime avatar CDN. Post-game **Share** (WhatsApp / Telegram / X / Facebook / system / trophy card image) lives on victory + results with UTM’d invite links — see [`docs/marketing/social_playbook.md`](marketing/social_playbook.md). Mid-game scoreboard hides the Totals row until halftime (`⌈total_rounds/2⌉`) or the ≤3-card phase, then keeps totals visible. ResultScreen is client-only celebration + standings from the last WS view (no coach REST).
 
 ---
 

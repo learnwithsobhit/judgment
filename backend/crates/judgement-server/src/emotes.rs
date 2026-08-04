@@ -5,7 +5,15 @@ use std::sync::OnceLock;
 pub const MAX_EMOTE_TEXT_LEN: usize = 40;
 pub const REACTION_COOLDOWN_MS: u64 = 2000;
 
+/// Illustrated Notionists faces (`face_01`…`face_40`) plus legacy emoji ids.
 const ALLOWED_AVATARS: &[&str] = &[
+    "face_01", "face_02", "face_03", "face_04", "face_05", "face_06", "face_07",
+    "face_08", "face_09", "face_10", "face_11", "face_12", "face_13", "face_14",
+    "face_15", "face_16", "face_17", "face_18", "face_19", "face_20", "face_21",
+    "face_22", "face_23", "face_24", "face_25", "face_26", "face_27", "face_28",
+    "face_29", "face_30", "face_31", "face_32", "face_33", "face_34", "face_35",
+    "face_36", "face_37", "face_38", "face_39", "face_40",
+    // Legacy emoji pack (still accepted for one release).
     "fox", "owl", "dragon", "cat", "dog", "panda", "tiger", "lion", "monkey", "frog",
     "robot", "alien", "ghost", "fire", "star", "crown", "spade", "heart", "diamond", "club",
     "wizard", "ninja", "pirate", "unicorn",
@@ -303,6 +311,28 @@ mod tests {
     #[test]
     fn avatar_allow_list() {
         assert!(is_allowed_avatar("fox"));
+        assert!(is_allowed_avatar("face_01"));
+        assert!(is_allowed_avatar("face_40"));
         assert!(!is_allowed_avatar("photo_upload"));
+        assert!(!is_allowed_avatar("face_99"));
+    }
+
+    #[test]
+    fn avatar_allowlist_matches_shared_fixture() {
+        let raw = include_str!("../../../../shared/avatar_allowlist.json");
+        let v: serde_json::Value = serde_json::from_str(raw).expect("avatar_allowlist.json");
+        let mut expected = Vec::new();
+        for key in ["image_ids", "legacy_emoji_ids"] {
+            for id in v[key].as_array().expect(key) {
+                expected.push(id.as_str().expect("id string").to_string());
+            }
+        }
+        let mut actual: Vec<String> = ALLOWED_AVATARS.iter().map(|s| (*s).to_string()).collect();
+        expected.sort();
+        actual.sort();
+        assert_eq!(
+            actual, expected,
+            "ALLOWED_AVATARS must match shared/avatar_allowlist.json"
+        );
     }
 }

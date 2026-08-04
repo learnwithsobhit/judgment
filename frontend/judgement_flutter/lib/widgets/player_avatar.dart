@@ -72,6 +72,7 @@ class _PlayerAvatarState extends State<PlayerAvatar>
   Widget build(BuildContext context) {
     final letter = widget.nickname.isNotEmpty ? widget.nickname[0] : '?';
     final glyph = avatarGlyph(widget.avatarId, fallbackLetter: letter);
+    final asset = avatarAssetPath(widget.avatarId);
     final child = ScaleTransition(
       scale: _scale,
       child: AnimatedContainer(
@@ -91,10 +92,18 @@ class _PlayerAvatarState extends State<PlayerAvatar>
           backgroundColor: widget.muted
               ? Colors.grey.shade700
               : const Color(0xFF37474F),
+          backgroundImage: (!widget.muted && asset != null)
+              ? AssetImage(asset)
+              : null,
           child: widget.muted
               ? Icon(Icons.wifi_off,
                   size: widget.radius * 0.9, color: Colors.white54)
-              : Text(glyph, style: TextStyle(fontSize: widget.radius * 0.95)),
+              : asset == null
+                  ? Text(
+                      glyph,
+                      style: TextStyle(fontSize: widget.radius * 0.95),
+                    )
+                  : null,
         ),
       ),
     );

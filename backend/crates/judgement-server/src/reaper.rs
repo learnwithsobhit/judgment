@@ -10,8 +10,8 @@ use crate::state::{AppState, RoomStatus};
 
 /// Lobby rooms that never start are reaped after this TTL.
 pub const LOBBY_TTL: Duration = Duration::from_secs(60 * 60);
-/// Finished/aborted games are hard-deleted after this TTL.
-pub const FINISHED_GAME_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+/// Backstop TTL for leftover finished/aborted rows (primary delete is on finish/abort).
+pub const FINISHED_GAME_TTL: Duration = Duration::from_secs(4 * 60 * 60);
 /// Orphan guest sessions older than this are deleted.
 pub const ORPHAN_SESSION_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// How often the reaper scans.

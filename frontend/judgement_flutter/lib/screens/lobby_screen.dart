@@ -7,10 +7,12 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
-import '../util/avatar_pack.dart';
 import '../util/room_share.dart';
+import '../util/social_share.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
+import '../widgets/player_avatar.dart';
+import '../widgets/share_sheet.dart';
 import 'table_screen.dart';
 
 class LobbyScreen extends StatefulWidget {
@@ -273,7 +275,25 @@ class _LobbyScreenState extends State<LobbyScreen> {
                           children: [
                             FilledButton.tonalIcon(
                               onPressed: () {
-                                final link = roomJoinUrl(_room.code);
+                                final text = buildLobbyInviteText(_room.code);
+                                final url = roomInviteUrl(
+                                  _room.code,
+                                  medium: 'whatsapp',
+                                );
+                                showSocialShareSheet(
+                                  context: context,
+                                  title: 'Invite friends',
+                                  text: text,
+                                  url: url,
+                                  campaign: ShareCampaign.lobbyInvite,
+                                );
+                              },
+                              icon: const Icon(Icons.ios_share, size: 18),
+                              label: const Text('Invite friends'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                final link = roomInviteUrl(_room.code);
                                 Clipboard.setData(ClipboardData(text: link));
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
@@ -387,24 +407,17 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final canRemove = _amHost && seat != null && !isMe && !_busy;
     return ListTile(
       dense: true,
-      leading: CircleAvatar(
-        backgroundColor: seat == null
-            ? Colors.white12
-            : (isMe ? goldAccent : feltGreen),
-        child: seat == null
-            ? const Icon(Icons.person_outline, size: 18, color: Colors.white38)
-            : Text(
-                avatarGlyph(
-                  seat.avatarId,
-                  fallbackLetter: seat.nickname.characters.first,
-                ),
-                style: TextStyle(
-                  fontSize: seat.avatarId == null ? 14 : 18,
-                  color: isMe && seat.avatarId == null ? Colors.black : null,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-      ),
+      leading: seat == null
+          ? const CircleAvatar(
+              backgroundColor: Colors.white12,
+              child: Icon(Icons.person_outline, size: 18, color: Colors.white38),
+            )
+          : PlayerAvatar(
+              avatarId: seat.avatarId,
+              nickname: seat.nickname,
+              radius: 18,
+              highlight: isMe,
+            ),
       title: Text(seat == null
           ? 'Empty seat'
           : '${seat.nickname}${isMe ? ' (you)' : ''}${seat.isHost ? ' · host' : ''}'),

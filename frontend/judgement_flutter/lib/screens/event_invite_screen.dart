@@ -4,8 +4,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../screens/legal/legal_screens.dart';
+import '../util/avatar_pack.dart';
 import '../util/legal_consent.dart';
 import '../util/table_media_session.dart';
+import '../widgets/avatar_picker.dart';
 import '../widgets/legal_consent_checkbox.dart';
 import 'lobby_screen.dart';
 
@@ -33,6 +35,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
   bool _legalAccepted = false;
   bool _busy = false;
   bool _loading = true;
+  String _selectedAvatarId = defaultAvatarId;
 
   @override
   void initState() {
@@ -109,6 +112,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
     try {
       await TableMediaSession.prepareBeforeNetwork();
       final session = await _api.createGuestSession(nickname);
+      await _api.setAvatar(_selectedAvatarId);
       final joined = await _api.joinRoom(code);
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(
@@ -206,6 +210,21 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
               Text('Lobby open — code ${event.roomCode}',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
               if (_rsvpStatus == 'going' || _rsvpStatus == null) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Your avatar',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                AvatarPicker(
+                  selectedId: _selectedAvatarId,
+                  onSelected: (id) =>
+                      setState(() => _selectedAvatarId = id),
+                ),
+                const SizedBox(height: 8),
                 LegalConsentCheckbox(
                   value: _legalAccepted,
                   onChanged: (v) => setState(() => _legalAccepted = v),

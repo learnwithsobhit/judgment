@@ -71,7 +71,7 @@ Symptoms: idle lobbies / finished rooms consuming memory; `active_rooms` much la
 
 Actions:
 
-1. Reaper: 1h lobby TTL; **24h** finished/aborted game purge; orphan room GC — check `rooms_reaped`, `games_purged`.  
+1. Reaper: 1h lobby TTL; **4h** backstop for leftover finished/aborted rows (primary delete is on finish/abort); orphan room GC — check `rooms_reaped`, `games_purged`.  
 2. Manual backfill: `deployment/scripts/purge_finished_games.sql` against Postgres.  
 3. Restart server only if needed (in-memory lobbies lost; durable rooms reload from DB).
 

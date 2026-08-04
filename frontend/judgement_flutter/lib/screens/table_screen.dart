@@ -8,15 +8,17 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
-import '../util/room_share.dart';
 import '../util/score_reveal.dart';
+import '../util/social_share.dart';
 import '../widgets/assistant_panel.dart';
+import '../widgets/avatar_picker.dart';
 import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
 import '../widgets/emote_bar.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/playing_card.dart';
 import '../widgets/scoreboard.dart';
+import '../widgets/share_sheet.dart';
 import '../widgets/victory_celebration.dart';
 import 'result_screen.dart';
 
@@ -400,9 +402,33 @@ class _PauseBanner extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 6,
                       children: [
+                        FilledButton.tonalIcon(
+                          onPressed: () {
+                            final text = buildLobbyInviteText(code);
+                            final url = roomInviteUrl(
+                              code,
+                              medium: 'whatsapp',
+                            );
+                            showSocialShareSheet(
+                              context: context,
+                              title: 'Invite friends',
+                              text: text,
+                              url: url,
+                              campaign: ShareCampaign.lobbyInvite,
+                            );
+                          },
+                          icon: const Icon(Icons.ios_share, size: 16),
+                          label: const Text('Invite friends'),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: accent,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                        ),
                         OutlinedButton.icon(
                           onPressed: () async {
-                            final link = roomJoinUrl(code);
+                            final link = roomInviteUrl(code);
                             await Clipboard.setData(ClipboardData(text: link));
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -697,14 +723,52 @@ class _TableArea extends StatelessWidget {
           // The viewer's own turn/dealer markers, shown at the bottom edge.
           Align(
             alignment: const Alignment(0, 0.97),
-            child: _selfBadge(view),
+            child: _selfBadge(context, view),
           ),
         ],
       ),
     );
   }
 
-  Widget _selfBadge(PlayerGameView view) {
+  Future<void> _showAvatarPickerSheet(BuildContext context) async {
+    final current = controller.view?.ownAvatarId;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: feltGreenDark,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Change avatar',
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: SingleChildScrollView(
+                    child: AvatarPicker(
+                      selectedId: current,
+                      onSelected: (id) {
+                        controller.setAvatar(id);
+                        Navigator.of(sheetContext).pop();
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _selfBadge(BuildContext context, PlayerGameView view) {
     final isMyTurn = view.currentTurn == controller.myPlayerId;
     final isDealer = view.round?.dealer == controller.myPlayerId;
     return Container(
@@ -716,13 +780,19 @@ class _TableArea extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          PlayerAvatar(
-            avatarId: view.ownAvatarId,
-            nickname: controller.myNickname,
-            radius: 12,
-            highlight: isMyTurn,
-            flashMood: controller.avatarFlashes[controller.myPlayerId],
-            onLongPress: () => controller.sendAvatarFlash('cheer'),
+          Tooltip(
+            message: 'Tap to change avatar · long-press to cheer',
+            child: GestureDetector(
+              onTap: () => _showAvatarPickerSheet(context),
+              child: PlayerAvatar(
+                avatarId: view.ownAvatarId,
+                nickname: controller.myNickname,
+                radius: 12,
+                highlight: isMyTurn,
+                flashMood: controller.avatarFlashes[controller.myPlayerId],
+                onLongPress: () => controller.sendAvatarFlash('cheer'),
+              ),
+            ),
           ),
           const SizedBox(width: 8),
           Text(

@@ -46,16 +46,52 @@ pub fn make_aborted_hook(
     })
 }
 
-/// Drop actor map entry after natural finish (keeps room/result; frees admission).
+/// Drop actor map entry and return the room to Lobby after natural finish.
 pub fn make_finished_hook(state: Arc<AppState>) -> Arc<dyn Fn(GameId) + Send + Sync> {
     Arc::new(move |game_id: GameId| {
-        if state.games.lock().unwrap().remove(&game_id).is_some() {
+        apply_finished_cleanup(&state, game_id);
+    })
+}
+
+/// Free admission + clear InGame → Lobby (seats kept, ready cleared).
+pub fn apply_finished_cleanup(state: &AppState, game_id: GameId) {
+    let room_id = {
+        let mut games = state.games.lock().unwrap();
+        let room_id = games.get(&game_id).map(|g| g.room_id);
+        if games.remove(&game_id).is_some() {
             state
                 .metrics
                 .games_removed
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
-    })
+        room_id
+    };
+    let Some(room_id) = room_id else {
+        return;
+    };
+
+    let snapshot = {
+        let mut rooms = state.rooms.lock().unwrap();
+        let Some(room) = rooms.get_mut(&room_id) else {
+            return;
+        };
+        // Only clear InGame for this finished game (ignore if already restarted).
+        if room.status != RoomStatus::InGame(game_id) {
+            return;
+        }
+        for seat in room.seats.iter_mut() {
+            seat.ready = false;
+        }
+        room.status = RoomStatus::Lobby;
+        stored_room(room)
+    };
+
+    let store = state.store.clone();
+    tokio::spawn(async move {
+        if let Err(error) = store.upsert_room(&snapshot).await {
+            tracing::warn!(%error, room = %room_id, "persist lobby after finish failed");
+        }
+    });
 }
 
 /// Drop actor map entry, prune vacant seats, return room to Lobby, persist.

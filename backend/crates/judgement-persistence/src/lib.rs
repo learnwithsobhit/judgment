@@ -77,13 +77,14 @@ pub trait GameStore: Send + Sync {
     /// Mark an active game aborted (host end / vacancy timeout).
     async fn abort_game(&self, game_id: GameId) -> Result<(), PersistError>;
 
-    /// Drop mid-game events and non-latest snapshots after finish/abort.
+    /// Drop mid-game events and non-latest snapshots (ops/backfill only;
+    /// live finish/abort calls [`Self::delete_game`] immediately).
     async fn compact_finished_game(&self, game_id: GameId) -> Result<(), PersistError>;
 
     /// Hard-delete a game row (cascades events/snapshots/results).
     async fn delete_game(&self, game_id: GameId) -> Result<(), PersistError>;
 
-    /// Finished/aborted games older than `older_than` (for TTL purge).
+    /// Leftover finished/aborted games older than `older_than` (reaper backstop).
     async fn list_terminal_games_older_than(
         &self,
         older_than: chrono::DateTime<chrono::Utc>,
