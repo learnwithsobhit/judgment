@@ -92,7 +92,19 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
+            "value": "no-cache, no-store, must-revalidate, max-age=0"
+          },
+          {
+            "key": "Pragma",
+            "value": "no-cache"
+          },
+          {
+            "key": "Expires",
+            "value": "0"
+          },
+          {
+            "key": "Clear-Site-Data",
+            "value": "\"cache\""
           }
         ]
       },
@@ -101,7 +113,19 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
+            "value": "no-cache, no-store, must-revalidate, max-age=0"
+          },
+          {
+            "key": "Pragma",
+            "value": "no-cache"
+          },
+          {
+            "key": "Expires",
+            "value": "0"
+          },
+          {
+            "key": "Clear-Site-Data",
+            "value": "\"cache\""
           }
         ]
       },
@@ -110,7 +134,19 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
+            "value": "no-cache, no-store, must-revalidate, max-age=0"
+          },
+          {
+            "key": "Pragma",
+            "value": "no-cache"
+          },
+          {
+            "key": "Expires",
+            "value": "0"
+          },
+          {
+            "key": "Clear-Site-Data",
+            "value": "\"cache\""
           }
         ]
       },
@@ -119,7 +155,19 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
+            "value": "no-cache, no-store, must-revalidate, max-age=0"
+          },
+          {
+            "key": "Pragma",
+            "value": "no-cache"
+          },
+          {
+            "key": "Expires",
+            "value": "0"
+          },
+          {
+            "key": "Clear-Site-Data",
+            "value": "\"cache\""
           }
         ]
       },
@@ -212,6 +260,23 @@
             "value": "public,max-age=86400"
           }
         ]
+      }
+    ],
+    "redirects": [
+      {
+        "source": "/",
+        "destination": "/index.html?_b=BUILD_ID",
+        "type": 302
+      },
+      {
+        "source": "/r/:code",
+        "destination": "/index.html?_b=BUILD_ID&room=:code",
+        "type": 302
+      },
+      {
+        "source": "/e/:slug",
+        "destination": "/index.html?_b=BUILD_ID&event=:slug",
+        "type": 302
       }
     ],
     "rewrites": [

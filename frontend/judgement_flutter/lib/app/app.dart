@@ -12,9 +12,35 @@ const feltGreen = Color(0xFF1B5E20);
 const feltGreenDark = Color(0xFF0D3311);
 const goldAccent = Color(0xFFFFC857);
 
-/// Parse `/e/{slug}`, `/e/{slug}/manage?token=`, and `/r/{CODE}` from the browser URL.
+/// Parse `/e/{slug}`, `/e/{slug}/manage?token=`, `/r/{CODE}`, and
+/// cache-bust landings on `/index.html?room=` / `?event=` (Safari redirects).
 Widget initialHomeFromUri(Uri uri) {
   captureUtmFromUri(uri);
+  final q = uri.queryParameters;
+
+  final roomParam = q['room'];
+  if (roomParam != null && roomParam.isNotEmpty) {
+    final code = normalizeRoomCode(roomParam);
+    if (code != null) return LandingScreen(initialJoinCode: code);
+    return const LandingScreen(invalidJoinLink: true);
+  }
+
+  final eventParam = q['event'];
+  if (eventParam != null && eventParam.isNotEmpty) {
+    if (q['manage'] == '1') {
+      final token = q['token'] ?? '';
+      if (token.isNotEmpty) {
+        return EventManageScreen(
+          api: ApiClient(),
+          slug: eventParam,
+          manageToken: token,
+          nickname: 'Host',
+        );
+      }
+    }
+    return EventInviteScreen(slug: eventParam);
+  }
+
   final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (segments.length >= 2 && segments[0] == 'e') {
     final slug = segments[1];

@@ -61,3 +61,27 @@ print(f"stamped version.json build_id={build_id} version={data.get('version')}")
 PY
 
 echo "stamped WINDOW_APP_BUILD_ID + version.json build_id=$BUILD_ID"
+
+# Per-deploy 302 destinations so Safari cannot reuse a disk-cached `/` document.
+FIREBASE_JSON="$ROOT/firebase.json"
+export STAMP_FIREBASE_JSON="$FIREBASE_JSON"
+if [[ -f "$FIREBASE_JSON" ]]; then
+  python3 - <<'PY'
+from pathlib import Path
+import os, re
+path = Path(os.environ["STAMP_FIREBASE_JSON"])
+build_id = os.environ["STAMP_BUILD_ID"]
+text = path.read_text()
+new = re.sub(
+    r'("/index\.html\?_b=)[^"&]+',
+    lambda m: m.group(1) + build_id,
+    text,
+)
+new = new.replace("/index.html?_b=BUILD_ID", f"/index.html?_b={build_id}")
+if new != text:
+    path.write_text(new)
+    print(f"stamped firebase.json redirects _b={build_id}")
+else:
+    print("firebase.json redirects unchanged")
+PY
+fi
