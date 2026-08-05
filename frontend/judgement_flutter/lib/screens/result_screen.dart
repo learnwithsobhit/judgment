@@ -6,6 +6,7 @@ import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/social_share.dart';
 import '../widgets/player_avatar.dart';
+import '../widgets/round_score_matrix.dart';
 import '../widgets/share_sheet.dart';
 
 /// Client-only celebration + standings from the last WS [PlayerGameView].
@@ -91,8 +92,7 @@ class ResultScreen extends StatelessWidget {
                         color: Colors.black.withValues(alpha: 0.22),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
+                      child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: _RoundVerifyMatrix(
                           controller: controller,
@@ -680,8 +680,6 @@ class _RoundVerifyMatrix extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const roundW = 52.0;
-
     final playerIds = ranking.map((r) => r.playerId).toList();
     if (playerIds.isEmpty) {
       final view = controller.view!;
@@ -689,106 +687,23 @@ class _RoundVerifyMatrix extends StatelessWidget {
       playerIds.addAll(view.opponents.map((o) => o.playerId));
     }
 
-    return Table(
-      defaultColumnWidth: const IntrinsicColumnWidth(),
-      columnWidths: const {0: FixedColumnWidth(roundW)},
-      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-      children: [
-        TableRow(
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: Text(
-                'Round',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white54,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            for (final playerId in playerIds)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Text(
-                  controller.nicknameOf(playerId),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: playerId == controller.myPlayerId
-                        ? goldAccent
-                        : Colors.white54,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-          ],
-        ),
-        for (final r in history)
-          TableRow(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: Text(
-                  'R${r.roundIndex + 1}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white54,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              for (final playerId in playerIds)
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                  child: Tooltip(
-                    message: _roundTooltip(r, playerId),
-                    child: Text(
-                      _score(r, playerId),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ),
-            ],
+    return RoundScoreMatrix(
+      columns: [
+        for (final playerId in playerIds)
+          RoundScoreColumn(
+            playerId: playerId,
+            displayName: controller.nicknameOf(playerId),
+            avatarId: controller.avatarOf(playerId),
+            highlightHeader: playerId == controller.myPlayerId,
+            total: _columnSum(playerId),
           ),
-        TableRow(
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: Text(
-                'TOTAL',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: goldAccent,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            for (final playerId in playerIds)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Text(
-                  '${_columnSum(playerId)}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: goldAccent,
-                  ),
-                ),
-              ),
-          ],
-        ),
       ],
+      history: history,
+      showTotals: true,
+      roundHeaderLabel: 'Rnd',
+      totalsLabel: 'TOTAL',
+      cellTooltip: _roundTooltip,
     );
-  }
-
-  String _score(RoundScoreView round, String playerId) {
-    for (final e in round.entries) {
-      if (e.playerId == playerId) return '${e.score}';
-    }
-    return '—';
   }
 
   int _columnSum(String playerId) {

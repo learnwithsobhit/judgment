@@ -63,10 +63,13 @@ jobs:
         working-directory: frontend/judgement_flutter
         env:
           API_BASE: ${{ vars.API_BASE }}
+          PUBLIC_WEB_ORIGIN: ${{ vars.PUBLIC_WEB_ORIGIN }}
         run: |
           flutter pub get
           chmod +x tool/build_web_release.sh tool/stamp_web_build.sh
-          API_BASE="$API_BASE" ./tool/build_web_release.sh
+          API_BASE="$API_BASE" \
+          PUBLIC_WEB_ORIGIN="${PUBLIC_WEB_ORIGIN:-https://judgment-lws-260731.web.app}" \
+            ./tool/build_web_release.sh
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
       - name: Deploy Hosting

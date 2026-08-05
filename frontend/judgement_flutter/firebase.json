@@ -266,17 +266,17 @@
       "redirects": [
         {
           "source": "/",
-          "destination": "/index.html?_b=BUILD_ID",
+          "destination": "/index.html?_b=20260805034850-41432e5",
           "type": 302
         },
         {
           "source": "/r/:code",
-          "destination": "/index.html?_b=BUILD_ID&room=:code",
+          "destination": "/index.html?_b=20260805034850-41432e5&room=:code",
           "type": 302
         },
         {
           "source": "/e/:slug",
-          "destination": "/index.html?_b=BUILD_ID&event=:slug",
+          "destination": "/index.html?_b=20260805034850-41432e5&event=:slug",
           "type": 302
         }
       ],
@@ -554,17 +554,17 @@
       "redirects": [
         {
           "source": "/",
-          "destination": "/index.html?_b=BUILD_ID",
+          "destination": "/index.html?_b=20260805034850-41432e5",
           "type": 302
         },
         {
           "source": "/r/:code",
-          "destination": "/index.html?_b=BUILD_ID&room=:code",
+          "destination": "/index.html?_b=20260805034850-41432e5&room=:code",
           "type": 302
         },
         {
           "source": "/e/:slug",
-          "destination": "/index.html?_b=BUILD_ID&event=:slug",
+          "destination": "/index.html?_b=20260805034850-41432e5&event=:slug",
           "type": 302
         }
       ],

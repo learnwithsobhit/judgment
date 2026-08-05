@@ -5,6 +5,7 @@ import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/score_reveal.dart';
 import 'player_avatar.dart';
+import 'round_score_matrix.dart';
 
 /// Scoreboard: current bid/won, round scores, and cumulative totals after
 /// halftime (⌈M/2⌉) or once the ≤3-card phase begins.
@@ -112,15 +113,25 @@ class Scoreboard extends StatelessWidget {
             ),
           )
         else ...[
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+          Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: _RoundScoreMatrix(
-              players: players,
+            child: RoundScoreMatrix(
+              columns: [
+                for (final row in players)
+                  RoundScoreColumn(
+                    playerId: row.playerId,
+                    displayName: row.name
+                        .replaceAll(RegExp(r'\s*\(you\)\s*'), '')
+                        .trim(),
+                    avatarId: row.avatarId,
+                    highlightHeader: leaderId == row.playerId,
+                    total: row.total,
+                  ),
+              ],
               history: history,
               showTotals: showTotals,
-              leaderId: leaderId,
-              currentTurn: view.currentTurn,
+              emphasizePlayerId: view.currentTurn,
+              footerHint: 'Exact bid = 10 + bid · miss = 0',
             ),
           ),
           if (!showTotals)
@@ -213,155 +224,6 @@ class Scoreboard extends StatelessWidget {
 
   static const _headerStyle =
       TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w600);
-}
-
-class _RoundScoreMatrix extends StatelessWidget {
-  final List<_PlayerRow> players;
-  final List<RoundScoreView> history;
-  final bool showTotals;
-  final String? leaderId;
-  final String? currentTurn;
-
-  const _RoundScoreMatrix({
-    required this.players,
-    required this.history,
-    required this.showTotals,
-    required this.leaderId,
-    required this.currentTurn,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Rounds as rows, players as columns (≤8 players, many rounds).
-    // Columns size to full nicknames (horizontal scroll if needed).
-    const roundW = 44.0;
-    final names = [
-      for (final row in players) _displayName(row.name),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Table(
-          defaultColumnWidth: const IntrinsicColumnWidth(),
-          columnWidths: const {0: FixedColumnWidth(roundW)},
-          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-          children: [
-            TableRow(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 4),
-                  child: Text('Rnd', style: Scoreboard._headerStyle),
-                ),
-                for (var i = 0; i < players.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    child: Text(
-                      names[i],
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: leaderId == players[i].playerId
-                            ? goldAccent
-                            : Colors.white54,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-              ],
-            ),
-            for (final r in history)
-              TableRow(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Text(
-                      'R${r.roundIndex + 1}',
-                      style: Scoreboard._headerStyle,
-                    ),
-                  ),
-                  for (final row in players)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      child: Text(
-                        _scoreFor(r, row.playerId),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: currentTurn == row.playerId
-                              ? goldAccent
-                              : null,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            if (showTotals)
-              TableRow(
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 6),
-                    child: Text(
-                      'Tot',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: goldAccent,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  for (final row in players)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      child: Text(
-                        '${row.total ?? 0}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: goldAccent,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-          ],
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            'Exact bid = 10 + bid · miss = 0',
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.white.withValues(alpha: 0.45),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Full nickname for column headers (drop the "(you)" suffix to keep columns tidy).
-  String _displayName(String name) {
-    return name.replaceAll(RegExp(r'\s*\(you\)\s*'), '').trim();
-  }
-
-  String _scoreFor(RoundScoreView round, String playerId) {
-    for (final e in round.entries) {
-      if (e.playerId == playerId) {
-        return '${e.score}';
-      }
-    }
-    return '—';
-  }
 }
 
 class _PlayerRow {

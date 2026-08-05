@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
+import '../util/room_share.dart';
 import 'player_avatar.dart';
 
 /// Felt/gold trophy card for Stories / download (1080×1920 logical scaled).
@@ -147,22 +148,22 @@ class ShareResultCard extends StatelessWidget {
                     color: Colors.black.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Column(
+                  child: Column(
                     children: [
-                      Text(
+                      const Text(
                         'Play free with friends',
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
                           color: goldAccent,
                         ),
                       ),
-                      SizedBox(height: 4),
+                      const SizedBox(height: 4),
                       Text(
-                        'judgment-lws-260731.web.app',
-                        style: TextStyle(fontSize: 12, color: Colors.white70),
+                        Uri.parse(webOrigin()).host,
+                        style: const TextStyle(fontSize: 12, color: Colors.white70),
                       ),
-                      SizedBox(height: 4),
-                      Text(
+                      const SizedBox(height: 4),
+                      const Text(
                         '#JudgementTable',
                         style: TextStyle(fontSize: 11, color: Colors.white54),
                       ),

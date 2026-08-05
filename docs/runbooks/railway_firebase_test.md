@@ -22,13 +22,19 @@ Always name the Hosting **target**:
 ```bash
 # TEST — Railway API baked in
 cd frontend/judgement_flutter
-API_BASE=https://judgement-server-production-311f.up.railway.app ./tool/build_web_release.sh
+API_BASE=https://judgement-server-production-311f.up.railway.app \
+PUBLIC_WEB_ORIGIN=https://judgment-railway-test.web.app \
+  ./tool/build_web_release.sh
 firebase deploy --only hosting:railway-test --project judgment-lws-260731
 
 # PROD — Fly API (CI uses hosting:prod)
-API_BASE=https://judgment-api.fly.dev ./tool/build_web_release.sh
+API_BASE=https://judgment-api.fly.dev \
+PUBLIC_WEB_ORIGIN=https://judgment-lws-260731.web.app \
+  ./tool/build_web_release.sh
 firebase deploy --only hosting:prod --project judgment-lws-260731
 ```
+
+`PUBLIC_WEB_ORIGIN` stamps Open Graph / Twitter absolute URLs and the `og-image.png` footer host so WhatsApp previews match the site you deployed.
 
 Never run bare `firebase deploy --only hosting` after multi-site is enabled (deploys all sites).
 
