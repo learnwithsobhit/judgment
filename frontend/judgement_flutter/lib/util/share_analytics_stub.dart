@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 void recordShareEvent(String name, [Map<String, String>? props]) {
   if (kDebugMode) {
-    debugPrint('share_event $name ${props ?? {}}');
+    debugPrint('client_event $name ${props ?? {}}');
   }
 }
 

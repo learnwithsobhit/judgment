@@ -8,7 +8,7 @@ const _utmKey = 'judgement_utm_last_v1';
 
 void recordShareEvent(String name, [Map<String, String>? props]) {
   if (kDebugMode) {
-    debugPrint('share_event $name ${props ?? {}}');
+    debugPrint('client_event $name ${props ?? {}}');
   }
   try {
     final raw = web.window.localStorage.getItem(_eventsKey);
@@ -22,16 +22,35 @@ void recordShareEvent(String name, [Map<String, String>? props]) {
           {},
     );
     counts[name] = (counts[name] ?? 0) + 1;
-    if (props != null && props['channel'] != null) {
-      final ch = 'channel_${props['channel']}';
-      counts[ch] = (counts[ch] ?? 0) + 1;
+    if (props != null) {
+      if (props['channel'] != null) {
+        final ch = 'channel_${props['channel']}';
+        counts[ch] = (counts[ch] ?? 0) + 1;
+      }
+      // Roll up exit intents for quick inspection in localStorage.
+      final intent = props['intent'];
+      if (intent != null && name.startsWith('exit_')) {
+        final key = 'exit_intent_$intent';
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+      final source = props['source'];
+      if (source != null && name.startsWith('exit_')) {
+        final key = 'exit_source_$source';
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
     }
     map['counts'] = counts;
-    map['last'] = {
+    final recent = List<dynamic>.from(map['recent'] as List? ?? const []);
+    recent.insert(0, {
       'name': name,
       'props': props ?? {},
       'at': DateTime.now().toUtc().toIso8601String(),
-    };
+    });
+    if (recent.length > 40) {
+      recent.removeRange(40, recent.length);
+    }
+    map['recent'] = recent;
+    map['last'] = recent.first;
     web.window.localStorage.setItem(_eventsKey, jsonEncode(map));
   } catch (_) {}
 }

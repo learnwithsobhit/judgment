@@ -15,6 +15,7 @@ import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../networking/game_socket.dart';
 import '../util/score_reveal.dart';
+import '../util/session_exit_analytics.dart';
 import '../util/soundboard.dart';
 import '../util/table_audio.dart';
 
@@ -61,6 +62,8 @@ class GameController extends ChangeNotifier {
   int _reconnectAttempts = 0;
   /// Stop auto-reconnect after abort / intentional switch to a new game.
   bool _suppressReconnect = false;
+  /// Set when the player confirmed Leave so socket teardown is not logged as network drop.
+  bool _intentionalLeave = false;
 
   PlayerGameView? view;
   GameConnectionState connection = GameConnectionState.connecting;
@@ -273,7 +276,11 @@ class GameController extends ChangeNotifier {
     if (_suppressReconnect || gameAborted || (view?.isFinished ?? false)) {
       return;
     }
-    if (_reconnectAttempts < _maxReconnectAttempts) {
+    final willReconnect = _reconnectAttempts < _maxReconnectAttempts;
+    if (!_intentionalLeave) {
+      recordExitWsDisconnect(willReconnect: willReconnect);
+    }
+    if (willReconnect) {
       _reconnectAttempts += 1;
       final delay =
           Duration(milliseconds: 500 * pow(2, _reconnectAttempts).toInt());
@@ -428,8 +435,14 @@ class GameController extends ChangeNotifier {
   }
 
   void leaveGame() {
+    _intentionalLeave = true;
+    _suppressReconnect = true;
     _sendCommand({'type': 'leave_game'});
   }
+
+  /// True while leaving the route would vacate a live seat (back/close guard).
+  bool get shouldGuardExit =>
+      !gameAborted && !(view?.isFinished ?? false);
 
   Future<void> endGameAsHost() async {
     if (!amHost) {

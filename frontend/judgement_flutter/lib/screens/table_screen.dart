@@ -8,13 +8,16 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
+import '../util/game_exit_guard.dart';
 import '../util/score_reveal.dart';
+import '../util/session_exit_analytics.dart';
 import '../util/social_share.dart';
 import '../widgets/assistant_panel.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
 import '../widgets/emote_bar.dart';
+import '../widgets/exit_confirm_dialogs.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/playing_card.dart';
 import '../widgets/scoreboard.dart';
@@ -37,6 +40,8 @@ class _TableScreenState extends State<TableScreen> {
   Timer? _ticker;
   /// After the game ends, celebrate first; open results on demand.
   bool _showResults = false;
+  bool _leaveDialogOpen = false;
+  bool _leaving = false;
 
   GameController get controller => widget.controller;
 
@@ -44,6 +49,7 @@ class _TableScreenState extends State<TableScreen> {
   void initState() {
     super.initState();
     controller.addListener(_onControllerChanged);
+    _syncExitGuard();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
       if (controller.turnDeadline != null || controller.pauseUntil != null) {
@@ -59,13 +65,49 @@ class _TableScreenState extends State<TableScreen> {
 
   @override
   void dispose() {
+    setGameExitGuard(false);
     _ticker?.cancel();
     controller.removeListener(_onControllerChanged);
     controller.dispose();
     super.dispose();
   }
 
+  void _syncExitGuard() {
+    setGameExitGuard(!_leaving && controller.shouldGuardExit);
+  }
+
+  Future<void> _confirmAndLeave({required String source}) async {
+    if (_leaveDialogOpen || _leaving || !controller.shouldGuardExit) return;
+    _leaveDialogOpen = true;
+    recordExitDialogShown(surface: ExitSurface.table, source: source);
+    try {
+      final leave = await showLeaveTableDialog(context);
+      if (leave != true || !mounted) {
+        if (leave != true) {
+          recordExitStay(surface: ExitSurface.table, source: source);
+        }
+        return;
+      }
+      recordExitLeaveConfirmed(surface: ExitSurface.table, source: source);
+      _leaving = true;
+      setGameExitGuard(false);
+      controller.leaveGame();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } finally {
+      _leaveDialogOpen = false;
+    }
+  }
+
   void _onControllerChanged() {
+    _syncExitGuard();
+    if (_leaveDialogOpen && !controller.shouldGuardExit && mounted) {
+      final nav = Navigator.of(context, rootNavigator: true);
+      if (nav.canPop()) nav.pop();
+      _leaveDialogOpen = false;
+    }
     final rejection = controller.lastRejection;
     final reasonCode = controller.lastRejectionCode;
     if (rejection != null && mounted) {
@@ -108,6 +150,22 @@ class _TableScreenState extends State<TableScreen> {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
+        final guard = !_leaving && controller.shouldGuardExit;
+        final body = _buildBody(context);
+        return PopScope(
+          canPop: !guard,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop && guard) {
+              unawaited(_confirmAndLeave(source: ExitSource.back));
+            }
+          },
+          child: body,
+        );
+      },
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
         final view = controller.view;
         if (view == null) {
           return Scaffold(
@@ -193,7 +251,15 @@ class _TableScreenState extends State<TableScreen> {
           body: SafeArea(
             child: Column(
               children: [
-                _TopBar(controller: controller, showScoreboardButton: !wide),
+                _TopBar(
+                  controller: controller,
+                  showScoreboardButton: !wide,
+                  onLeave: _leaving
+                      ? null
+                      : () => unawaited(
+                            _confirmAndLeave(source: ExitSource.leaveButton),
+                          ),
+                ),
                 if (controller.savingInProgress)
                   Material(
                     color: const Color(0xFF243B3A),
@@ -293,14 +359,23 @@ class _TableScreenState extends State<TableScreen> {
             ),
           ),
         );
-      },
-    );
   }
 }
 
 // ---------------------------------------------------------------------------
 // Pause / disconnect banner (reconnect grace or vacant seat)
 // ---------------------------------------------------------------------------
+
+Future<void> _confirmEndGameAsHost(
+  BuildContext context,
+  GameController controller,
+) async {
+  final end = await showEndGameDialog(context);
+  if (end == true && context.mounted) {
+    recordExitEndGameConfirmed();
+    await controller.endGameAsHost();
+  }
+}
 
 class _PauseBanner extends StatelessWidget {
   final GameController controller;
@@ -485,7 +560,9 @@ class _PauseBanner extends StatelessWidget {
                           ),
                         if (controller.amHost)
                           TextButton(
-                            onPressed: () => controller.endGameAsHost(),
+                            onPressed: () => unawaited(
+                              _confirmEndGameAsHost(context, controller),
+                            ),
                             style: TextButton.styleFrom(
                               foregroundColor: Colors.white70,
                               visualDensity: VisualDensity.compact,
@@ -512,8 +589,13 @@ class _PauseBanner extends StatelessWidget {
 class _TopBar extends StatelessWidget {
   final GameController controller;
   final bool showScoreboardButton;
+  final VoidCallback? onLeave;
 
-  const _TopBar({required this.controller, required this.showScoreboardButton});
+  const _TopBar({
+    required this.controller,
+    required this.showScoreboardButton,
+    this.onLeave,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -573,6 +655,12 @@ class _TopBar extends StatelessWidget {
                     tooltip: 'Scoreboard',
                     onPressed: () => Scaffold.of(context).openEndDrawer(),
                   ),
+                ),
+              if (onLeave != null)
+                IconButton(
+                  icon: const Icon(Icons.logout),
+                  tooltip: 'Leave table',
+                  onPressed: onLeave,
                 ),
             ],
           ),

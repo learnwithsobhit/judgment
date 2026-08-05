@@ -9,8 +9,11 @@ import '../networking/api_client.dart';
 import '../state/game_controller.dart';
 import '../util/room_share.dart';
 import '../util/social_share.dart';
+import '../util/game_exit_guard.dart';
+import '../util/session_exit_analytics.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
+import '../widgets/exit_confirm_dialogs.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/share_sheet.dart';
 import 'table_screen.dart';
@@ -38,6 +41,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
   Timer? _poll;
   bool _busy = false;
   bool _navigatedToGame = false;
+  bool _leaveDialogOpen = false;
+  bool _leaving = false;
   String? _myAvatarId;
 
   @override
@@ -48,10 +53,12 @@ class _LobbyScreenState extends State<LobbyScreen> {
         .map((s) => s.avatarId)
         .firstOrNull;
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    setGameExitGuard(true);
   }
 
   @override
   void dispose() {
+    setGameExitGuard(false);
     _poll?.cancel();
     super.dispose();
   }
@@ -121,6 +128,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
     if (_navigatedToGame || !mounted) return;
     _navigatedToGame = true;
     _poll?.cancel();
+    // TableScreen owns the unload guard once we leave the lobby route.
+    setGameExitGuard(false);
     final controller = GameController(
       api: widget.api,
       gameId: gameId,
@@ -191,7 +200,26 @@ class _LobbyScreenState extends State<LobbyScreen> {
     }
   }
 
+  Future<void> _requestLeave({required String source}) async {
+    if (_leaveDialogOpen || _leaving || _navigatedToGame) return;
+    _leaveDialogOpen = true;
+    recordExitDialogShown(surface: ExitSurface.lobby, source: source);
+    try {
+      final confirmed = await showLeaveLobbyDialog(context);
+      if (confirmed == true && mounted) {
+        recordExitLeaveConfirmed(surface: ExitSurface.lobby, source: source);
+        await _leave();
+      } else if (confirmed != true) {
+        recordExitStay(surface: ExitSurface.lobby, source: source);
+      }
+    } finally {
+      _leaveDialogOpen = false;
+    }
+  }
+
   Future<void> _leave() async {
+    _leaving = true;
+    setGameExitGuard(false);
     _poll?.cancel();
     try {
       await widget.api.leaveRoom(_room.roomId);
@@ -228,14 +256,23 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final filled = _room.seats.length;
     final total = _room.maxPlayers;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          unawaited(_requestLeave(source: ExitSource.back));
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Lobby'),
         backgroundColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           tooltip: 'Leave room',
-          onPressed: _leave,
+          onPressed: _leaving
+              ? null
+              : () => unawaited(_requestLeave(source: ExitSource.appBar)),
         ),
       ),
       body: Center(
@@ -397,6 +434,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
             ),
           ),
         ),
+      ),
       ),
     );
   }
