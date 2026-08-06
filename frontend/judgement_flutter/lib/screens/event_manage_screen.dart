@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../embed/judgement_embed_binding.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../util/event_share.dart';
@@ -66,7 +67,10 @@ class _EventManageScreenState extends State<EventManageScreen> {
     final event = _view?.event;
     if (event == null) return;
     final inviteUrl = '${Uri.base.origin}/e/${widget.slug}';
-    final body = eventShareText(event);
+    final body = eventShareText(
+      event,
+      pathPrefix: JudgementEmbedBinding.sharePathPrefix,
+    );
     final text = buildEventInviteShareText(body, inviteUrl);
     final url = withUtm(
       inviteUrl,

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app.dart';
+import '../embed/judgement_embed_binding.dart';
+import '../embed/judgement_embed_scope.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
@@ -243,7 +245,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
       // Leaving an emptied room returns 404; either way we go back.
     }
     clearGameReclaim(_room.code);
-    if (mounted) Navigator.of(context).pop();
+    if (mounted) {
+      if (JudgementEmbedBinding.embedded) {
+        JudgementEmbedScope.exitToHome(context);
+      } else {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   void _showError(String message) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../embed/judgement_embed_scope.dart';
 import '../util/avatar_pack.dart';
 
 /// Built-in pack avatar with optional cheer / flash scale bounce.
@@ -93,7 +94,7 @@ class _PlayerAvatarState extends State<PlayerAvatar>
               ? Colors.grey.shade700
               : const Color(0xFF37474F),
           backgroundImage: (!widget.muted && asset != null)
-              ? AssetImage(asset)
+              ? AssetImage(asset, package: kJudgementAssetPackage)
               : null,
           child: widget.muted
               ? Icon(Icons.wifi_off,

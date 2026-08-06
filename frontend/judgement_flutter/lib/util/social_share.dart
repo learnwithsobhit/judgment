@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../embed/judgement_embed_binding.dart';
 import '../models/protocol.dart';
 import 'room_share.dart';
 import 'share_analytics.dart';
@@ -74,9 +75,16 @@ String roomInviteUrl(
   ShareCampaign campaign = ShareCampaign.lobbyInvite,
   String medium = 'app',
   String? origin,
+  String pathPrefix = '',
 }) {
   return withUtm(
-    roomJoinUrl(code, origin: origin),
+    roomJoinUrl(
+      code,
+      origin: origin,
+      pathPrefix: pathPrefix.isEmpty
+          ? JudgementEmbedBinding.sharePathPrefix
+          : pathPrefix,
+    ),
     campaign: campaign,
     medium: medium,
   );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../embed/judgement_embed_scope.dart';
 import '../models/protocol.dart';
 import '../util/card_assets.dart';
 
@@ -56,6 +57,7 @@ class PlayingCardWidget extends StatelessWidget {
               color: Colors.white,
               child: Image.asset(
                 assetPath,
+                package: kJudgementAssetPackage,
                 width: width,
                 height: height,
                 fit: BoxFit.contain,
@@ -127,6 +129,7 @@ class CardBack extends StatelessWidget {
         borderRadius: BorderRadius.circular(width * 0.06),
         child: Image.asset(
           cardBackAssetPath,
+          package: kJudgementAssetPackage,
           width: width,
           height: height,
           fit: BoxFit.cover,

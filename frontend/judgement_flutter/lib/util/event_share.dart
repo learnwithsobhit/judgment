@@ -5,12 +5,20 @@ import '../models/protocol.dart';
 /// Uses the current web origin (Flutter web port) so invite links match the
 /// running app, and formats [startsAt] in the device local zone (same zone the
 /// host used when picking the time).
-String eventShareText(GameEventPublicView event, {String? webOrigin}) {
+String eventShareText(
+  GameEventPublicView event, {
+  String? webOrigin,
+  String pathPrefix = '',
+}) {
   final origin = webOrigin ?? Uri.base.origin;
   final when = formatEventWhenLocal(event.startsAt);
+  final prefix = pathPrefix.trimRight().replaceAll(RegExp(r'/+$'), '');
+  final path = prefix.isEmpty
+      ? '/e/${event.slug}'
+      : '$prefix/e/${event.slug}';
   return 'Judgement on $when (${event.timezone})\n'
       '${event.title}\n'
-      'RSVP (up to ${event.maxPlayers} players, 5 waitlist): $origin/e/${event.slug}\n'
+      'RSVP (up to ${event.maxPlayers} players, 5 waitlist): $origin$path\n'
       'Add to calendar from that page for a reminder.';
 }
 

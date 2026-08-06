@@ -1,0 +1,28 @@
+name: shell_flutter
+description: Table Games shell — brand home and game picker.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  go_router: ^15.1.2
+  url_launcher: ^6.3.1
+  web: ^1.1.1
+  judgement_flutter:
+    path: ../judgement_flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

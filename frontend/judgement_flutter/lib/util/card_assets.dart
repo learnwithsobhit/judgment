@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../embed/judgement_embed_scope.dart';
 import '../models/protocol.dart';
 
 /// Asset paths for the vendored PNG deck (`assets/cards/`).
@@ -37,6 +38,9 @@ String cardFaceAssetPath(CardModel card) =>
 /// Warm the image cache so the first hand does not flicker.
 Future<void> precacheCardAssets(BuildContext context) async {
   for (final path in allCardAssetPaths()) {
-    await precacheImage(AssetImage(path), context);
+    await precacheImage(
+      AssetImage(path, package: kJudgementAssetPackage),
+      context,
+    );
   }
 }

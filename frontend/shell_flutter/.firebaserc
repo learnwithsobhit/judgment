@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "judgment-lws-260731"
+  },
+  "targets": {
+    "judgment-lws-260731": {
+      "hosting": {
+        "table-games": [
+          "table-games"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app.dart';
+import '../embed/judgement_embed_scope.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
@@ -94,7 +95,7 @@ class _TableScreenState extends State<TableScreen> {
       controller.leaveGame();
       await Future<void>.delayed(const Duration(milliseconds: 150));
       if (mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        JudgementEmbedScope.exitToHome(context);
       }
     } finally {
       _leaveDialogOpen = false;
@@ -216,9 +217,9 @@ class _TableScreenState extends State<TableScreen> {
                     ),
                     const SizedBox(height: 24),
                     FilledButton(
-                      onPressed: () => Navigator.of(context)
-                          .popUntil((route) => route.isFirst),
-                      child: const Text('Back to home'),
+                      onPressed: () =>
+                          JudgementEmbedScope.exitToHome(context),
+                      child: Text(JudgementEmbedScope.backHomeLabel(context)),
                     ),
                   ],
                 ),

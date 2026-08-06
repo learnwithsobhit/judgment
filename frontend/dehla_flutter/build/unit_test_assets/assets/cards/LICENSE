@@ -1,0 +1,14 @@
+Playing card face and back artwork
+
+Primary source used at runtime (PNG):
+  Vector Playing Cards (Byron Knoll) — public domain
+  https://code.google.com/archive/p/vector-playing-cards/
+  Packaged as PNG by https://github.com/hayeah/playing-cards-assets (MIT)
+
+Vendored into this app on 2026-07-31 as individual PNG assets under
+`{rank}_{suit}.png` plus `back.png`.
+
+Note: An earlier attempt used Adrian Kennard CC0 SVGs
+(https://www.me.uk/cards/), but `flutter_svg` does not correctly render
+those files’ `<symbol>` / `<use>` references (faces appeared as solid
+suit-coloured blocks). PNGs are used so court art and pips display reliably.

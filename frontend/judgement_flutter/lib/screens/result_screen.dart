@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app.dart';
+import '../embed/judgement_embed_scope.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/social_share.dart';
@@ -184,10 +185,10 @@ class ResultScreen extends StatelessWidget {
                         label: const Text('Copy results summary'),
                       ),
                       FilledButton.tonalIcon(
-                        onPressed: () => Navigator.of(context)
-                            .popUntil((route) => route.isFirst),
+                        onPressed: () =>
+                            JudgementEmbedScope.exitToHome(context),
                         icon: const Icon(Icons.home),
-                        label: const Text('Back to home'),
+                        label: Text(JudgementEmbedScope.backHomeLabel(context)),
                       ),
                     ],
                   ),

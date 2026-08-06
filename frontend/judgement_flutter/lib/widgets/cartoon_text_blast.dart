@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../embed/judgement_embed_scope.dart';
 import '../state/game_controller.dart';
 import '../util/emote_lexicon.dart';
 import '../util/sticker_pack.dart';
@@ -194,6 +195,7 @@ class _StickerBadge extends StatelessWidget {
           ? Center(child: Text(glyph, style: TextStyle(fontSize: size * 0.5)))
           : Image.asset(
               assetPath!,
+              package: kJudgementAssetPackage,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => Center(
                 child: Text(glyph, style: TextStyle(fontSize: size * 0.5)),

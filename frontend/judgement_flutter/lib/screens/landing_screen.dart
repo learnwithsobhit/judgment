@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
+import '../embed/judgement_embed_scope.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
@@ -12,6 +13,7 @@ import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/legal_consent_checkbox.dart';
+import '../widgets/player_avatar.dart';
 import '../widgets/trump_cycle_editor.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
@@ -24,10 +26,21 @@ class LandingScreen extends StatefulWidget {
   /// True when `/r/...` was present but the code could not be parsed.
   final bool invalidJoinLink;
 
+  /// When true, show streamlined desk chrome and shell exit.
+  final bool embedded;
+
+  final VoidCallback? onExitToShell;
+  final String? prefillNickname;
+  final String? prefillAvatarId;
+
   const LandingScreen({
     super.key,
     this.initialJoinCode,
     this.invalidJoinLink = false,
+    this.embedded = false,
+    this.onExitToShell,
+    this.prefillNickname,
+    this.prefillAvatarId,
   });
 
   @override
@@ -52,6 +65,14 @@ class _LandingScreenState extends State<LandingScreen> {
     if (code != null) {
       _roomCode.text = code;
     }
+    final nick = widget.prefillNickname?.trim();
+    if (nick != null && nick.isNotEmpty) {
+      _nickname.text = nick;
+    }
+    final avatar = widget.prefillAvatarId;
+    if (avatar != null && avatar.isNotEmpty) {
+      _selectedAvatarId = avatar;
+    }
     if (widget.invalidJoinLink) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -61,6 +82,9 @@ class _LandingScreenState extends State<LandingScreen> {
       });
     }
   }
+
+  bool get _hasPrefillNick =>
+      (widget.prefillNickname?.trim().isNotEmpty ?? false);
 
   // Room options (create mode, ADR 0003).
   int _maxPlayers = 6;
@@ -486,7 +510,26 @@ class _LandingScreenState extends State<LandingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final embedded = widget.embedded;
     return Scaffold(
+      appBar: embedded
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back to Table Games',
+                onPressed: () {
+                  final exit = widget.onExitToShell;
+                  if (exit != null) {
+                    exit();
+                  } else {
+                    JudgementEmbedScope.exitToHome(context);
+                  }
+                },
+              ),
+              title: const Text('Judgement'),
+            )
+          : null,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -495,21 +538,26 @@ class _LandingScreenState extends State<LandingScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  '\u2660 \u2665 Judgement \u2666 \u2663',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    color: goldAccent,
-                    letterSpacing: 1.5,
+                if (!embedded) ...[
+                  const Text(
+                    '\u2660 \u2665 Judgement \u2666 \u2663',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                      color: goldAccent,
+                      letterSpacing: 1.5,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
+                  const SizedBox(height: 8),
+                ],
                 Text(
                   'Bid exactly. Win exactly. Three to eight players.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.7),
+                    fontSize: embedded ? 15 : 14,
+                  ),
                 ),
                 const SizedBox(height: 32),
                 Card(
@@ -529,7 +577,7 @@ class _LandingScreenState extends State<LandingScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Enter a nickname to sit at the table',
+                            'Enter your nickname to sit at the table',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.7),
@@ -550,35 +598,75 @@ class _LandingScreenState extends State<LandingScreen> {
                           ),
                         ],
                         const SizedBox(height: 20),
-                        TextField(
-                          controller: _nickname,
-                          autofocus: _fromLink,
-                          maxLength: 24,
-                          decoration: const InputDecoration(
-                            labelText: 'Nickname',
-                            border: OutlineInputBorder(),
-                            counterText: '',
+                        if (_hasPrefillNick && embedded && !_fromLink) ...[
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: PlayerAvatar(
+                              avatarId: _selectedAvatarId,
+                              nickname: _nickname.text,
+                              radius: 22,
+                            ),
+                            title: Text('Playing as ${_nickname.text}'),
+                            subtitle: const Text('Change'),
+                            onTap: () => setState(() {
+                              // Reveal fields by clearing prefill view flag
+                              // — keep text, show editors below.
+                            }),
                           ),
-                          onSubmitted: (_) => _submit(),
-                        ),
-                        const SizedBox(height: 16),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Your avatar',
-                            style: Theme.of(context).textTheme.titleSmall,
+                          // Always keep editors accessible but compact when prefilled:
+                          ExpansionTile(
+                            title: const Text('Change name or avatar'),
+                            initiallyExpanded: false,
+                            children: [
+                              TextField(
+                                controller: _nickname,
+                                maxLength: 24,
+                                decoration: const InputDecoration(
+                                  labelText: 'Nickname',
+                                  border: OutlineInputBorder(),
+                                  counterText: '',
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              AvatarPicker(
+                                selectedId: _selectedAvatarId,
+                                onSelected: (id) =>
+                                    setState(() => _selectedAvatarId = id),
+                              ),
+                            ],
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        AvatarPicker(
-                          selectedId: _selectedAvatarId,
-                          onSelected: (id) =>
-                              setState(() => _selectedAvatarId = id),
-                        ),
+                        ] else ...[
+                          TextField(
+                            controller: _nickname,
+                            autofocus: _fromLink && !_hasPrefillNick,
+                            maxLength: 24,
+                            decoration: const InputDecoration(
+                              labelText: 'Nickname',
+                              border: OutlineInputBorder(),
+                              counterText: '',
+                            ),
+                            onSubmitted: (_) => _submit(),
+                          ),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Your avatar',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          AvatarPicker(
+                            selectedId: _selectedAvatarId,
+                            onSelected: (id) =>
+                                setState(() => _selectedAvatarId = id),
+                          ),
+                        ],
                         if (_joining && !_fromLink) ...[
                           const SizedBox(height: 12),
                           TextField(
                             controller: _roomCode,
+                            autofocus: _hasPrefillNick && embedded,
                             textCapitalization: TextCapitalization.characters,
                             decoration: const InputDecoration(
                               labelText: 'Room code',

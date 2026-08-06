@@ -20,8 +20,20 @@ String? normalizeRoomCode(String raw) {
   return cleaned;
 }
 
-/// Full join link for the current web origin, e.g. `https://…/r/AB3K9M`.
-String roomJoinUrl(String code, {String? origin}) {
+/// Full join link for the current web origin, e.g. `https://…/r/AB3K9M`
+/// or `https://…/j/r/AB3K9M` when [pathPrefix] is `/j` (Table Games embed).
+String roomJoinUrl(
+  String code, {
+  String? origin,
+  String pathPrefix = '',
+}) {
   final normalized = normalizeRoomCode(code) ?? code.toUpperCase();
-  return '${webOrigin(override: origin)}/r/$normalized';
+  var prefix = pathPrefix.trimRight().replaceAll(RegExp(r'/+$'), '');
+  // Table Games shell always shares under /j so invites open the join desk.
+  final resolvedOrigin = webOrigin(override: origin);
+  if (prefix.isEmpty && resolvedOrigin.contains('table-games')) {
+    prefix = '/j';
+  }
+  final path = prefix.isEmpty ? '/r/$normalized' : '$prefix/r/$normalized';
+  return '$resolvedOrigin$path';
 }

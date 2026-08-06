@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
+import '../embed/judgement_embed_scope.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/avatar_pack.dart';
@@ -103,7 +104,10 @@ class _ShareSheetBodyState extends State<_ShareSheetBody> {
       final path = avatarAssetPath(c.avatarOf(r.playerId));
       if (path == null) continue;
       try {
-        await precacheImage(AssetImage(path), overlayContext);
+        await precacheImage(
+          AssetImage(path, package: kJudgementAssetPackage),
+          overlayContext,
+        );
       } catch (_) {
         // Glyph fallback is fine if an asset is missing.
       }

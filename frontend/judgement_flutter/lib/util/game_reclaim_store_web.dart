@@ -6,14 +6,13 @@ import 'game_reclaim_store.dart';
 
 const _key = 'judgement_game_reclaim_v1';
 
-GameReclaimBlob? readGameReclaim(String roomCode) {
+GameReclaimBlob? peekGameReclaim() {
   try {
     final raw = web.window.localStorage.getItem(_key);
     if (raw == null || raw.isEmpty) return null;
     final blob = GameReclaimBlob.fromJson(
       jsonDecode(raw) as Map<String, dynamic>,
     );
-    if (blob.roomCode != roomCode.toUpperCase()) return null;
     if (blob.isExpired) {
       clearGameReclaim();
       return null;
@@ -22,6 +21,13 @@ GameReclaimBlob? readGameReclaim(String roomCode) {
   } catch (_) {
     return null;
   }
+}
+
+GameReclaimBlob? readGameReclaim(String roomCode) {
+  final blob = peekGameReclaim();
+  if (blob == null) return null;
+  if (blob.roomCode != roomCode.toUpperCase()) return null;
+  return blob;
 }
 
 void writeGameReclaim(GameReclaimBlob blob) {
