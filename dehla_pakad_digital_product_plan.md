@@ -1239,3 +1239,75 @@ The most defensible feature is not the deck or the basic rules. It is the combin
 - Apple App Review Guidelines and In-App Purchase guidance.
 
 **Important:** Regulatory interpretation and pricing are product-planning recommendations, not legal or tax advice. Obtain Indian gaming, consumer-protection, privacy and platform-policy review before production launch.
+
+---
+
+# Addendum A — Multi-game packaging with Judgement (2026-08-06)
+
+This addendum amends the standalone assumptions in Parts VI–IX for delivery
+**inside the Judgement monorepo**. Binding architecture: [`docs/adr/0006-multi-game-platform.md`](docs/adr/0006-multi-game-platform.md),
+capacity: [`docs/dehla_game_estimation.md`](docs/dehla_game_estimation.md).
+
+## A.1 Decisions locked
+
+1. **Monorepo** with separate Dehla backend crates (`dehla-*`) and
+   `frontend/dehla_flutter` package; thin `frontend/shell_flutter` for game picker.
+2. **Separate Railway service + Postgres** for Dehla; Judgement API unchanged.
+3. **Presence:** Judgement ADR 0004 — vacant seat + pause + human reclaim;
+   **no bot fill** at MVP.
+4. **Partnership:** after four players seated, default **random opposite
+   partners**; optional **choose partners** before start.
+5. **MVP tables:** private rooms + namespaced deep links (`/dp/r/{CODE}`) first;
+   public matchmaking / ranked deferred.
+6. **CAP/NFR:** CP table authority, single-writer, Judgement-aligned latency and
+   ~99.0–99.5% availability **class** (not a 99.9% MVP contract). Redis deferred.
+7. **Judgement non-regression (must follow):** do not modify Judgement game
+   engine, protocol, persistence, actor, or table UI for Dehla. Copy or
+   redevelop under `dehla-*` / `dehla_flutter`.
+
+## A.2 §24 Non-functional targets — superseded for MVP
+
+Replace the MVP bullets in §24 with:
+
+| NFR | MVP target |
+|-----|------------|
+| CAP class | CP (persist tip before observe) |
+| Availability class | ~99.0–99.5% if API+DB healthy (not contractual SLO) |
+| Perceived action latency (India) | ~100–200 ms p50 |
+| Persist p95 | &lt; 50 ms |
+| Reconnect restore | &lt; 3 s after transport recovery |
+| Crash-free sessions | &gt; 99.5% |
+| Private match completion | &gt; 85% |
+| Deterministic replay | 100% of completed matches |
+| Queue / bot-fallback latency | N/A at MVP (no bots, private rooms only) |
+
+99.9% availability and Redis-backed presence remain **Phase B+** only with an
+explicit HA / multi-writer design.
+
+## A.3 Phase 1 MVP scope — trimmed
+
+In scope:
+
+- Dehla Pakad Classic rules engine (server-authoritative);
+- announced + cut trump;
+- private rooms, deep links, guest sessions;
+- ADR 0004 reclaim (no bots);
+- partnership modes (random default + choose partners);
+- pile-capture HUD;
+- Hindi/English basics;
+- analytics hooks;
+- separate `dehla-server` on Railway.
+
+Out of Phase 1 (defer): Mendikot pack, Custom Family Table schema, public
+matchmaking, ranked, economy/IAP, Redis, bot engine, clubs/voice/spectators.
+
+## A.4 Frontend layout
+
+```text
+frontend/shell_flutter/      # game picker + /dp and Judgement deep-link host
+frontend/judgement_flutter/  # existing Judgement — do not regress
+frontend/dehla_flutter/      # Dehla package (standalone main_dev for debug)
+```
+
+Dehla never imports Judgement protocol/table code (and reverse). Reclaim keys
+namespaced (`dehla_reclaim_v1`, etc.).

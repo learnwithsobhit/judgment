@@ -10,6 +10,11 @@ members = [
     "crates/judgement-ai",
     "crates/judgement-rag",
     "crates/judgement-analytics",
+    "crates/dehla-domain",
+    "crates/dehla-engine",
+    "crates/dehla-protocol",
+    "crates/dehla-persistence",
+    "crates/dehla-server",
 ]
 
 [workspace.package]
@@ -34,3 +39,8 @@ judgement-persistence = { path = "crates/judgement-persistence" }
 judgement-ai = { path = "crates/judgement-ai" }
 judgement-rag = { path = "crates/judgement-rag" }
 judgement-analytics = { path = "crates/judgement-analytics" }
+
+dehla-domain = { path = "crates/dehla-domain" }
+dehla-engine = { path = "crates/dehla-engine" }
+dehla-protocol = { path = "crates/dehla-protocol" }
+dehla-persistence = { path = "crates/dehla-persistence" }

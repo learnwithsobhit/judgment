@@ -1,0 +1,11 @@
+[package]
+name = "dehla-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dehla-domain = { workspace = true }
+dehla-engine = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }

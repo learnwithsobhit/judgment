@@ -1,0 +1,24 @@
+# Multi-stage build for dehla-server (ADR 0006 — separate from Judgement).
+# Build from repo root: docker build -f deployment/docker/Dockerfile.dehla .
+
+FROM rust:1.88-bookworm AS builder
+WORKDIR /app
+COPY backend/ ./backend/
+WORKDIR /app/backend
+RUN cargo build --release -p dehla-server
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /srv
+COPY --from=builder /app/backend/target/release/dehla-server /usr/local/bin/dehla-server
+COPY --from=builder /app/backend/crates/dehla-persistence/migrations /srv/migrations/dehla
+ENV RUST_LOG=info
+ENV PORT=8080
+ENV DEHLA_MIGRATIONS_DIR=/srv/migrations/dehla
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
+USER nobody
+CMD ["dehla-server"]

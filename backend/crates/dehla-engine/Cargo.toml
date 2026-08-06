@@ -1,0 +1,16 @@
+[package]
+name = "dehla-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dehla-domain = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+rand_chacha = { workspace = true }

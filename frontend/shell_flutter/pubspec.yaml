@@ -1,0 +1,22 @@
+name: shell_flutter
+description: Multi-game shell — Judgement + Dehla Pakad picker (ADR 0006).
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dehla_flutter:
+    path: ../dehla_flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

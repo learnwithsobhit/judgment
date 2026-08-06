@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "judgment-lws-260731"
+  },
+  "targets": {
+    "judgment-lws-260731": {
+      "hosting": {
+        "dehla-railway-test": [
+          "dehla-railway-test"
+        ]
+      }
+    }
+  }
+}
