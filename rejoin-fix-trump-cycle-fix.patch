@@ -1,0 +1,1844 @@
+diff --git a/backend/crates/judgement-domain/src/lib.rs b/backend/crates/judgement-domain/src/lib.rs
+index 0d82a84..734fd8e 100644
+--- a/backend/crates/judgement-domain/src/lib.rs
++++ b/backend/crates/judgement-domain/src/lib.rs
+@@ -18,9 +18,9 @@ pub use ids::{
+ };
+ pub use player::{ConnectionStatus, PlayerState};
+ pub use rules::{
+-    max_cards_per_player, BiddingRule, GameRules, ManualRoundStep, RoundPattern, RoundSchedule,
+-    RoundScheduleError, RoundScheduleMode, ScoringRule, TrumpRule, EVENT_SEAT_CAP,
+-    EVENT_WAITLIST_CAP, MAX_MANUAL_REPEAT, MAX_MANUAL_ROUNDS, MAX_PLAYERS, MIN_PLAYERS,
+-    TRUMP_ROTATION,
++    max_cards_per_player, trump_rule_from_config, validate_trump_cycle, BiddingRule, GameRules,
++    ManualRoundStep, RoundPattern, RoundSchedule, RoundScheduleError, RoundScheduleMode,
++    ScoringRule, TrumpRule, EVENT_SEAT_CAP, EVENT_WAITLIST_CAP, MAX_MANUAL_REPEAT,
++    MAX_MANUAL_ROUNDS, MAX_PLAYERS, MIN_PLAYERS, TRUMP_ROTATION,
+ };
+ pub use score::{RankedPlayer, RoundScoreEntry, ScoreTable};
+diff --git a/backend/crates/judgement-domain/src/rules.rs b/backend/crates/judgement-domain/src/rules.rs
+index 16929b7..52de1c0 100644
+--- a/backend/crates/judgement-domain/src/rules.rs
++++ b/backend/crates/judgement-domain/src/rules.rs
+@@ -261,6 +261,51 @@ impl TrumpRule {
+             .collect();
+         TrumpRule::FixedSequence { suits }
+     }
++
++    /// Host-defined cycle: exactly the four suits, each once, in order.
++    pub fn from_cycle(suits: Vec<Suit>) -> Result<Self, String> {
++        validate_trump_cycle(&suits)?;
++        Ok(TrumpRule::FixedSequence { suits })
++    }
++}
++
++/// Validate a host trump cycle: permutation of all four suits.
++pub fn validate_trump_cycle(suits: &[Suit]) -> Result<(), String> {
++    if suits.len() != 4 {
++        return Err("trump_cycle must contain exactly 4 suits".into());
++    }
++    let mut seen = [false; 4];
++    for suit in suits {
++        let idx = match suit {
++            Suit::Spades => 0,
++            Suit::Diamonds => 1,
++            Suit::Clubs => 2,
++            Suit::Hearts => 3,
++        };
++        if seen[idx] {
++            return Err("trump_cycle must list each suit once".into());
++        }
++        seen[idx] = true;
++    }
++    if seen.iter().any(|s| !*s) {
++        return Err("trump_cycle must list each suit once".into());
++    }
++    Ok(())
++}
++
++/// Resolve room trump config → engine rule.
++/// Prefer `trump_cycle` when present; else legacy `first_trump`; else reveal.
++pub fn trump_rule_from_config(
++    trump_cycle: Option<&[Suit]>,
++    first_trump: Option<Suit>,
++) -> Result<TrumpRule, String> {
++    match trump_cycle {
++        Some(cycle) => TrumpRule::from_cycle(cycle.to_vec()),
++        None => Ok(match first_trump {
++            Some(suit) => TrumpRule::rotating_from(suit),
++            None => TrumpRule::RevealUndealtCard,
++        }),
++    }
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+@@ -378,6 +423,51 @@ mod tests {
+         assert_eq!(suits, TRUMP_ROTATION.to_vec());
+     }
+ 
++    #[test]
++    fn custom_trump_cycle_and_validation() {
++        let custom = TrumpRule::from_cycle(vec![
++            Suit::Spades,
++            Suit::Clubs,
++            Suit::Hearts,
++            Suit::Diamonds,
++        ])
++        .unwrap();
++        let TrumpRule::FixedSequence { suits } = custom else {
++            panic!("expected FixedSequence");
++        };
++        assert_eq!(
++            suits,
++            vec![
++                Suit::Spades,
++                Suit::Clubs,
++                Suit::Hearts,
++                Suit::Diamonds
++            ]
++        );
++        assert!(TrumpRule::from_cycle(vec![Suit::Spades, Suit::Clubs]).is_err());
++        assert!(validate_trump_cycle(&[
++            Suit::Spades,
++            Suit::Spades,
++            Suit::Hearts,
++            Suit::Diamonds
++        ])
++        .is_err());
++        let rule = trump_rule_from_config(
++            Some(&[
++                Suit::Hearts,
++                Suit::Diamonds,
++                Suit::Spades,
++                Suit::Clubs,
++            ]),
++            Some(Suit::Spades),
++        )
++        .unwrap();
++        let TrumpRule::FixedSequence { suits } = rule else {
++            panic!("expected FixedSequence");
++        };
++        assert_eq!(suits[0], Suit::Hearts);
++    }
++
+     #[test]
+     fn six_player_descending_pattern() {
+         let pattern = RoundPattern::descending_for_players(6);
+diff --git a/backend/crates/judgement-persistence/src/models.rs b/backend/crates/judgement-persistence/src/models.rs
+index a76479e..b48bf12 100644
+--- a/backend/crates/judgement-persistence/src/models.rs
++++ b/backend/crates/judgement-persistence/src/models.rs
+@@ -40,6 +40,9 @@ pub struct StoredRoom {
+     pub max_players: u8,
+     pub turn_timeout_seconds: Option<u16>,
+     pub first_trump: Option<Suit>,
++    /// Custom 4-suit trump cycle when set.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub trump_cycle: Option<Vec<Suit>>,
+     /// Automatic descending or manual `{cards, repeat}` steps.
+     #[serde(default)]
+     pub round_schedule: RoundSchedule,
+@@ -130,6 +133,8 @@ pub struct StoredScheduledEvent {
+     pub max_players: u8,
+     pub turn_timeout_seconds: Option<u16>,
+     pub first_trump: Option<Suit>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub trump_cycle: Option<Vec<Suit>>,
+     #[serde(default)]
+     pub round_schedule: RoundSchedule,
+     pub status: String,
+diff --git a/backend/crates/judgement-persistence/src/postgres.rs b/backend/crates/judgement-persistence/src/postgres.rs
+index 82d52a3..b2d5b02 100644
+--- a/backend/crates/judgement-persistence/src/postgres.rs
++++ b/backend/crates/judgement-persistence/src/postgres.rs
+@@ -102,13 +102,15 @@ impl GameStore for PostgresStore {
+             r#"
+             INSERT INTO rooms (
+                 room_id, code, host_session_id, max_players, turn_timeout_seconds,
+-                first_trump, round_schedule, dealer_total_restriction, phase, game_id, created_at
+-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
++                first_trump, trump_cycle, round_schedule, dealer_total_restriction,
++                phase, game_id, created_at
++            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+             ON CONFLICT (room_id) DO UPDATE SET
+                 host_session_id = EXCLUDED.host_session_id,
+                 max_players = EXCLUDED.max_players,
+                 turn_timeout_seconds = EXCLUDED.turn_timeout_seconds,
+                 first_trump = EXCLUDED.first_trump,
++                trump_cycle = EXCLUDED.trump_cycle,
+                 round_schedule = EXCLUDED.round_schedule,
+                 dealer_total_restriction = EXCLUDED.dealer_total_restriction,
+                 phase = EXCLUDED.phase,
+@@ -121,6 +123,7 @@ impl GameStore for PostgresStore {
+         .bind(room.max_players as i16)
+         .bind(room.turn_timeout_seconds.map(|t| t as i16))
+         .bind(room.first_trump.map(suit_to_db))
++        .bind(serde_json::to_value(&room.trump_cycle)?)
+         .bind(serde_json::to_value(&room.round_schedule)?)
+         .bind(room.dealer_total_restriction)
+         .bind(&room.phase)
+@@ -189,7 +192,8 @@ impl GameStore for PostgresStore {
+         let room_rows = sqlx::query(
+             r#"
+             SELECT room_id, code, host_session_id, max_players, turn_timeout_seconds,
+-                   first_trump, round_schedule, dealer_total_restriction, phase, game_id, created_at
++                   first_trump, trump_cycle, round_schedule, dealer_total_restriction,
++                   phase, game_id, created_at
+             FROM rooms
+             "#,
+         )
+@@ -221,6 +225,14 @@ impl GameStore for PostgresStore {
+             .collect();
+ 
+             let first_trump: Option<String> = row.get("first_trump");
++            let cycle_value: Option<serde_json::Value> = row.get("trump_cycle");
++            let trump_cycle = cycle_value.and_then(|v| {
++                if v.is_null() {
++                    None
++                } else {
++                    serde_json::from_value(v).ok()
++                }
++            });
+             let schedule_value: serde_json::Value = row.get("round_schedule");
+             let round_schedule = serde_json::from_value(schedule_value).unwrap_or_default();
+             rooms.push(StoredRoom {
+@@ -232,6 +244,7 @@ impl GameStore for PostgresStore {
+                     .get::<Option<i16>, _>("turn_timeout_seconds")
+                     .map(|t| t as u16),
+                 first_trump: first_trump.as_deref().and_then(suit_from_db),
++                trump_cycle,
+                 round_schedule,
+                 dealer_total_restriction: row.get("dealer_total_restriction"),
+                 phase: row.get("phase"),
+@@ -623,10 +636,10 @@ impl GameStore for PostgresStore {
+             INSERT INTO scheduled_events (
+                 event_id, slug, manage_token_hash, host_nickname, host_session_id,
+                 title, starts_at, timezone, duration_minutes, max_players,
+-                turn_timeout_seconds, first_trump, round_schedule, status, room_id,
+-                created_at, updated_at
++                turn_timeout_seconds, first_trump, trump_cycle, round_schedule,
++                status, room_id, created_at, updated_at
+             ) VALUES (
+-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
++                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+             )
+             ON CONFLICT (event_id) DO UPDATE SET
+                 manage_token_hash = EXCLUDED.manage_token_hash,
+@@ -637,6 +650,7 @@ impl GameStore for PostgresStore {
+                 max_players = EXCLUDED.max_players,
+                 turn_timeout_seconds = EXCLUDED.turn_timeout_seconds,
+                 first_trump = EXCLUDED.first_trump,
++                trump_cycle = EXCLUDED.trump_cycle,
+                 round_schedule = EXCLUDED.round_schedule,
+                 status = EXCLUDED.status,
+                 room_id = EXCLUDED.room_id,
+@@ -655,6 +669,7 @@ impl GameStore for PostgresStore {
+         .bind(event.max_players as i16)
+         .bind(event.turn_timeout_seconds.map(|t| t as i16))
+         .bind(event.first_trump.map(suit_to_db))
++        .bind(serde_json::to_value(&event.trump_cycle)?)
+         .bind(serde_json::to_value(&event.round_schedule)?)
+         .bind(&event.status)
+         .bind(event.room_id.map(|r| r.0))
+@@ -698,8 +713,8 @@ impl GameStore for PostgresStore {
+             r#"
+             SELECT event_id, slug, manage_token_hash, host_nickname, host_session_id,
+                    title, starts_at, timezone, duration_minutes, max_players,
+-                   turn_timeout_seconds, first_trump, round_schedule, status, room_id,
+-                   created_at, updated_at
++                   turn_timeout_seconds, first_trump, trump_cycle, round_schedule,
++                   status, room_id, created_at, updated_at
+             FROM scheduled_events
+             "#,
+         )
+@@ -732,6 +747,14 @@ impl GameStore for PostgresStore {
+             .collect();
+ 
+             let first_trump: Option<String> = row.get("first_trump");
++            let cycle_value: Option<serde_json::Value> = row.get("trump_cycle");
++            let trump_cycle = cycle_value.and_then(|v| {
++                if v.is_null() {
++                    None
++                } else {
++                    serde_json::from_value(v).ok()
++                }
++            });
+             let schedule_value: serde_json::Value = row.get("round_schedule");
+             events.push(StoredScheduledEvent {
+                 event_id: EventId(event_id),
+@@ -750,6 +773,7 @@ impl GameStore for PostgresStore {
+                     .get::<Option<i16>, _>("turn_timeout_seconds")
+                     .map(|t| t as u16),
+                 first_trump: first_trump.as_deref().and_then(suit_from_db),
++                trump_cycle,
+                 round_schedule: serde_json::from_value(schedule_value).unwrap_or_default(),
+                 status: row.get("status"),
+                 room_id: row.get::<Option<Uuid>, _>("room_id").map(RoomId),
+diff --git a/backend/crates/judgement-persistence/tests/memory_store.rs b/backend/crates/judgement-persistence/tests/memory_store.rs
+index 1f5bc46..d6c3433 100644
+--- a/backend/crates/judgement-persistence/tests/memory_store.rs
++++ b/backend/crates/judgement-persistence/tests/memory_store.rs
+@@ -50,6 +50,7 @@ async fn memory_store_finishes_game_and_records_history() {
+             max_players: 4,
+             turn_timeout_seconds: None,
+             first_trump: Some(Suit::Clubs),
++            trump_cycle: None,
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             phase: "lobby".into(),
+@@ -168,6 +169,7 @@ async fn action_committed_detects_durable_action_id() {
+             max_players: 4,
+             turn_timeout_seconds: None,
+             first_trump: Some(Suit::Clubs),
++            trump_cycle: None,
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             phase: "lobby".into(),
+diff --git a/backend/crates/judgement-persistence/tests/postgres_store.rs b/backend/crates/judgement-persistence/tests/postgres_store.rs
+index e4c6949..c48cb7f 100644
+--- a/backend/crates/judgement-persistence/tests/postgres_store.rs
++++ b/backend/crates/judgement-persistence/tests/postgres_store.rs
+@@ -80,6 +80,7 @@ async fn postgres_persists_and_restores_a_game() {
+             max_players: 4,
+             turn_timeout_seconds: None,
+             first_trump: Some(Suit::Spades),
++            trump_cycle: None,
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             phase: "lobby".into(),
+diff --git a/backend/crates/judgement-protocol/src/rest.rs b/backend/crates/judgement-protocol/src/rest.rs
+index 6c0cdce..cae23fd 100644
+--- a/backend/crates/judgement-protocol/src/rest.rs
++++ b/backend/crates/judgement-protocol/src/rest.rs
+@@ -40,8 +40,13 @@ pub struct CreateRoomRequest {
+     pub turn_timeout_seconds: Option<u16>,
+     /// Trump for round 1; later rounds follow the fixed rotation
+     /// ♠ → ♦ → ♣ → ♥ (ADR 0003). Omitted ⇒ revealed-card trump each round.
++    /// Ignored when `trump_cycle` is set (coerced to `cycle[0]`).
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub first_trump: Option<Suit>,
++    /// Full trump suit cycle (exactly 4 distinct suits). When set, round `n`
++    /// uses `trump_cycle[n % 4]`. Omitted ⇒ use `first_trump` / revealed-card.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub trump_cycle: Option<Vec<Suit>>,
+     /// Automatic (default) or Manual step list expanded at game start.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub round_schedule: Option<RoundSchedule>,
+@@ -62,7 +67,12 @@ pub struct CreateRoomResponse {
+ }
+ 
+ #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+-pub struct JoinRoomRequest {}
++pub struct JoinRoomRequest {
++    /// Prefer reclaiming this vacant in-game `player_id` (same seat/hand/scores).
++    /// Omitted ⇒ nick hint (if unique) or first vacant seat.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub player_id: Option<PlayerId>,
++}
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct JoinRoomResponse {
+@@ -143,9 +153,13 @@ pub struct RoomView {
+     /// `None` means the room has no turn timer (ADR 0003).
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub turn_timeout_seconds: Option<u16>,
+-    /// `None` means revealed-card trump; `Some` means rotation from this suit.
++    /// `None` means revealed-card trump; `Some` means rotation from this suit
++    /// (or `trump_cycle[0]` when a custom cycle is set).
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub first_trump: Option<Suit>,
++    /// Custom 4-suit trump cycle when set; omitted for revealed-card / legacy.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub trump_cycle: Option<Vec<Suit>>,
+     /// Host-chosen round schedule (default Automatic when omitted on older clients).
+     #[serde(default)]
+     pub round_schedule: RoundSchedule,
+@@ -166,6 +180,9 @@ pub struct SeatView {
+     pub is_host: bool,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub avatar_id: Option<String>,
++    /// True while this in-game seat is vacant and claimable (omit/false in lobby).
++    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
++    pub vacant: bool,
+ }
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+@@ -327,6 +344,8 @@ pub struct CreateGameEventRequest {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub first_trump: Option<Suit>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub trump_cycle: Option<Vec<Suit>>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub round_schedule: Option<RoundSchedule>,
+ }
+ 
+@@ -356,6 +375,8 @@ pub struct GameEventPublicView {
+     pub max_players: u8,
+     pub turn_timeout_seconds: Option<u16>,
+     pub first_trump: Option<Suit>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub trump_cycle: Option<Vec<Suit>>,
+     #[serde(default)]
+     pub round_schedule: RoundSchedule,
+     pub round_schedule_summary: String,
+diff --git a/backend/crates/judgement-server/src/actor.rs b/backend/crates/judgement-server/src/actor.rs
+index 7178c1e..19cfe65 100644
+--- a/backend/crates/judgement-server/src/actor.rs
++++ b/backend/crates/judgement-server/src/actor.rs
+@@ -463,18 +463,33 @@ impl GameActor {
+         if self.ended || self.engine.is_finished() {
+             return Err("game is over".into());
+         }
+-        let vacant: Vec<PlayerId> = self
++        let vacant_players: Vec<_> = self
+             .engine
+             .state()
+             .players
+             .iter()
+             .filter(|p| p.connection_status == ConnectionStatus::Vacant)
+-            .map(|p| p.id)
+             .collect();
++        let vacant_ids: Vec<PlayerId> = vacant_players.iter().map(|p| p.id).collect();
+         let player_id = match preferred {
+-            Some(id) if vacant.contains(&id) => id,
+-            Some(_) => return Err("that seat is not vacant".into()),
+-            None => *vacant.first().ok_or_else(|| "no vacant seats".to_string())?,
++            Some(id) if vacant_ids.contains(&id) => id,
++            Some(_) => return Err("SEAT_NOT_VACANT: that seat is not vacant".into()),
++            None => {
++                // Soft reclaim: unique vacant nickname match (case-insensitive).
++                let nick = nickname.trim().to_ascii_lowercase();
++                let nick_matches: Vec<PlayerId> = vacant_players
++                    .iter()
++                    .filter(|p| p.nickname.trim().to_ascii_lowercase() == nick)
++                    .map(|p| p.id)
++                    .collect();
++                if nick_matches.len() == 1 {
++                    nick_matches[0]
++                } else {
++                    *vacant_ids
++                        .first()
++                        .ok_or_else(|| "no vacant seats".to_string())?
++                }
++            }
+         };
+         self.engine
+             .set_seat_identity(player_id, nickname.clone(), avatar_id)
+diff --git a/backend/crates/judgement-server/src/error.rs b/backend/crates/judgement-server/src/error.rs
+index 5dd8928..e78bd24 100644
+--- a/backend/crates/judgement-server/src/error.rs
++++ b/backend/crates/judgement-server/src/error.rs
+@@ -24,6 +24,9 @@ pub enum ApiError {
+     /// Product capacity gate — new rooms/starts rejected; live games untouched.
+     #[error("{0}")]
+     CapacityFull(String),
++    /// Preferred reclaim `player_id` is not currently vacant.
++    #[error("{0}")]
++    SeatNotVacant(String),
+ }
+ 
+ impl ApiError {
+@@ -36,6 +39,7 @@ impl ApiError {
+             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
+             ApiError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
+             ApiError::CapacityFull(_) => StatusCode::SERVICE_UNAVAILABLE,
++            ApiError::SeatNotVacant(_) => StatusCode::CONFLICT,
+         }
+     }
+ 
+@@ -48,6 +52,7 @@ impl ApiError {
+             ApiError::BadRequest(_) => "BAD_REQUEST",
+             ApiError::TooManyRequests(_) => "RATE_LIMITED",
+             ApiError::CapacityFull(_) => "CAPACITY_FULL",
++            ApiError::SeatNotVacant(_) => "SEAT_NOT_VACANT",
+         }
+     }
+ }
+diff --git a/backend/crates/judgement-server/src/events.rs b/backend/crates/judgement-server/src/events.rs
+index 88390c6..00cd637 100644
+--- a/backend/crates/judgement-server/src/events.rs
++++ b/backend/crates/judgement-server/src/events.rs
+@@ -116,6 +116,7 @@ impl ScheduledEvent {
+             max_players: EVENT_SEAT_CAP,
+             turn_timeout_seconds: self.turn_timeout_seconds,
+             first_trump: self.first_trump,
++            trump_cycle: self.trump_cycle.clone(),
+             round_schedule: self.round_schedule.clone(),
+             // Summary for the eventual lobby size (going, or seat cap if empty).
+             round_schedule_summary: self.round_schedule.summary(
+@@ -155,6 +156,7 @@ impl ScheduledEvent {
+             max_players: self.max_players,
+             turn_timeout_seconds: self.turn_timeout_seconds,
+             first_trump: self.first_trump,
++            trump_cycle: self.trump_cycle.clone(),
+             round_schedule: self.round_schedule.clone(),
+             status: status_to_str(self.status).into(),
+             room_id: self.room_id,
+@@ -190,6 +192,11 @@ impl ScheduledEvent {
+             max_players: stored.max_players,
+             turn_timeout_seconds: stored.turn_timeout_seconds,
+             first_trump: stored.first_trump,
++            trump_cycle: stored.trump_cycle.and_then(|cycle| {
++                judgement_domain::validate_trump_cycle(&cycle)
++                    .ok()
++                    .map(|_| cycle)
++            }),
+             round_schedule: stored.round_schedule,
+             status: status_from_str(&stored.status),
+             room_id: stored.room_id,
+@@ -321,9 +328,12 @@ pub async fn create_event(
+     let _ = body.max_players;
+     let turn_timeout_seconds = body.turn_timeout_seconds.map(|t| t.clamp(5, 300));
+     let round_schedule = body.round_schedule.unwrap_or_default();
++    let (trump_cycle, first_trump) =
++        crate::routes::normalize_trump_config(body.trump_cycle, body.first_trump)?;
+     // Validate deal schedule against the largest possible table (8).
++    let reveal_trump = trump_cycle.is_none() && first_trump.is_none();
+     round_schedule
+-        .resolve_pattern(EVENT_SEAT_CAP, body.first_trump.is_none())
++        .resolve_pattern(EVENT_SEAT_CAP, reveal_trump)
+         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+ 
+     let manage_token = generate_secret();
+@@ -348,7 +358,8 @@ pub async fn create_event(
+         duration_minutes: body.duration_minutes,
+         max_players: EVENT_SEAT_CAP,
+         turn_timeout_seconds,
+-        first_trump: body.first_trump,
++        first_trump,
++        trump_cycle,
+         round_schedule,
+         status: GameEventStatus::Open,
+         room_id: None,
+@@ -622,7 +633,7 @@ pub async fn open_lobby(
+             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+     }
+ 
+-    let (event_id, max_players, turn_timeout_seconds, first_trump, round_schedule) = {
++    let (event_id, max_players, turn_timeout_seconds, first_trump, trump_cycle, round_schedule) = {
+         let events = state.events.lock().unwrap();
+         let event = events
+             .values()
+@@ -641,10 +652,11 @@ pub async fn open_lobby(
+             )));
+         }
+         let max_players = going.min(MAX_PLAYERS);
++        let reveal_trump = event.trump_cycle.is_none() && event.first_trump.is_none();
+         // Re-validate deal schedule for the actual lobby size.
+         event
+             .round_schedule
+-            .resolve_pattern(max_players, event.first_trump.is_none())
++            .resolve_pattern(max_players, reveal_trump)
+             .map_err(|e| {
+                 ApiError::Conflict(format!(
+                     "round schedule is not valid for {max_players} going players: {e}"
+@@ -655,6 +667,7 @@ pub async fn open_lobby(
+             max_players,
+             event.turn_timeout_seconds,
+             event.first_trump,
++            event.trump_cycle.clone(),
+             event.round_schedule.clone(),
+         )
+     };
+@@ -687,6 +700,7 @@ pub async fn open_lobby(
+         max_players,
+         turn_timeout_seconds,
+         first_trump,
++        trump_cycle,
+         round_schedule: round_schedule.clone(),
+         dealer_total_restriction: false,
+     };
+diff --git a/backend/crates/judgement-server/src/persist.rs b/backend/crates/judgement-server/src/persist.rs
+index 3c4c028..b330bc8 100644
+--- a/backend/crates/judgement-server/src/persist.rs
++++ b/backend/crates/judgement-server/src/persist.rs
+@@ -34,6 +34,7 @@ pub fn stored_room(room: &Room) -> StoredRoom {
+         max_players: room.max_players,
+         turn_timeout_seconds: room.turn_timeout_seconds,
+         first_trump: room.first_trump,
++        trump_cycle: room.trump_cycle.clone(),
+         round_schedule: room.round_schedule.clone(),
+         dealer_total_restriction: room.dealer_total_restriction,
+         phase,
+diff --git a/backend/crates/judgement-server/src/restore.rs b/backend/crates/judgement-server/src/restore.rs
+index cd48cb1..26b1ff7 100644
+--- a/backend/crates/judgement-server/src/restore.rs
++++ b/backend/crates/judgement-server/src/restore.rs
+@@ -68,6 +68,11 @@ pub async fn restore_from_store(
+                     max_players: stored.max_players,
+                     turn_timeout_seconds: stored.turn_timeout_seconds,
+                     first_trump: stored.first_trump,
++                    trump_cycle: stored.trump_cycle.and_then(|cycle| {
++                        judgement_domain::validate_trump_cycle(&cycle)
++                            .ok()
++                            .map(|_| cycle)
++                    }),
+                     round_schedule: stored.round_schedule,
+                     dealer_total_restriction: stored.dealer_total_restriction,
+                 },
+diff --git a/backend/crates/judgement-server/src/routes.rs b/backend/crates/judgement-server/src/routes.rs
+index 75841c9..9772746 100644
+--- a/backend/crates/judgement-server/src/routes.rs
++++ b/backend/crates/judgement-server/src/routes.rs
+@@ -9,8 +9,8 @@ use axum::http::HeaderMap;
+ use axum::Json;
+ use chrono::Utc;
+ use judgement_domain::{
+-    ActionId, GameId, GameRules, PlayerId, PlayerState, RoomId, SessionId, TrumpRule, MAX_PLAYERS,
+-    MIN_PLAYERS,
++    trump_rule_from_config, validate_trump_cycle, ActionId, GameId, GameRules, PlayerId,
++    PlayerState, RoomId, SessionId, Suit, MAX_PLAYERS, MIN_PLAYERS,
+ };
+ use judgement_engine::GameEngine;
+ use judgement_persistence::{NewGamePlayer, StoredRoom};
+@@ -147,8 +147,9 @@ pub async fn create_room(
+     let turn_timeout_seconds = body.turn_timeout_seconds.map(|t| t.clamp(5, 300));
+ 
+     let round_schedule = body.round_schedule.unwrap_or_default();
++    let (trump_cycle, first_trump) = normalize_trump_config(body.trump_cycle, body.first_trump)?;
+     // Validate against table size at create; start_game re-checks seated count.
+-    let reveal_trump = body.first_trump.is_none();
++    let reveal_trump = trump_cycle.is_none() && first_trump.is_none();
+     round_schedule
+         .resolve_pattern(max_players, reveal_trump)
+         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+@@ -181,7 +182,8 @@ pub async fn create_room(
+         status: RoomStatus::Lobby,
+         max_players,
+         turn_timeout_seconds,
+-        first_trump: body.first_trump,
++        first_trump,
++        trump_cycle,
+         round_schedule,
+         dealer_total_restriction: body.dealer_total_restriction,
+     };
+@@ -210,9 +212,54 @@ pub async fn get_room(
+ ) -> Result<Json<RoomView>, ApiError> {
+     state.authenticate(&headers)?;
+     let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+-    let rooms = state.rooms.lock().unwrap();
+-    let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+-    Ok(Json(room.view()))
++    let mut view = {
++        let rooms = state.rooms.lock().unwrap();
++        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
++        room.view()
++    };
++    enrich_room_vacancy(&state, &mut view).await;
++    Ok(Json(view))
++}
++
++/// Mark vacant in-game seats on a [`RoomView`] for reclaim / picker UIs.
++async fn enrich_room_vacancy(state: &AppState, view: &mut RoomView) {
++    let Some(game_id) = view.game_id else {
++        return;
++    };
++    let commands = {
++        let games = state.games.lock().unwrap();
++        games.get(&game_id).map(|info| info.commands.clone())
++    };
++    let Some(commands) = commands else {
++        return;
++    };
++    let (reply_tx, reply_rx) = oneshot::channel();
++    if commands
++        .send(ActorMessage::QueryPresence { reply: reply_tx })
++        .await
++        .is_err()
++    {
++        return;
++    }
++    let Ok(presence) = reply_rx.await else {
++        return;
++    };
++    for seat in &mut view.seats {
++        seat.vacant = presence.vacant_player_ids.contains(&seat.player_id);
++    }
++}
++
++fn map_claim_error(message: String) -> ApiError {
++    if message.starts_with("SEAT_NOT_VACANT") {
++        ApiError::SeatNotVacant(
++            message
++                .strip_prefix("SEAT_NOT_VACANT: ")
++                .unwrap_or(message.as_str())
++                .to_string(),
++        )
++    } else {
++        ApiError::Conflict(message)
++    }
+ }
+ 
+ pub async fn join_room(
+@@ -221,7 +268,7 @@ pub async fn join_room(
+     Path(room_ref): Path<String>,
+     body: Option<Json<JoinRoomRequest>>,
+ ) -> Result<Json<JoinRoomResponse>, ApiError> {
+-    let _ = body;
++    let preferred = body.and_then(|j| j.0.player_id);
+     let session = state.authenticate(&headers)?;
+     let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+ 
+@@ -235,7 +282,8 @@ pub async fn join_room(
+             None
+         }
+     };
+-    if let Some((room, player_id)) = already_seated {
++    if let Some((mut room, player_id)) = already_seated {
++        enrich_room_vacancy(&state, &mut room).await;
+         return Ok(Json(JoinRoomResponse { room, player_id }));
+     }
+     let needs_claim = {
+@@ -250,7 +298,9 @@ pub async fn join_room(
+             &state,
+             &session,
+             room_id,
+-            ClaimSeatRequest { player_id: None },
++            ClaimSeatRequest {
++                player_id: preferred,
++            },
+         )
+         .await?;
+         return Ok(Json(JoinRoomResponse {
+@@ -354,7 +404,7 @@ async fn claim_seat_inner(
+     let player_id = reply_rx
+         .await
+         .map_err(|_| ApiError::Conflict("claim reply dropped".into()))?
+-        .map_err(ApiError::Conflict)?;
++        .map_err(map_claim_error)?;
+ 
+     // Remap session → player in GameInfo and room seats.
+     let snapshot = {
+@@ -390,13 +440,14 @@ async fn claim_seat_inner(
+         .await
+         .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
+ 
+-    let view = {
++    let mut view = {
+         let rooms = state.rooms.lock().unwrap();
+         rooms
+             .get(&room_id)
+             .ok_or(ApiError::NotFound("room"))?
+             .view()
+     };
++    enrich_room_vacancy(state, &mut view).await;
+     Ok(ClaimSeatResponse {
+         room: view,
+         player_id,
+@@ -774,6 +825,7 @@ async fn start_game_inner(
+         session_to_player,
+         turn_timeout_seconds,
+         first_trump,
++        trump_cycle,
+         round_schedule,
+         dealer_total_restriction,
+         game_players,
+@@ -824,6 +876,7 @@ async fn start_game_inner(
+             mapping,
+             room.turn_timeout_seconds,
+             room.first_trump,
++            room.trump_cycle.clone(),
+             room.round_schedule.clone(),
+             room.dealer_total_restriction,
+             game_players,
+@@ -832,11 +885,12 @@ async fn start_game_inner(
+ 
+     let game_id = GameId::new();
+     let seated = players.len() as u8;
+-    let trump_rule = match first_trump {
+-        Some(suit) => TrumpRule::rotating_from(suit),
+-        None => TrumpRule::RevealUndealtCard,
+-    };
+-    let reveal_trump = matches!(trump_rule, TrumpRule::RevealUndealtCard);
++    let trump_rule = trump_rule_from_config(trump_cycle.as_deref(), first_trump)
++        .map_err(ApiError::Conflict)?;
++    let reveal_trump = matches!(
++        trump_rule,
++        judgement_domain::TrumpRule::RevealUndealtCard
++    );
+     let round_pattern = round_schedule
+         .resolve_pattern(seated, reveal_trump)
+         .map_err(|e| {
+@@ -1228,3 +1282,18 @@ fn ensure_game_participant(
+     // beyond ranking (hands are not included). Tighten in Phase 9 if needed.
+     Ok(())
+ }
++
++/// Prefer `trump_cycle` when present; coerce `first_trump` to `cycle[0]`.
++pub(crate) fn normalize_trump_config(
++    trump_cycle: Option<Vec<Suit>>,
++    first_trump: Option<Suit>,
++) -> Result<(Option<Vec<Suit>>, Option<Suit>), ApiError> {
++    match trump_cycle {
++        Some(cycle) => {
++            validate_trump_cycle(&cycle).map_err(ApiError::BadRequest)?;
++            let first = Some(cycle[0]);
++            Ok((Some(cycle), first))
++        }
++        None => Ok((None, first_trump)),
++    }
++}
+diff --git a/backend/crates/judgement-server/src/state.rs b/backend/crates/judgement-server/src/state.rs
+index d493087..3310543 100644
+--- a/backend/crates/judgement-server/src/state.rs
++++ b/backend/crates/judgement-server/src/state.rs
+@@ -65,8 +65,11 @@ pub struct Room {
+     pub max_players: u8,
+     /// `None` disables the turn timer (ADR 0003).
+     pub turn_timeout_seconds: Option<u16>,
+-    /// `None` ⇒ revealed-card trump; `Some` ⇒ rotation from this suit.
++    /// `None` ⇒ revealed-card trump; `Some` ⇒ rotation from this suit
++    /// (or `trump_cycle[0]` when a custom cycle is set).
+     pub first_trump: Option<Suit>,
++    /// Custom 4-suit cycle when set; `None` ⇒ legacy first_trump / reveal.
++    pub trump_cycle: Option<Vec<Suit>>,
+     /// Resolved into `GameRules.round_pattern` at start.
+     pub round_schedule: RoundSchedule,
+     /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
+@@ -93,6 +96,7 @@ impl Room {
+                 ready: s.ready,
+                 is_host: s.session_id == self.host_session,
+                 avatar_id: s.avatar_id.clone(),
++                vacant: false,
+             })
+             .collect();
+         seats.sort_by_key(|s| s.seat);
+@@ -105,6 +109,7 @@ impl Room {
+             min_players: MIN_PLAYERS,
+             turn_timeout_seconds: self.turn_timeout_seconds,
+             first_trump: self.first_trump,
++            trump_cycle: self.trump_cycle.clone(),
+             round_schedule: self.round_schedule.clone(),
+             round_schedule_summary: self.round_schedule.summary(self.max_players),
+             dealer_total_restriction: self.dealer_total_restriction,
+@@ -148,6 +153,7 @@ pub struct ScheduledEvent {
+     pub max_players: u8,
+     pub turn_timeout_seconds: Option<u16>,
+     pub first_trump: Option<Suit>,
++    pub trump_cycle: Option<Vec<Suit>>,
+     pub round_schedule: RoundSchedule,
+     pub status: GameEventStatus,
+     pub room_id: Option<RoomId>,
+diff --git a/backend/crates/judgement-server/tests/coaching.rs b/backend/crates/judgement-server/tests/coaching.rs
+index cc23865..4208a4e 100644
+--- a/backend/crates/judgement-server/tests/coaching.rs
++++ b/backend/crates/judgement-server/tests/coaching.rs
+@@ -57,6 +57,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
+             max_players: 4,
+             turn_timeout_seconds: None,
+             first_trump: Some(Suit::Clubs),
++            trump_cycle: None,
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             phase: "in_game".into(),
+diff --git a/backend/crates/judgement-server/tests/presence.rs b/backend/crates/judgement-server/tests/presence.rs
+index 0a31be8..d96987f 100644
+--- a/backend/crates/judgement-server/tests/presence.rs
++++ b/backend/crates/judgement-server/tests/presence.rs
+@@ -521,3 +521,199 @@ async fn host_end_removes_actor_and_returns_lobby() {
+     assert!(room.game_id.is_none());
+     assert_eq!(room.seats.len(), 3);
+ }
++
++async fn leave_game(client: &mut Client, game_id: GameId) {
++    let view = client.last.as_ref().unwrap();
++    let envelope = ClientEnvelope {
++        protocol_version: PROTOCOL_VERSION,
++        action_id: ActionId::new(),
++        game_id,
++        expected_state_version: view.state_version,
++        action: ClientCommand::LeaveGame,
++    };
++    let ws = client.ws.as_mut().unwrap();
++    ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
++        .await
++        .unwrap();
++    client.ws = None;
++}
++
++#[tokio::test]
++async fn two_vacants_preferred_claims_restore_own_seats() {
++    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
++    let addr = spawn_with(state).await;
++    let base = format!("http://{addr}");
++
++    let mut clients = Vec::new();
++    for name in ["A", "B", "C", "D"] {
++        clients.push(Client::guest(&base, name).await);
++    }
++    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
++    for client in &mut clients {
++        client.connect_ws(&base, game_id).await;
++    }
++
++    let seat_b = clients[1].player_id;
++    let seat_c = clients[2].player_id;
++    let table_seat_b = clients[1].last.as_ref().unwrap().own_seat;
++    let table_seat_c = clients[2].last.as_ref().unwrap().own_seat;
++    leave_game(&mut clients[1], game_id).await;
++    leave_game(&mut clients[2], game_id).await;
++    tokio::time::sleep(Duration::from_millis(150)).await;
++
++    let http = reqwest::Client::new();
++    // Rejoin as C first with preferred C — must not steal B's lower seat index.
++    let mut rejoin_c = Client::guest(&base, "C2").await;
++    let claimed_c: ClaimSeatResponse = http
++        .post(format!("{base}/api/v1/rooms/{code}/claim"))
++        .headers(rejoin_c.headers())
++        .json(&serde_json::json!({ "player_id": seat_c }))
++        .send()
++        .await
++        .unwrap()
++        .json()
++        .await
++        .unwrap();
++    assert_eq!(claimed_c.player_id, seat_c);
++
++    let mut rejoin_b = Client::guest(&base, "B2").await;
++    let claimed_b: JoinRoomResponse = http
++        .post(format!("{base}/api/v1/rooms/{code}/join"))
++        .headers(rejoin_b.headers())
++        .json(&serde_json::json!({ "player_id": seat_b }))
++        .send()
++        .await
++        .unwrap()
++        .json()
++        .await
++        .unwrap();
++    assert_eq!(claimed_b.player_id, seat_b);
++
++    rejoin_c.player_id = seat_c;
++    rejoin_b.player_id = seat_b;
++    rejoin_c.connect_ws(&base, game_id).await;
++    rejoin_b.connect_ws(&base, game_id).await;
++    assert_eq!(rejoin_c.last.as_ref().unwrap().own_seat, table_seat_c);
++    assert_eq!(rejoin_b.last.as_ref().unwrap().own_seat, table_seat_b);
++}
++
++#[tokio::test]
++async fn two_vacants_unscoped_claim_uses_first_vacant() {
++    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
++    let addr = spawn_with(state).await;
++    let base = format!("http://{addr}");
++
++    let mut clients = Vec::new();
++    for name in ["A", "B", "C", "D"] {
++        clients.push(Client::guest(&base, name).await);
++    }
++    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
++    for client in &mut clients {
++        client.connect_ws(&base, game_id).await;
++    }
++
++    // Leave higher seat index first, then lower — first vacant is still seat order.
++    let seat_b = clients[1].player_id;
++    leave_game(&mut clients[2], game_id).await;
++    leave_game(&mut clients[1], game_id).await;
++    tokio::time::sleep(Duration::from_millis(150)).await;
++
++    let http = reqwest::Client::new();
++    let mut replacer = Client::guest(&base, "X").await;
++    let claimed: ClaimSeatResponse = http
++        .post(format!("{base}/api/v1/rooms/{code}/claim"))
++        .headers(replacer.headers())
++        .json(&serde_json::json!({}))
++        .send()
++        .await
++        .unwrap()
++        .json()
++        .await
++        .unwrap();
++    assert_eq!(
++        claimed.player_id, seat_b,
++        "unscoped claim must take first vacant in seat order"
++    );
++}
++
++#[tokio::test]
++async fn preferred_claim_when_seat_taken_returns_seat_not_vacant() {
++    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
++    let addr = spawn_with(state).await;
++    let base = format!("http://{addr}");
++
++    let mut clients = Vec::new();
++    for name in ["A", "B", "C", "D"] {
++        clients.push(Client::guest(&base, name).await);
++    }
++    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
++    for client in &mut clients {
++        client.connect_ws(&base, game_id).await;
++    }
++
++    let seat_b = clients[1].player_id;
++    leave_game(&mut clients[1], game_id).await;
++    tokio::time::sleep(Duration::from_millis(100)).await;
++
++    let http = reqwest::Client::new();
++    let mut first = Client::guest(&base, "X").await;
++    let claimed: ClaimSeatResponse = http
++        .post(format!("{base}/api/v1/rooms/{code}/claim"))
++        .headers(first.headers())
++        .json(&serde_json::json!({ "player_id": seat_b }))
++        .send()
++        .await
++        .unwrap()
++        .json()
++        .await
++        .unwrap();
++    assert_eq!(claimed.player_id, seat_b);
++
++    let mut second = Client::guest(&base, "Y").await;
++    let resp = http
++        .post(format!("{base}/api/v1/rooms/{code}/join"))
++        .headers(second.headers())
++        .json(&serde_json::json!({ "player_id": seat_b }))
++        .send()
++        .await
++        .unwrap();
++    assert_eq!(resp.status(), reqwest::StatusCode::CONFLICT);
++    let body: serde_json::Value = resp.json().await.unwrap();
++    assert_eq!(body["error"]["code"], "SEAT_NOT_VACANT");
++}
++
++#[tokio::test]
++async fn unique_nickname_hint_reclaims_matching_vacant_seat() {
++    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
++    let addr = spawn_with(state).await;
++    let base = format!("http://{addr}");
++
++    let mut clients = Vec::new();
++    for name in ["A", "B", "C", "D"] {
++        clients.push(Client::guest(&base, name).await);
++    }
++    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
++    for client in &mut clients {
++        client.connect_ws(&base, game_id).await;
++    }
++
++    let seat_c = clients[2].player_id;
++    leave_game(&mut clients[1], game_id).await;
++    leave_game(&mut clients[2], game_id).await;
++    tokio::time::sleep(Duration::from_millis(150)).await;
++
++    let http = reqwest::Client::new();
++    // Nickname "C" uniquely matches vacant seat C even though B is first vacant.
++    let mut rejoin_c = Client::guest(&base, "C").await;
++    let claimed: ClaimSeatResponse = http
++        .post(format!("{base}/api/v1/rooms/{code}/claim"))
++        .headers(rejoin_c.headers())
++        .json(&serde_json::json!({}))
++        .send()
++        .await
++        .unwrap()
++        .json()
++        .await
++        .unwrap();
++    assert_eq!(claimed.player_id, seat_c);
++}
+diff --git a/backend/crates/judgement-server/tests/round_schedule.rs b/backend/crates/judgement-server/tests/round_schedule.rs
+index 23ed75c..f9825ae 100644
+--- a/backend/crates/judgement-server/tests/round_schedule.rs
++++ b/backend/crates/judgement-server/tests/round_schedule.rs
+@@ -194,6 +194,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
+                 max_players: 6,
+                 turn_timeout_seconds: None,
+                 first_trump: Some(judgement_domain::Suit::Spades),
++                trump_cycle: None,
+                 round_schedule: RoundSchedule {
+                     mode: RoundScheduleMode::Manual,
+                     steps: Some(vec![ManualRoundStep { cards: 12, repeat: 1 }]),
+diff --git a/docs/adr/0003-table-size-timer-trump-options.md b/docs/adr/0003-table-size-timer-trump-options.md
+index 1b3be65..e96ad66 100644
+--- a/docs/adr/0003-table-size-timer-trump-options.md
++++ b/docs/adr/0003-table-size-timer-trump-options.md
+@@ -41,19 +41,23 @@ Play-testing after Phase 4 surfaced three product requests:
+   so the projection now includes `own_seat`; clients must not infer their
+   seat from the opponents' seat numbers.
+ 
+-### 3. Chosen first trump with fixed rotation
++### 3. Trump: revealed card, legacy first suit, or custom cycle
+ 
+-- Room creation accepts an optional `first_trump` suit.
+-  - **Absent** → existing MVP behaviour: reveal one undealt card per round;
+-    its suit is trump (`TrumpRule::RevealUndealtCard`).
+-  - **Present** → `TrumpRule::FixedSequence`: round 1 uses the chosen suit,
+-    then trump follows the classic order **♠ spades → ♦ diamonds →
+-    ♣ clubs → ♥ hearts**, wrapping, one step per round. No trump card is
+-    revealed in this mode (the projection's `trump_card` stays `null`; the
+-    `trump` suit is always present during a round).
++- Room creation accepts trump config (default **revealed card**):
++  - **`trump_cycle` present** (exactly four distinct suits) →
++    `TrumpRule::FixedSequence` with that order; round `n` uses
++    `cycle[n % 4]`. `first_trump` is coerced to `cycle[0]`. No trump card
++    is revealed (`trump_card` stays `null`).
++  - **`trump_cycle` absent + `first_trump` present** (legacy clients) →
++    classic rotation **♠ → ♦ → ♣ → ♥** starting at the chosen suit
++    (`TrumpRule::rotating_from`).
++  - **Both absent** → reveal one undealt card per round
++    (`TrumpRule::RevealUndealtCard`).
++- Host create UI offers presets (including classic) plus reorder; default
++  remains revealed-card so existing habits are unchanged.
+ - The engine records the effective trump suit in state rather than deriving
+-  it from the revealed card, so both modes flow through the same
+-  trick-evaluation path.
++  it from the revealed card, so all modes flow through the same
++  trick-evaluation path. Restart re-reads the room’s stored cycle.
+ 
+ ## Consequences
+ 
+diff --git a/docs/adr/0004-presence-grace-bot-takeover.md b/docs/adr/0004-presence-grace-bot-takeover.md
+index 797ef8f..776d21f 100644
+--- a/docs/adr/0004-presence-grace-bot-takeover.md
++++ b/docs/adr/0004-presence-grace-bot-takeover.md
+@@ -17,6 +17,15 @@
+    the game WebSocket. A **new** session uses `POST /api/v1/rooms/{code}/claim`
+    (also used by `join` when in-game). Same `player_id` / seat / hand / scores;
+    nickname/avatar update; resume when no vacancies remain.
++
++   **Reclaim precedence** (client + server): (1) same-session token /
++   `already_seated` / WS reclaim; (2) optional preferred `player_id` on
++   `JoinRoomRequest` / claim (client reclaim store); (3) unique vacant
++   nickname hint when preferred is omitted; (4) client seat picker when 2+
++   seats are vacant and identity is ambiguous; (5) first vacant (true
++   replacement / sole vacant). Preferred seat that is not vacant returns
++   `SEAT_NOT_VACANT` (no silent remap). Client reclaim blob is kept across
++   intentional leave until foreign claim, game end/abort/restart, or ~10m TTL.
+ 5. **End game:** host may `EndGame` (WS) or `POST .../end`. Vacancy older than
+    **10 minutes** auto-ends (`aborted`). Abort removes the actor from
+    `state.games`, **hard-deletes** the game row (tip + events), and returns
+@@ -47,3 +56,6 @@
+   or the 10m TTL fires.
+ - Abort/restart/finish free `MAX_ACTIVE_GAMES` slots immediately; finished tip
+   snapshots are not retained for coaching.
++- Mid-game leave→landing→rejoin should reclaim the leaver's own `player_id`
++  when the client still has a reclaim store; multi-vacant joins without identity
++  use the picker instead of silently claiming seat-order first vacant.
+diff --git a/frontend/judgement_flutter/firebase.json b/frontend/judgement_flutter/firebase.json
+index 8ac0ba0..54154c9 100644
+--- a/frontend/judgement_flutter/firebase.json
++++ b/frontend/judgement_flutter/firebase.json
+@@ -266,17 +266,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20260805043924-0fca61f",
++          "destination": "/index.html?_b=20260805061443-ef07162",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20260805043924-0fca61f&room=:code",
++          "destination": "/index.html?_b=20260805061443-ef07162&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20260805043924-0fca61f&event=:slug",
++          "destination": "/index.html?_b=20260805061443-ef07162&event=:slug",
+           "type": 302
+         }
+       ],
+@@ -554,17 +554,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20260805043924-0fca61f",
++          "destination": "/index.html?_b=20260805061443-ef07162",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20260805043924-0fca61f&room=:code",
++          "destination": "/index.html?_b=20260805061443-ef07162&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20260805043924-0fca61f&event=:slug",
++          "destination": "/index.html?_b=20260805061443-ef07162&event=:slug",
+           "type": 302
+         }
+       ],
+diff --git a/frontend/judgement_flutter/lib/models/protocol.dart b/frontend/judgement_flutter/lib/models/protocol.dart
+index cdffea8..871689c 100644
+--- a/frontend/judgement_flutter/lib/models/protocol.dart
++++ b/frontend/judgement_flutter/lib/models/protocol.dart
+@@ -4,6 +4,8 @@
+ /// compute rules (PLAN.md §3.2, §29.2: no game rules duplicated in Flutter).
+ library;
+ 
++import 'package:flutter/material.dart' show Color;
++
+ const int protocolVersion = 1;
+ 
+ // ---------------------------------------------------------------------------
+@@ -17,6 +19,9 @@ const suitSymbols = {
+   'spades': '\u2660',
+ };
+ 
++/// Classic ADR 0003 trump cycle (default when host picks Suit cycle).
++const classicTrumpCycle = ['spades', 'diamonds', 'clubs', 'hearts'];
++
+ const rankLabels = {
+   'two': '2',
+   'three': '3',
+@@ -38,6 +43,31 @@ const _rankOrder = [
+   'nine', 'ten', 'jack', 'queen', 'king', 'ace',
+ ];
+ 
++/// Suit ink for glyphs on dark UI (hearts/diamonds red).
++Color suitColor(String? suit) {
++  switch (suit) {
++    case 'hearts':
++    case 'diamonds':
++      return const Color(0xFFFF6B6B);
++    case 'clubs':
++    case 'spades':
++      return const Color(0xFFE8E8F0);
++    default:
++      return const Color(0xFFE8E8F0);
++  }
++}
++
++/// Suit ink for glyphs on light backgrounds (card fallback).
++Color suitColorOnLight(String? suit) {
++  switch (suit) {
++    case 'hearts':
++    case 'diamonds':
++      return const Color(0xFFC62828);
++    default:
++      return const Color(0xFF1A1A2E);
++  }
++}
++
+ class CardModel {
+   final String suit;
+   final String rank;
+@@ -561,6 +591,7 @@ class SeatView {
+   final bool ready;
+   final bool isHost;
+   final String? avatarId;
++  final bool vacant;
+ 
+   SeatView.fromJson(Map<String, dynamic> json)
+       : playerId = json['player_id'] as String,
+@@ -568,7 +599,8 @@ class SeatView {
+         seat = json['seat'] as int,
+         ready = json['ready'] as bool,
+         isHost = json['is_host'] as bool,
+-        avatarId = json['avatar_id'] as String?;
++        avatarId = json['avatar_id'] as String?,
++        vacant = json['vacant'] as bool? ?? false;
+ }
+ 
+ /// One manual schedule step: deal [cards] for [repeat] consecutive rounds.
+@@ -669,8 +701,10 @@ class RoomView {
+   /// Null means the room has no turn timer (ADR 0003).
+   final int? turnTimeoutSeconds;
+ 
+-  /// Null means revealed-card trump; otherwise trump rotates from this suit.
++  /// Null means revealed-card trump; otherwise trump rotates from this suit
++  /// (or `trumpCycle[0]` when a custom cycle is set).
+   final String? firstTrump;
++  final List<String>? trumpCycle;
+   final RoundSchedule roundSchedule;
+   final String roundScheduleSummary;
+   final bool dealerTotalRestriction;
+@@ -685,6 +719,9 @@ class RoomView {
+         minPlayers = json['min_players'] as int,
+         turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
+         firstTrump = json['first_trump'] as String?,
++        trumpCycle = (json['trump_cycle'] as List?)
++            ?.map((s) => s as String)
++            .toList(),
+         roundSchedule = RoundSchedule.fromJson(
+           json['round_schedule'] as Map<String, dynamic>?,
+         ),
+@@ -712,6 +749,7 @@ class GameEventPublicView {
+   final int maxPlayers;
+   final int? turnTimeoutSeconds;
+   final String? firstTrump;
++  final List<String>? trumpCycle;
+   final RoundSchedule roundSchedule;
+   final String roundScheduleSummary;
+   final String status;
+@@ -737,6 +775,9 @@ class GameEventPublicView {
+         maxPlayers = json['max_players'] as int? ?? 8,
+         turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
+         firstTrump = json['first_trump'] as String?,
++        trumpCycle = (json['trump_cycle'] as List?)
++            ?.map((s) => s as String)
++            .toList(),
+         roundSchedule = RoundSchedule.fromJson(
+           json['round_schedule'] as Map<String, dynamic>?,
+         ),
+diff --git a/frontend/judgement_flutter/lib/networking/api_client.dart b/frontend/judgement_flutter/lib/networking/api_client.dart
+index 206f7c4..2bb0e7f 100644
+--- a/frontend/judgement_flutter/lib/networking/api_client.dart
++++ b/frontend/judgement_flutter/lib/networking/api_client.dart
+@@ -73,20 +73,23 @@ class ApiClient {
+     return session;
+   }
+ 
+-  /// [turnTimeoutSeconds] null ⇒ no turn timer; [firstTrump] null ⇒
+-  /// revealed-card trump, otherwise rotation from that suit (ADR 0003).
++  /// [turnTimeoutSeconds] null ⇒ no turn timer.
++  /// Trump: omit both for revealed-card; [trumpCycle] (4 suits) for custom
++  /// rotation; or legacy [firstTrump] alone for classic ♠♦♣♥ from that suit.
+   /// [roundSchedule] null ⇒ automatic descending max→1.
+   Future<({RoomView room, String playerId, String? capacity})> createRoom({
+     int? maxPlayers,
+     int? turnTimeoutSeconds,
+     String? firstTrump,
++    List<String>? trumpCycle,
+     RoundSchedule? roundSchedule,
+     bool dealerTotalRestriction = false,
+   }) async {
+     final json = await _post('/api/v1/rooms', {
+       'max_players': ?maxPlayers,
+       'turn_timeout_seconds': ?turnTimeoutSeconds,
+-      'first_trump': ?firstTrump,
++      if (trumpCycle != null) 'trump_cycle': trumpCycle,
++      if (trumpCycle == null) 'first_trump': ?firstTrump,
+       'round_schedule': ?roundSchedule?.toJson(),
+       'dealer_total_restriction': dealerTotalRestriction,
+     });
+@@ -97,8 +100,13 @@ class ApiClient {
+     );
+   }
+ 
+-  Future<({RoomView room, String playerId})> joinRoom(String roomRef) async {
+-    final json = await _post('/api/v1/rooms/$roomRef/join', {});
++  Future<({RoomView room, String playerId})> joinRoom(
++    String roomRef, {
++    String? playerId,
++  }) async {
++    final json = await _post('/api/v1/rooms/$roomRef/join', {
++      if (playerId != null) 'player_id': playerId,
++    });
+     return (
+       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
+       playerId: json['player_id'] as String,
+@@ -111,7 +119,7 @@ class ApiClient {
+     String? playerId,
+   }) async {
+     final json = await _post('/api/v1/rooms/$roomRef/claim', {
+-      'player_id': ?playerId,
++      if (playerId != null) 'player_id': playerId,
+     });
+     return (
+       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
+@@ -198,6 +206,7 @@ class ApiClient {
+     int durationMinutes = 90,
+     int? turnTimeoutSeconds,
+     String? firstTrump,
++    List<String>? trumpCycle,
+     RoundSchedule? roundSchedule,
+   }) async {
+     final json = await _post('/api/v1/events', {
+@@ -206,7 +215,8 @@ class ApiClient {
+       'timezone': timezone,
+       'duration_minutes': durationMinutes,
+       'turn_timeout_seconds': ?turnTimeoutSeconds,
+-      'first_trump': ?firstTrump,
++      if (trumpCycle != null) 'trump_cycle': trumpCycle,
++      if (trumpCycle == null) 'first_trump': ?firstTrump,
+       'round_schedule': ?roundSchedule?.toJson(),
+     });
+     return CreateGameEventResult.fromJson(json);
+diff --git a/frontend/judgement_flutter/lib/screens/event_invite_screen.dart b/frontend/judgement_flutter/lib/screens/event_invite_screen.dart
+index c021b3e..2fd4e73 100644
+--- a/frontend/judgement_flutter/lib/screens/event_invite_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/event_invite_screen.dart
+@@ -7,6 +7,7 @@ import '../screens/legal/legal_screens.dart';
+ import '../util/app_update.dart';
+ import '../util/avatar_pack.dart';
+ import '../util/legal_consent.dart';
++import '../util/room_rejoin.dart';
+ import '../util/table_media_session.dart';
+ import '../widgets/app_version_bar.dart';
+ import '../widgets/avatar_picker.dart';
+@@ -115,14 +116,18 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
+     setState(() => _busy = true);
+     try {
+       await TableMediaSession.prepareBeforeNetwork();
+-      final session = await _api.createGuestSession(nickname);
+-      await _api.setAvatar(_selectedAvatarId);
+-      final joined = await _api.joinRoom(code);
++      final joined = await joinRoomWithReclaim(
++        context: context,
++        api: _api,
++        roomCode: code,
++        nickname: nickname,
++        avatarId: _selectedAvatarId,
++      );
+       if (!mounted) return;
+       Navigator.of(context).push(MaterialPageRoute(
+         builder: (_) => LobbyScreen(
+           api: _api,
+-          nickname: session.nickname,
++          nickname: joined.nickname,
+           initialRoom: joined.room,
+           myPlayerId: joined.playerId,
+         ),
+diff --git a/frontend/judgement_flutter/lib/screens/landing_screen.dart b/frontend/judgement_flutter/lib/screens/landing_screen.dart
+index 47be61d..9b5bad2 100644
+--- a/frontend/judgement_flutter/lib/screens/landing_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/landing_screen.dart
+@@ -7,10 +7,12 @@ import '../state/game_controller.dart';
+ import '../util/app_update.dart';
+ import '../util/avatar_pack.dart';
+ import '../util/legal_consent.dart';
++import '../util/room_rejoin.dart';
+ import '../util/table_media_session.dart';
+ import '../widgets/app_version_bar.dart';
+ import '../widgets/avatar_picker.dart';
+ import '../widgets/legal_consent_checkbox.dart';
++import '../widgets/trump_cycle_editor.dart';
+ import 'lobby_screen.dart';
+ import 'schedule_event_screen.dart';
+ import 'table_screen.dart';
+@@ -64,7 +66,8 @@ class _LandingScreenState extends State<LandingScreen> {
+   int _maxPlayers = 6;
+   bool _timerEnabled = false;
+   int _timerSeconds = 30;
+-  String? _firstTrump; // null = revealed-card trump each round
++  /// null = revealed-card; otherwise a 4-suit cycle that repeats each round.
++  List<String>? _trumpCycle;
+   bool _manualSchedule = false;
+   /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
+   bool _dealerTotalRestriction = false;
+@@ -131,26 +134,39 @@ class _LandingScreenState extends State<LandingScreen> {
+       // Sound + mic under this tap, fully settled before network (fixes iOS hang).
+       await TableMediaSession.prepareBeforeNetwork();
+ 
+-      final session = await api.createGuestSession(nickname);
+-      await api.setAvatar(_selectedAvatarId);
+-      final ({RoomView room, String playerId}) result;
++      late final RoomView room;
++      late final String playerId;
++      late final String sessionNickname;
+       String? capacityHint;
+       if (_joining) {
+-        final joined = await api.joinRoom(_roomCode.text.trim().toUpperCase());
+-        result = (room: joined.room, playerId: joined.playerId);
++        final joined = await joinRoomWithReclaim(
++          context: context,
++          api: api,
++          roomCode: _roomCode.text,
++          nickname: nickname,
++          avatarId: _selectedAvatarId,
++        );
++        room = joined.room;
++        playerId = joined.playerId;
++        sessionNickname = joined.nickname;
+       } else {
++        final session = await api.createGuestSession(nickname);
++        await api.setAvatar(_selectedAvatarId);
+         final schedule = _manualSchedule
+             ? RoundSchedule(mode: 'manual', steps: _manualSteps)
+             : RoundSchedule.automatic();
+         final created = await api.createRoom(
+           maxPlayers: _maxPlayers,
+           turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
+-          firstTrump: _firstTrump,
++          trumpCycle: _trumpCycle,
+           roundSchedule: schedule,
+           dealerTotalRestriction: _dealerTotalRestriction,
+         );
+-        result = (room: created.room, playerId: created.playerId);
++        room = created.room;
++        playerId = created.playerId;
++        sessionNickname = session.nickname;
+         capacityHint = created.capacity;
++        // Do not persist reclaim in lobby — invite join must mint a new seat.
+       }
+       if (!mounted) return;
+       if (capacityHint == 'busy') {
+@@ -164,17 +180,17 @@ class _LandingScreenState extends State<LandingScreen> {
+           ),
+         );
+       }
+-      final gameId = result.room.gameId;
+-      if (result.room.phase == 'in_game' && gameId != null) {
++      final gameId = room.gameId;
++      if (room.phase == 'in_game' && gameId != null) {
+         final controller = GameController(
+           api: api,
+           gameId: gameId,
+-          myPlayerId: result.playerId,
+-          myNickname: session.nickname,
++          myPlayerId: playerId,
++          myNickname: sessionNickname,
+         )
+-          ..roomCode = result.room.code
+-          ..amHost = result.room.seats.any(
+-            (s) => s.playerId == result.playerId && s.isHost,
++          ..roomCode = room.code
++          ..amHost = room.seats.any(
++            (s) => s.playerId == playerId && s.isHost,
+           );
+         controller.connect();
+         Navigator.of(context).push(MaterialPageRoute(
+@@ -184,9 +200,9 @@ class _LandingScreenState extends State<LandingScreen> {
+         Navigator.of(context).push(MaterialPageRoute(
+           builder: (_) => LobbyScreen(
+             api: api,
+-            nickname: session.nickname,
+-            initialRoom: result.room,
+-            myPlayerId: result.playerId,
++            nickname: sessionNickname,
++            initialRoom: room,
++            myPlayerId: playerId,
+           ),
+         ));
+       }
+@@ -324,13 +340,12 @@ class _LandingScreenState extends State<LandingScreen> {
+             ],
+           ),
+         const SizedBox(height: 12),
+-        Text('First trump', style: labelStyle),
++        Text('Trump', style: labelStyle),
+         const SizedBox(height: 2),
+         Text(
+-          _firstTrump == null
++          _trumpCycle == null
+               ? 'A card is revealed each round; its suit is trump'
+-              : 'Starts at ${suitSymbols[_firstTrump]}, then rotates '
+-                  '\u2660 \u2666 \u2663 \u2665 each round',
++              : 'Repeats every round (round 5 = same as round 1)',
+           style: const TextStyle(fontSize: 12, color: Colors.white54),
+         ),
+         const SizedBox(height: 6),
+@@ -339,28 +354,25 @@ class _LandingScreenState extends State<LandingScreen> {
+           children: [
+             ChoiceChip(
+               label: const Text('Revealed card'),
+-              selected: _firstTrump == null,
+-              onSelected: (_) => setState(() => _firstTrump = null),
++              selected: _trumpCycle == null,
++              onSelected: (_) => setState(() => _trumpCycle = null),
++            ),
++            ChoiceChip(
++              label: const Text('Suit cycle'),
++              selected: _trumpCycle != null,
++              onSelected: (_) => setState(() {
++                _trumpCycle ??= List<String>.from(classicTrumpCycle);
++              }),
+             ),
+-            for (final suit in const ['spades', 'diamonds', 'clubs', 'hearts'])
+-              ChoiceChip(
+-                label: Text(
+-                  suitSymbols[suit]!,
+-                  style: TextStyle(
+-                    fontSize: 18,
+-                    color: _firstTrump == suit
+-                        ? (suit == 'hearts' || suit == 'diamonds'
+-                            ? const Color(0xFFFF6B6B)
+-                            : Colors.white)
+-                        : Colors.white70,
+-                  ),
+-                ),
+-                tooltip: suit,
+-                selected: _firstTrump == suit,
+-                onSelected: (_) => setState(() => _firstTrump = suit),
+-              ),
+           ],
+         ),
++        if (_trumpCycle != null) ...[
++          const SizedBox(height: 10),
++          TrumpCycleEditor(
++            cycle: _trumpCycle!,
++            onChanged: (next) => setState(() => _trumpCycle = next),
++          ),
++        ],
+       ],
+     );
+   }
+diff --git a/frontend/judgement_flutter/lib/screens/lobby_screen.dart b/frontend/judgement_flutter/lib/screens/lobby_screen.dart
+index d3cf6f5..043d70c 100644
+--- a/frontend/judgement_flutter/lib/screens/lobby_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/lobby_screen.dart
+@@ -8,6 +8,8 @@ import '../models/protocol.dart';
+ import '../networking/api_client.dart';
+ import '../state/game_controller.dart';
+ import '../util/room_share.dart';
++import '../util/room_rejoin.dart';
++import '../util/game_reclaim_store.dart';
+ import '../util/social_share.dart';
+ import '../util/game_exit_guard.dart';
+ import '../util/session_exit_analytics.dart';
+@@ -54,6 +56,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
+         .firstOrNull;
+     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+     setGameExitGuard(true);
++    // Mid-game reclaim may land here already in_game — enter table immediately.
++    final gameId = _room.gameId;
++    if (_room.phase == 'in_game' && gameId != null) {
++      WidgetsBinding.instance.addPostFrameCallback((_) {
++        if (mounted) _enterGame(gameId);
++      });
++    }
+   }
+ 
+   @override
+@@ -130,6 +139,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
+     _poll?.cancel();
+     // TableScreen owns the unload guard once we leave the lobby route.
+     setGameExitGuard(false);
++    persistTableReclaim(
++      api: widget.api,
++      roomCode: _room.code,
++      playerId: widget.myPlayerId,
++      nickname: widget.nickname,
++      gameId: gameId,
++    );
+     final controller = GameController(
+       api: widget.api,
+       gameId: gameId,
+@@ -226,6 +242,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
+     } catch (_) {
+       // Leaving an emptied room returns 404; either way we go back.
+     }
++    clearGameReclaim(_room.code);
+     if (mounted) Navigator.of(context).pop();
+   }
+ 
+@@ -371,9 +388,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
+                             _room.turnTimeoutSeconds == null
+                                 ? 'No turn timer'
+                                 : '${_room.turnTimeoutSeconds}s turn timer',
+-                            _room.firstTrump == null
+-                                ? 'revealed-card trump'
+-                                : 'trump rotates from ${suitSymbols[_room.firstTrump]}',
+                             _room.roundScheduleSummary,
+                             _room.dealerTotalRestriction
+                                 ? 'dealer bid restriction on'
+@@ -381,6 +395,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
+                           ].join(' · '),
+                           style: const TextStyle(fontSize: 12, color: Colors.white54),
+                         ),
++                        const SizedBox(height: 4),
++                        _trumpSummaryWidget(_room),
+                         const SizedBox(height: 8),
+                         for (var seat = 0; seat < total; seat++)
+                           _seatTile(seat),
+@@ -439,6 +455,55 @@ class _LobbyScreenState extends State<LobbyScreen> {
+     );
+   }
+ 
++  Widget _trumpSummaryWidget(RoomView room) {
++    final cycle = room.trumpCycle;
++    if (cycle != null && cycle.length == 4) {
++      return Text.rich(
++        TextSpan(
++          style: const TextStyle(fontSize: 13, color: Colors.white70),
++          children: [
++            const TextSpan(text: 'Trump cycle '),
++            for (var i = 0; i < cycle.length; i++) ...[
++              if (i > 0)
++                const TextSpan(
++                  text: ' → ',
++                  style: TextStyle(color: Colors.white38),
++                ),
++              TextSpan(
++                text: suitSymbols[cycle[i]] ?? '?',
++                style: TextStyle(
++                  color: suitColor(cycle[i]),
++                  fontSize: 16,
++                ),
++              ),
++            ],
++          ],
++        ),
++      );
++    }
++    if (room.firstTrump != null) {
++      return Text.rich(
++        TextSpan(
++          style: const TextStyle(fontSize: 13, color: Colors.white70),
++          children: [
++            const TextSpan(text: 'Trump rotates from '),
++            TextSpan(
++              text: suitSymbols[room.firstTrump] ?? '?',
++              style: TextStyle(
++                color: suitColor(room.firstTrump),
++                fontSize: 16,
++              ),
++            ),
++          ],
++        ),
++      );
++    }
++    return const Text(
++      'Revealed-card trump',
++      style: TextStyle(fontSize: 13, color: Colors.white70),
++    );
++  }
++
+   Widget _seatTile(int seatNumber) {
+     final seat = _room.seats.where((s) => s.seat == seatNumber).firstOrNull;
+     final isMe = seat?.playerId == widget.myPlayerId;
+diff --git a/frontend/judgement_flutter/lib/screens/schedule_event_screen.dart b/frontend/judgement_flutter/lib/screens/schedule_event_screen.dart
+index 327cd01..a543f12 100644
+--- a/frontend/judgement_flutter/lib/screens/schedule_event_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/schedule_event_screen.dart
+@@ -1,6 +1,8 @@
+ import 'package:flutter/material.dart';
+ 
++import '../models/protocol.dart';
+ import '../networking/api_client.dart';
++import '../widgets/trump_cycle_editor.dart';
+ import 'event_manage_screen.dart';
+ 
+ /// Host creates a future meetup (ADR 0005).
+@@ -19,7 +21,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
+   int _durationMinutes = 90;
+   bool _timerEnabled = false;
+   final int _timerSeconds = 30;
+-  String? _firstTrump;
++  List<String>? _trumpCycle;
+   bool _busy = false;
+ 
+   Future<void> _pickDateTime() async {
+@@ -67,7 +69,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
+         timezone: _timezone,
+         durationMinutes: _durationMinutes,
+         turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
+-        firstTrump: _firstTrump,
++        trumpCycle: _trumpCycle,
+       );
+       if (!mounted) return;
+       Navigator.of(context).pushReplacement(MaterialPageRoute(
+@@ -203,6 +205,33 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
+                       value: _timerEnabled,
+                       onChanged: (v) => setState(() => _timerEnabled = v),
+                     ),
++                    const SizedBox(height: 8),
++                    const Text('Trump', style: TextStyle(fontWeight: FontWeight.w600)),
++                    const SizedBox(height: 4),
++                    Wrap(
++                      spacing: 8,
++                      children: [
++                        ChoiceChip(
++                          label: const Text('Revealed card'),
++                          selected: _trumpCycle == null,
++                          onSelected: (_) => setState(() => _trumpCycle = null),
++                        ),
++                        ChoiceChip(
++                          label: const Text('Suit cycle'),
++                          selected: _trumpCycle != null,
++                          onSelected: (_) => setState(() {
++                            _trumpCycle ??= List<String>.from(classicTrumpCycle);
++                          }),
++                        ),
++                      ],
++                    ),
++                    if (_trumpCycle != null) ...[
++                      const SizedBox(height: 8),
++                      TrumpCycleEditor(
++                        cycle: _trumpCycle!,
++                        onChanged: (next) => setState(() => _trumpCycle = next),
++                      ),
++                    ],
+                     const SizedBox(height: 16),
+                     FilledButton(
+                       onPressed: _busy ? null : _submit,
+diff --git a/frontend/judgement_flutter/lib/screens/table_screen.dart b/frontend/judgement_flutter/lib/screens/table_screen.dart
+index 484f335..5acebd9 100644
+--- a/frontend/judgement_flutter/lib/screens/table_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/table_screen.dart
+@@ -681,7 +681,6 @@ class _TopBar extends StatelessWidget {
+ 
+   Widget _trumpChip(PlayerGameView view) {
+     final symbol = suitSymbols[view.trump] ?? '?';
+-    final isRed = view.trump == 'hearts' || view.trump == 'diamonds';
+     return Tooltip(
+       message: view.trumpCard == null
+           ? 'Trump: ${view.trump}'
+@@ -698,7 +697,7 @@ class _TopBar extends StatelessWidget {
+             Text(
+               symbol,
+               style: TextStyle(
+-                color: isRed ? const Color(0xFFC62828) : Colors.black,
++                color: suitColorOnLight(view.trump),
+                 fontSize: 16,
+               ),
+             ),
+diff --git a/frontend/judgement_flutter/lib/state/game_controller.dart b/frontend/judgement_flutter/lib/state/game_controller.dart
+index 321cce4..56e2734 100644
+--- a/frontend/judgement_flutter/lib/state/game_controller.dart
++++ b/frontend/judgement_flutter/lib/state/game_controller.dart
+@@ -14,6 +14,8 @@ import 'package:uuid/uuid.dart';
+ import '../models/protocol.dart';
+ import '../networking/api_client.dart';
+ import '../networking/game_socket.dart';
++import '../util/game_reclaim_store.dart';
++import '../util/room_rejoin.dart';
+ import '../util/score_reveal.dart';
+ import '../util/session_exit_analytics.dart';
+ import '../util/soundboard.dart';
+@@ -380,14 +382,17 @@ class GameController extends ChangeNotifier {
+         pauseReason = _humanizePauseReason(reason);
+         _clearPendingCommand();
+         _closeSocket();
++        _clearReclaimStore();
+         _notify();
+       case GameRestarted(:final gameId):
++        _clearReclaimStore();
+         unawaited(_switchToRestartedGame(gameId));
+       case HostChanged(:final newHost):
+         amHost = newHost == myPlayerId;
+         _notify();
+       case TokenRotated(:final token):
+         api.token = token;
++        _persistReclaimStore();
+       case TableEventMessage(
+           :final kind,
+           :final from,
+@@ -592,9 +597,31 @@ class GameController extends ChangeNotifier {
+     }
+ 
+     view = next;
++    if (next.isFinished) {
++      _clearReclaimStore();
++    } else {
++      _persistReclaimStore();
++    }
+     _notify();
+   }
+ 
++  void _persistReclaimStore() {
++    final code = roomCode ?? vacantRoomCode;
++    if (code == null) return;
++    persistTableReclaim(
++      api: api,
++      roomCode: code,
++      playerId: myPlayerId,
++      nickname: myNickname,
++      gameId: gameId,
++    );
++  }
++
++  void _clearReclaimStore() {
++    final code = roomCode ?? vacantRoomCode;
++    clearGameReclaim(code);
++  }
++
+   void _armHold() {
+     _holdUntil = DateTime.now().add(_minTrickHold);
+     _holdTimer?.cancel();
+diff --git a/frontend/judgement_flutter/lib/widgets/playing_card.dart b/frontend/judgement_flutter/lib/widgets/playing_card.dart
+index 440bfe0..cd38f73 100644
+--- a/frontend/judgement_flutter/lib/widgets/playing_card.dart
++++ b/frontend/judgement_flutter/lib/widgets/playing_card.dart
+@@ -88,8 +88,7 @@ class _CardFallback extends StatelessWidget {
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final color =
+-        card.isRed ? const Color(0xFFC62828) : const Color(0xFF1A1A2E);
++    final color = suitColorOnLight(card.suit);
+     return Padding(
+       padding: const EdgeInsets.all(4),
+       child: Column(

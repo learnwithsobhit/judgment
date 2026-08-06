@@ -24,6 +24,9 @@ pub enum ApiError {
     /// Product capacity gate — new rooms/starts rejected; live games untouched.
     #[error("{0}")]
     CapacityFull(String),
+    /// Preferred reclaim `player_id` is not currently vacant.
+    #[error("{0}")]
+    SeatNotVacant(String),
 }
 
 impl ApiError {
@@ -36,6 +39,7 @@ impl ApiError {
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
             ApiError::CapacityFull(_) => StatusCode::SERVICE_UNAVAILABLE,
+            ApiError::SeatNotVacant(_) => StatusCode::CONFLICT,
         }
     }
 
@@ -48,6 +52,7 @@ impl ApiError {
             ApiError::BadRequest(_) => "BAD_REQUEST",
             ApiError::TooManyRequests(_) => "RATE_LIMITED",
             ApiError::CapacityFull(_) => "CAPACITY_FULL",
+            ApiError::SeatNotVacant(_) => "SEAT_NOT_VACANT",
         }
     }
 }

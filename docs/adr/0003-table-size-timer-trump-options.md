@@ -41,19 +41,23 @@ Play-testing after Phase 4 surfaced three product requests:
   so the projection now includes `own_seat`; clients must not infer their
   seat from the opponents' seat numbers.
 
-### 3. Chosen first trump with fixed rotation
+### 3. Trump: revealed card, legacy first suit, or custom cycle
 
-- Room creation accepts an optional `first_trump` suit.
-  - **Absent** → existing MVP behaviour: reveal one undealt card per round;
-    its suit is trump (`TrumpRule::RevealUndealtCard`).
-  - **Present** → `TrumpRule::FixedSequence`: round 1 uses the chosen suit,
-    then trump follows the classic order **♠ spades → ♦ diamonds →
-    ♣ clubs → ♥ hearts**, wrapping, one step per round. No trump card is
-    revealed in this mode (the projection's `trump_card` stays `null`; the
-    `trump` suit is always present during a round).
+- Room creation accepts trump config (default **revealed card**):
+  - **`trump_cycle` present** (exactly four distinct suits) →
+    `TrumpRule::FixedSequence` with that order; round `n` uses
+    `cycle[n % 4]`. `first_trump` is coerced to `cycle[0]`. No trump card
+    is revealed (`trump_card` stays `null`).
+  - **`trump_cycle` absent + `first_trump` present** (legacy clients) →
+    classic rotation **♠ → ♦ → ♣ → ♥** starting at the chosen suit
+    (`TrumpRule::rotating_from`).
+  - **Both absent** → reveal one undealt card per round
+    (`TrumpRule::RevealUndealtCard`).
+- Host create UI offers presets (including classic) plus reorder; default
+  remains revealed-card so existing habits are unchanged.
 - The engine records the effective trump suit in state rather than deriving
-  it from the revealed card, so both modes flow through the same
-  trick-evaluation path.
+  it from the revealed card, so all modes flow through the same
+  trick-evaluation path. Restart re-reads the room’s stored cycle.
 
 ## Consequences
 

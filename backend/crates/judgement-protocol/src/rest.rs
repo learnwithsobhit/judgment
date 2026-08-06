@@ -40,8 +40,13 @@ pub struct CreateRoomRequest {
     pub turn_timeout_seconds: Option<u16>,
     /// Trump for round 1; later rounds follow the fixed rotation
     /// ♠ → ♦ → ♣ → ♥ (ADR 0003). Omitted ⇒ revealed-card trump each round.
+    /// Ignored when `trump_cycle` is set (coerced to `cycle[0]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_trump: Option<Suit>,
+    /// Full trump suit cycle (exactly 4 distinct suits). When set, round `n`
+    /// uses `trump_cycle[n % 4]`. Omitted ⇒ use `first_trump` / revealed-card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trump_cycle: Option<Vec<Suit>>,
     /// Automatic (default) or Manual step list expanded at game start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub round_schedule: Option<RoundSchedule>,
@@ -62,7 +67,12 @@ pub struct CreateRoomResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct JoinRoomRequest {}
+pub struct JoinRoomRequest {
+    /// Prefer reclaiming this vacant in-game `player_id` (same seat/hand/scores).
+    /// Omitted ⇒ nick hint (if unique) or first vacant seat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_id: Option<PlayerId>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinRoomResponse {
@@ -143,9 +153,13 @@ pub struct RoomView {
     /// `None` means the room has no turn timer (ADR 0003).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_timeout_seconds: Option<u16>,
-    /// `None` means revealed-card trump; `Some` means rotation from this suit.
+    /// `None` means revealed-card trump; `Some` means rotation from this suit
+    /// (or `trump_cycle[0]` when a custom cycle is set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_trump: Option<Suit>,
+    /// Custom 4-suit trump cycle when set; omitted for revealed-card / legacy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trump_cycle: Option<Vec<Suit>>,
     /// Host-chosen round schedule (default Automatic when omitted on older clients).
     #[serde(default)]
     pub round_schedule: RoundSchedule,
@@ -166,6 +180,9 @@ pub struct SeatView {
     pub is_host: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    /// True while this in-game seat is vacant and claimable (omit/false in lobby).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vacant: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,6 +344,8 @@ pub struct CreateGameEventRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_trump: Option<Suit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trump_cycle: Option<Vec<Suit>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub round_schedule: Option<RoundSchedule>,
 }
 
@@ -356,6 +375,8 @@ pub struct GameEventPublicView {
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trump_cycle: Option<Vec<Suit>>,
     #[serde(default)]
     pub round_schedule: RoundSchedule,
     pub round_schedule_summary: String,

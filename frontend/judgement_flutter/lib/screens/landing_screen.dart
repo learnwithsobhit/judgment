@@ -7,10 +7,12 @@ import '../state/game_controller.dart';
 import '../util/app_update.dart';
 import '../util/avatar_pack.dart';
 import '../util/legal_consent.dart';
+import '../util/room_rejoin.dart';
 import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/legal_consent_checkbox.dart';
+import '../widgets/trump_cycle_editor.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
 import 'table_screen.dart';
@@ -64,7 +66,8 @@ class _LandingScreenState extends State<LandingScreen> {
   int _maxPlayers = 6;
   bool _timerEnabled = false;
   int _timerSeconds = 30;
-  String? _firstTrump; // null = revealed-card trump each round
+  /// null = revealed-card; otherwise a 4-suit cycle that repeats each round.
+  List<String>? _trumpCycle;
   bool _manualSchedule = false;
   /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
   bool _dealerTotalRestriction = false;
@@ -131,26 +134,39 @@ class _LandingScreenState extends State<LandingScreen> {
       // Sound + mic under this tap, fully settled before network (fixes iOS hang).
       await TableMediaSession.prepareBeforeNetwork();
 
-      final session = await api.createGuestSession(nickname);
-      await api.setAvatar(_selectedAvatarId);
-      final ({RoomView room, String playerId}) result;
+      late final RoomView room;
+      late final String playerId;
+      late final String sessionNickname;
       String? capacityHint;
       if (_joining) {
-        final joined = await api.joinRoom(_roomCode.text.trim().toUpperCase());
-        result = (room: joined.room, playerId: joined.playerId);
+        final joined = await joinRoomWithReclaim(
+          context: context,
+          api: api,
+          roomCode: _roomCode.text,
+          nickname: nickname,
+          avatarId: _selectedAvatarId,
+        );
+        room = joined.room;
+        playerId = joined.playerId;
+        sessionNickname = joined.nickname;
       } else {
+        final session = await api.createGuestSession(nickname);
+        await api.setAvatar(_selectedAvatarId);
         final schedule = _manualSchedule
             ? RoundSchedule(mode: 'manual', steps: _manualSteps)
             : RoundSchedule.automatic();
         final created = await api.createRoom(
           maxPlayers: _maxPlayers,
           turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
-          firstTrump: _firstTrump,
+          trumpCycle: _trumpCycle,
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
         );
-        result = (room: created.room, playerId: created.playerId);
+        room = created.room;
+        playerId = created.playerId;
+        sessionNickname = session.nickname;
         capacityHint = created.capacity;
+        // Do not persist reclaim in lobby — invite join must mint a new seat.
       }
       if (!mounted) return;
       if (capacityHint == 'busy') {
@@ -164,17 +180,17 @@ class _LandingScreenState extends State<LandingScreen> {
           ),
         );
       }
-      final gameId = result.room.gameId;
-      if (result.room.phase == 'in_game' && gameId != null) {
+      final gameId = room.gameId;
+      if (room.phase == 'in_game' && gameId != null) {
         final controller = GameController(
           api: api,
           gameId: gameId,
-          myPlayerId: result.playerId,
-          myNickname: session.nickname,
+          myPlayerId: playerId,
+          myNickname: sessionNickname,
         )
-          ..roomCode = result.room.code
-          ..amHost = result.room.seats.any(
-            (s) => s.playerId == result.playerId && s.isHost,
+          ..roomCode = room.code
+          ..amHost = room.seats.any(
+            (s) => s.playerId == playerId && s.isHost,
           );
         controller.connect();
         Navigator.of(context).push(MaterialPageRoute(
@@ -184,9 +200,9 @@ class _LandingScreenState extends State<LandingScreen> {
         Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => LobbyScreen(
             api: api,
-            nickname: session.nickname,
-            initialRoom: result.room,
-            myPlayerId: result.playerId,
+            nickname: sessionNickname,
+            initialRoom: room,
+            myPlayerId: playerId,
           ),
         ));
       }
@@ -324,13 +340,12 @@ class _LandingScreenState extends State<LandingScreen> {
             ],
           ),
         const SizedBox(height: 12),
-        Text('First trump', style: labelStyle),
+        Text('Trump', style: labelStyle),
         const SizedBox(height: 2),
         Text(
-          _firstTrump == null
+          _trumpCycle == null
               ? 'A card is revealed each round; its suit is trump'
-              : 'Starts at ${suitSymbols[_firstTrump]}, then rotates '
-                  '\u2660 \u2666 \u2663 \u2665 each round',
+              : 'Repeats every round (round 5 = same as round 1)',
           style: const TextStyle(fontSize: 12, color: Colors.white54),
         ),
         const SizedBox(height: 6),
@@ -339,28 +354,25 @@ class _LandingScreenState extends State<LandingScreen> {
           children: [
             ChoiceChip(
               label: const Text('Revealed card'),
-              selected: _firstTrump == null,
-              onSelected: (_) => setState(() => _firstTrump = null),
+              selected: _trumpCycle == null,
+              onSelected: (_) => setState(() => _trumpCycle = null),
             ),
-            for (final suit in const ['spades', 'diamonds', 'clubs', 'hearts'])
-              ChoiceChip(
-                label: Text(
-                  suitSymbols[suit]!,
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: _firstTrump == suit
-                        ? (suit == 'hearts' || suit == 'diamonds'
-                            ? const Color(0xFFFF6B6B)
-                            : Colors.white)
-                        : Colors.white70,
-                  ),
-                ),
-                tooltip: suit,
-                selected: _firstTrump == suit,
-                onSelected: (_) => setState(() => _firstTrump = suit),
-              ),
+            ChoiceChip(
+              label: const Text('Suit cycle'),
+              selected: _trumpCycle != null,
+              onSelected: (_) => setState(() {
+                _trumpCycle ??= List<String>.from(classicTrumpCycle);
+              }),
+            ),
           ],
         ),
+        if (_trumpCycle != null) ...[
+          const SizedBox(height: 10),
+          TrumpCycleEditor(
+            cycle: _trumpCycle!,
+            onChanged: (next) => setState(() => _trumpCycle = next),
+          ),
+        ],
       ],
     );
   }

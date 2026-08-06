@@ -14,6 +14,8 @@ import 'package:uuid/uuid.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../networking/game_socket.dart';
+import '../util/game_reclaim_store.dart';
+import '../util/room_rejoin.dart';
 import '../util/score_reveal.dart';
 import '../util/session_exit_analytics.dart';
 import '../util/soundboard.dart';
@@ -380,14 +382,17 @@ class GameController extends ChangeNotifier {
         pauseReason = _humanizePauseReason(reason);
         _clearPendingCommand();
         _closeSocket();
+        _clearReclaimStore();
         _notify();
       case GameRestarted(:final gameId):
+        _clearReclaimStore();
         unawaited(_switchToRestartedGame(gameId));
       case HostChanged(:final newHost):
         amHost = newHost == myPlayerId;
         _notify();
       case TokenRotated(:final token):
         api.token = token;
+        _persistReclaimStore();
       case TableEventMessage(
           :final kind,
           :final from,
@@ -592,7 +597,29 @@ class GameController extends ChangeNotifier {
     }
 
     view = next;
+    if (next.isFinished) {
+      _clearReclaimStore();
+    } else {
+      _persistReclaimStore();
+    }
     _notify();
+  }
+
+  void _persistReclaimStore() {
+    final code = roomCode ?? vacantRoomCode;
+    if (code == null) return;
+    persistTableReclaim(
+      api: api,
+      roomCode: code,
+      playerId: myPlayerId,
+      nickname: myNickname,
+      gameId: gameId,
+    );
+  }
+
+  void _clearReclaimStore() {
+    final code = roomCode ?? vacantRoomCode;
+    clearGameReclaim(code);
   }
 
   void _armHold() {

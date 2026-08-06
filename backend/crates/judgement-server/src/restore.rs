@@ -68,6 +68,11 @@ pub async fn restore_from_store(
                     max_players: stored.max_players,
                     turn_timeout_seconds: stored.turn_timeout_seconds,
                     first_trump: stored.first_trump,
+                    trump_cycle: stored.trump_cycle.and_then(|cycle| {
+                        judgement_domain::validate_trump_cycle(&cycle)
+                            .ok()
+                            .map(|_| cycle)
+                    }),
                     round_schedule: stored.round_schedule,
                     dealer_total_restriction: stored.dealer_total_restriction,
                 },

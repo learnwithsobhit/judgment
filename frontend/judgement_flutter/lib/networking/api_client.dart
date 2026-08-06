@@ -73,20 +73,23 @@ class ApiClient {
     return session;
   }
 
-  /// [turnTimeoutSeconds] null ⇒ no turn timer; [firstTrump] null ⇒
-  /// revealed-card trump, otherwise rotation from that suit (ADR 0003).
+  /// [turnTimeoutSeconds] null ⇒ no turn timer.
+  /// Trump: omit both for revealed-card; [trumpCycle] (4 suits) for custom
+  /// rotation; or legacy [firstTrump] alone for classic ♠♦♣♥ from that suit.
   /// [roundSchedule] null ⇒ automatic descending max→1.
   Future<({RoomView room, String playerId, String? capacity})> createRoom({
     int? maxPlayers,
     int? turnTimeoutSeconds,
     String? firstTrump,
+    List<String>? trumpCycle,
     RoundSchedule? roundSchedule,
     bool dealerTotalRestriction = false,
   }) async {
     final json = await _post('/api/v1/rooms', {
       'max_players': ?maxPlayers,
       'turn_timeout_seconds': ?turnTimeoutSeconds,
-      'first_trump': ?firstTrump,
+      if (trumpCycle != null) 'trump_cycle': trumpCycle,
+      if (trumpCycle == null) 'first_trump': ?firstTrump,
       'round_schedule': ?roundSchedule?.toJson(),
       'dealer_total_restriction': dealerTotalRestriction,
     });
@@ -97,8 +100,13 @@ class ApiClient {
     );
   }
 
-  Future<({RoomView room, String playerId})> joinRoom(String roomRef) async {
-    final json = await _post('/api/v1/rooms/$roomRef/join', {});
+  Future<({RoomView room, String playerId})> joinRoom(
+    String roomRef, {
+    String? playerId,
+  }) async {
+    final json = await _post('/api/v1/rooms/$roomRef/join', {
+      if (playerId != null) 'player_id': playerId,
+    });
     return (
       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
       playerId: json['player_id'] as String,
@@ -111,7 +119,7 @@ class ApiClient {
     String? playerId,
   }) async {
     final json = await _post('/api/v1/rooms/$roomRef/claim', {
-      'player_id': ?playerId,
+      if (playerId != null) 'player_id': playerId,
     });
     return (
       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
@@ -198,6 +206,7 @@ class ApiClient {
     int durationMinutes = 90,
     int? turnTimeoutSeconds,
     String? firstTrump,
+    List<String>? trumpCycle,
     RoundSchedule? roundSchedule,
   }) async {
     final json = await _post('/api/v1/events', {
@@ -206,7 +215,8 @@ class ApiClient {
       'timezone': timezone,
       'duration_minutes': durationMinutes,
       'turn_timeout_seconds': ?turnTimeoutSeconds,
-      'first_trump': ?firstTrump,
+      if (trumpCycle != null) 'trump_cycle': trumpCycle,
+      if (trumpCycle == null) 'first_trump': ?firstTrump,
       'round_schedule': ?roundSchedule?.toJson(),
     });
     return CreateGameEventResult.fromJson(json);

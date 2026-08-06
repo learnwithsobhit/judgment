@@ -463,18 +463,33 @@ impl GameActor {
         if self.ended || self.engine.is_finished() {
             return Err("game is over".into());
         }
-        let vacant: Vec<PlayerId> = self
+        let vacant_players: Vec<_> = self
             .engine
             .state()
             .players
             .iter()
             .filter(|p| p.connection_status == ConnectionStatus::Vacant)
-            .map(|p| p.id)
             .collect();
+        let vacant_ids: Vec<PlayerId> = vacant_players.iter().map(|p| p.id).collect();
         let player_id = match preferred {
-            Some(id) if vacant.contains(&id) => id,
-            Some(_) => return Err("that seat is not vacant".into()),
-            None => *vacant.first().ok_or_else(|| "no vacant seats".to_string())?,
+            Some(id) if vacant_ids.contains(&id) => id,
+            Some(_) => return Err("SEAT_NOT_VACANT: that seat is not vacant".into()),
+            None => {
+                // Soft reclaim: unique vacant nickname match (case-insensitive).
+                let nick = nickname.trim().to_ascii_lowercase();
+                let nick_matches: Vec<PlayerId> = vacant_players
+                    .iter()
+                    .filter(|p| p.nickname.trim().to_ascii_lowercase() == nick)
+                    .map(|p| p.id)
+                    .collect();
+                if nick_matches.len() == 1 {
+                    nick_matches[0]
+                } else {
+                    *vacant_ids
+                        .first()
+                        .ok_or_else(|| "no vacant seats".to_string())?
+                }
+            }
         };
         self.engine
             .set_seat_identity(player_id, nickname.clone(), avatar_id)

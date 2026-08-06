@@ -261,6 +261,51 @@ impl TrumpRule {
             .collect();
         TrumpRule::FixedSequence { suits }
     }
+
+    /// Host-defined cycle: exactly the four suits, each once, in order.
+    pub fn from_cycle(suits: Vec<Suit>) -> Result<Self, String> {
+        validate_trump_cycle(&suits)?;
+        Ok(TrumpRule::FixedSequence { suits })
+    }
+}
+
+/// Validate a host trump cycle: permutation of all four suits.
+pub fn validate_trump_cycle(suits: &[Suit]) -> Result<(), String> {
+    if suits.len() != 4 {
+        return Err("trump_cycle must contain exactly 4 suits".into());
+    }
+    let mut seen = [false; 4];
+    for suit in suits {
+        let idx = match suit {
+            Suit::Spades => 0,
+            Suit::Diamonds => 1,
+            Suit::Clubs => 2,
+            Suit::Hearts => 3,
+        };
+        if seen[idx] {
+            return Err("trump_cycle must list each suit once".into());
+        }
+        seen[idx] = true;
+    }
+    if seen.iter().any(|s| !*s) {
+        return Err("trump_cycle must list each suit once".into());
+    }
+    Ok(())
+}
+
+/// Resolve room trump config → engine rule.
+/// Prefer `trump_cycle` when present; else legacy `first_trump`; else reveal.
+pub fn trump_rule_from_config(
+    trump_cycle: Option<&[Suit]>,
+    first_trump: Option<Suit>,
+) -> Result<TrumpRule, String> {
+    match trump_cycle {
+        Some(cycle) => TrumpRule::from_cycle(cycle.to_vec()),
+        None => Ok(match first_trump {
+            Some(suit) => TrumpRule::rotating_from(suit),
+            None => TrumpRule::RevealUndealtCard,
+        }),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -376,6 +421,51 @@ mod tests {
             panic!("rotating_from must produce a fixed sequence");
         };
         assert_eq!(suits, TRUMP_ROTATION.to_vec());
+    }
+
+    #[test]
+    fn custom_trump_cycle_and_validation() {
+        let custom = TrumpRule::from_cycle(vec![
+            Suit::Spades,
+            Suit::Clubs,
+            Suit::Hearts,
+            Suit::Diamonds,
+        ])
+        .unwrap();
+        let TrumpRule::FixedSequence { suits } = custom else {
+            panic!("expected FixedSequence");
+        };
+        assert_eq!(
+            suits,
+            vec![
+                Suit::Spades,
+                Suit::Clubs,
+                Suit::Hearts,
+                Suit::Diamonds
+            ]
+        );
+        assert!(TrumpRule::from_cycle(vec![Suit::Spades, Suit::Clubs]).is_err());
+        assert!(validate_trump_cycle(&[
+            Suit::Spades,
+            Suit::Spades,
+            Suit::Hearts,
+            Suit::Diamonds
+        ])
+        .is_err());
+        let rule = trump_rule_from_config(
+            Some(&[
+                Suit::Hearts,
+                Suit::Diamonds,
+                Suit::Spades,
+                Suit::Clubs,
+            ]),
+            Some(Suit::Spades),
+        )
+        .unwrap();
+        let TrumpRule::FixedSequence { suits } = rule else {
+            panic!("expected FixedSequence");
+        };
+        assert_eq!(suits[0], Suit::Hearts);
     }
 
     #[test]

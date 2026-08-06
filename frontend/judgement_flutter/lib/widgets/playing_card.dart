@@ -88,8 +88,7 @@ class _CardFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        card.isRed ? const Color(0xFFC62828) : const Color(0xFF1A1A2E);
+    final color = suitColorOnLight(card.suit);
     return Padding(
       padding: const EdgeInsets.all(4),
       child: Column(

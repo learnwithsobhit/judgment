@@ -8,6 +8,8 @@ import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
 import '../util/room_share.dart';
+import '../util/room_rejoin.dart';
+import '../util/game_reclaim_store.dart';
 import '../util/social_share.dart';
 import '../util/game_exit_guard.dart';
 import '../util/session_exit_analytics.dart';
@@ -54,6 +56,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
         .firstOrNull;
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
     setGameExitGuard(true);
+    // Mid-game reclaim may land here already in_game — enter table immediately.
+    final gameId = _room.gameId;
+    if (_room.phase == 'in_game' && gameId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _enterGame(gameId);
+      });
+    }
   }
 
   @override
@@ -130,6 +139,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
     _poll?.cancel();
     // TableScreen owns the unload guard once we leave the lobby route.
     setGameExitGuard(false);
+    persistTableReclaim(
+      api: widget.api,
+      roomCode: _room.code,
+      playerId: widget.myPlayerId,
+      nickname: widget.nickname,
+      gameId: gameId,
+    );
     final controller = GameController(
       api: widget.api,
       gameId: gameId,
@@ -226,6 +242,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     } catch (_) {
       // Leaving an emptied room returns 404; either way we go back.
     }
+    clearGameReclaim(_room.code);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -371,9 +388,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
                             _room.turnTimeoutSeconds == null
                                 ? 'No turn timer'
                                 : '${_room.turnTimeoutSeconds}s turn timer',
-                            _room.firstTrump == null
-                                ? 'revealed-card trump'
-                                : 'trump rotates from ${suitSymbols[_room.firstTrump]}',
                             _room.roundScheduleSummary,
                             _room.dealerTotalRestriction
                                 ? 'dealer bid restriction on'
@@ -381,6 +395,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
                           ].join(' · '),
                           style: const TextStyle(fontSize: 12, color: Colors.white54),
                         ),
+                        const SizedBox(height: 4),
+                        _trumpSummaryWidget(_room),
                         const SizedBox(height: 8),
                         for (var seat = 0; seat < total; seat++)
                           _seatTile(seat),
@@ -436,6 +452,55 @@ class _LobbyScreenState extends State<LobbyScreen> {
         ),
       ),
       ),
+    );
+  }
+
+  Widget _trumpSummaryWidget(RoomView room) {
+    final cycle = room.trumpCycle;
+    if (cycle != null && cycle.length == 4) {
+      return Text.rich(
+        TextSpan(
+          style: const TextStyle(fontSize: 13, color: Colors.white70),
+          children: [
+            const TextSpan(text: 'Trump cycle '),
+            for (var i = 0; i < cycle.length; i++) ...[
+              if (i > 0)
+                const TextSpan(
+                  text: ' → ',
+                  style: TextStyle(color: Colors.white38),
+                ),
+              TextSpan(
+                text: suitSymbols[cycle[i]] ?? '?',
+                style: TextStyle(
+                  color: suitColor(cycle[i]),
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+    if (room.firstTrump != null) {
+      return Text.rich(
+        TextSpan(
+          style: const TextStyle(fontSize: 13, color: Colors.white70),
+          children: [
+            const TextSpan(text: 'Trump rotates from '),
+            TextSpan(
+              text: suitSymbols[room.firstTrump] ?? '?',
+              style: TextStyle(
+                color: suitColor(room.firstTrump),
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return const Text(
+      'Revealed-card trump',
+      style: TextStyle(fontSize: 13, color: Colors.white70),
     );
   }
 

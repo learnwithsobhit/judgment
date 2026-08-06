@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/protocol.dart';
 import '../networking/api_client.dart';
+import '../widgets/trump_cycle_editor.dart';
 import 'event_manage_screen.dart';
 
 /// Host creates a future meetup (ADR 0005).
@@ -19,7 +21,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
   int _durationMinutes = 90;
   bool _timerEnabled = false;
   final int _timerSeconds = 30;
-  String? _firstTrump;
+  List<String>? _trumpCycle;
   bool _busy = false;
 
   Future<void> _pickDateTime() async {
@@ -67,7 +69,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
         timezone: _timezone,
         durationMinutes: _durationMinutes,
         turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
-        firstTrump: _firstTrump,
+        trumpCycle: _trumpCycle,
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
@@ -203,6 +205,33 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
                       value: _timerEnabled,
                       onChanged: (v) => setState(() => _timerEnabled = v),
                     ),
+                    const SizedBox(height: 8),
+                    const Text('Trump', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('Revealed card'),
+                          selected: _trumpCycle == null,
+                          onSelected: (_) => setState(() => _trumpCycle = null),
+                        ),
+                        ChoiceChip(
+                          label: const Text('Suit cycle'),
+                          selected: _trumpCycle != null,
+                          onSelected: (_) => setState(() {
+                            _trumpCycle ??= List<String>.from(classicTrumpCycle);
+                          }),
+                        ),
+                      ],
+                    ),
+                    if (_trumpCycle != null) ...[
+                      const SizedBox(height: 8),
+                      TrumpCycleEditor(
+                        cycle: _trumpCycle!,
+                        onChanged: (next) => setState(() => _trumpCycle = next),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: _busy ? null : _submit,

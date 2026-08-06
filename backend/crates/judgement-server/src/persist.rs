@@ -34,6 +34,7 @@ pub fn stored_room(room: &Room) -> StoredRoom {
         max_players: room.max_players,
         turn_timeout_seconds: room.turn_timeout_seconds,
         first_trump: room.first_trump,
+        trump_cycle: room.trump_cycle.clone(),
         round_schedule: room.round_schedule.clone(),
         dealer_total_restriction: room.dealer_total_restriction,
         phase,

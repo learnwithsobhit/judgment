@@ -80,6 +80,7 @@ async fn postgres_persists_and_restores_a_game() {
             max_players: 4,
             turn_timeout_seconds: None,
             first_trump: Some(Suit::Spades),
+            trump_cycle: None,
             round_schedule: Default::default(),
             dealer_total_restriction: false,
             phase: "lobby".into(),

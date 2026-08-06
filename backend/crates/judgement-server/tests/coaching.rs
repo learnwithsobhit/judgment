@@ -57,6 +57,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             max_players: 4,
             turn_timeout_seconds: None,
             first_trump: Some(Suit::Clubs),
+            trump_cycle: None,
             round_schedule: Default::default(),
             dealer_total_restriction: false,
             phase: "in_game".into(),

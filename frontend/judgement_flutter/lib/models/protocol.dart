@@ -4,6 +4,8 @@
 /// compute rules (PLAN.md §3.2, §29.2: no game rules duplicated in Flutter).
 library;
 
+import 'package:flutter/material.dart' show Color;
+
 const int protocolVersion = 1;
 
 // ---------------------------------------------------------------------------
@@ -16,6 +18,9 @@ const suitSymbols = {
   'clubs': '\u2663',
   'spades': '\u2660',
 };
+
+/// Classic ADR 0003 trump cycle (default when host picks Suit cycle).
+const classicTrumpCycle = ['spades', 'diamonds', 'clubs', 'hearts'];
 
 const rankLabels = {
   'two': '2',
@@ -37,6 +42,31 @@ const _rankOrder = [
   'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
   'nine', 'ten', 'jack', 'queen', 'king', 'ace',
 ];
+
+/// Suit ink for glyphs on dark UI (hearts/diamonds red).
+Color suitColor(String? suit) {
+  switch (suit) {
+    case 'hearts':
+    case 'diamonds':
+      return const Color(0xFFFF6B6B);
+    case 'clubs':
+    case 'spades':
+      return const Color(0xFFE8E8F0);
+    default:
+      return const Color(0xFFE8E8F0);
+  }
+}
+
+/// Suit ink for glyphs on light backgrounds (card fallback).
+Color suitColorOnLight(String? suit) {
+  switch (suit) {
+    case 'hearts':
+    case 'diamonds':
+      return const Color(0xFFC62828);
+    default:
+      return const Color(0xFF1A1A2E);
+  }
+}
 
 class CardModel {
   final String suit;
@@ -561,6 +591,7 @@ class SeatView {
   final bool ready;
   final bool isHost;
   final String? avatarId;
+  final bool vacant;
 
   SeatView.fromJson(Map<String, dynamic> json)
       : playerId = json['player_id'] as String,
@@ -568,7 +599,8 @@ class SeatView {
         seat = json['seat'] as int,
         ready = json['ready'] as bool,
         isHost = json['is_host'] as bool,
-        avatarId = json['avatar_id'] as String?;
+        avatarId = json['avatar_id'] as String?,
+        vacant = json['vacant'] as bool? ?? false;
 }
 
 /// One manual schedule step: deal [cards] for [repeat] consecutive rounds.
@@ -669,8 +701,10 @@ class RoomView {
   /// Null means the room has no turn timer (ADR 0003).
   final int? turnTimeoutSeconds;
 
-  /// Null means revealed-card trump; otherwise trump rotates from this suit.
+  /// Null means revealed-card trump; otherwise trump rotates from this suit
+  /// (or `trumpCycle[0]` when a custom cycle is set).
   final String? firstTrump;
+  final List<String>? trumpCycle;
   final RoundSchedule roundSchedule;
   final String roundScheduleSummary;
   final bool dealerTotalRestriction;
@@ -685,6 +719,9 @@ class RoomView {
         minPlayers = json['min_players'] as int,
         turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
         firstTrump = json['first_trump'] as String?,
+        trumpCycle = (json['trump_cycle'] as List?)
+            ?.map((s) => s as String)
+            .toList(),
         roundSchedule = RoundSchedule.fromJson(
           json['round_schedule'] as Map<String, dynamic>?,
         ),
@@ -712,6 +749,7 @@ class GameEventPublicView {
   final int maxPlayers;
   final int? turnTimeoutSeconds;
   final String? firstTrump;
+  final List<String>? trumpCycle;
   final RoundSchedule roundSchedule;
   final String roundScheduleSummary;
   final String status;
@@ -737,6 +775,9 @@ class GameEventPublicView {
         maxPlayers = json['max_players'] as int? ?? 8,
         turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
         firstTrump = json['first_trump'] as String?,
+        trumpCycle = (json['trump_cycle'] as List?)
+            ?.map((s) => s as String)
+            .toList(),
         roundSchedule = RoundSchedule.fromJson(
           json['round_schedule'] as Map<String, dynamic>?,
         ),

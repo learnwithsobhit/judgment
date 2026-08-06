@@ -681,7 +681,6 @@ class _TopBar extends StatelessWidget {
 
   Widget _trumpChip(PlayerGameView view) {
     final symbol = suitSymbols[view.trump] ?? '?';
-    final isRed = view.trump == 'hearts' || view.trump == 'diamonds';
     return Tooltip(
       message: view.trumpCard == null
           ? 'Trump: ${view.trump}'
@@ -698,7 +697,7 @@ class _TopBar extends StatelessWidget {
             Text(
               symbol,
               style: TextStyle(
-                color: isRed ? const Color(0xFFC62828) : Colors.black,
+                color: suitColorOnLight(view.trump),
                 fontSize: 16,
               ),
             ),

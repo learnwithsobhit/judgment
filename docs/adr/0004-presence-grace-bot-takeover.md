@@ -17,6 +17,15 @@
    the game WebSocket. A **new** session uses `POST /api/v1/rooms/{code}/claim`
    (also used by `join` when in-game). Same `player_id` / seat / hand / scores;
    nickname/avatar update; resume when no vacancies remain.
+
+   **Reclaim precedence** (client + server): (1) same-session token /
+   `already_seated` / WS reclaim; (2) optional preferred `player_id` on
+   `JoinRoomRequest` / claim (client reclaim store); (3) unique vacant
+   nickname hint when preferred is omitted; (4) client seat picker when 2+
+   seats are vacant and identity is ambiguous; (5) first vacant (true
+   replacement / sole vacant). Preferred seat that is not vacant returns
+   `SEAT_NOT_VACANT` (no silent remap). Client reclaim blob is kept across
+   intentional leave until foreign claim, game end/abort/restart, or ~10m TTL.
 5. **End game:** host may `EndGame` (WS) or `POST .../end`. Vacancy older than
    **10 minutes** auto-ends (`aborted`). Abort removes the actor from
    `state.games`, **hard-deletes** the game row (tip + events), and returns
@@ -47,3 +56,6 @@
   or the 10m TTL fires.
 - Abort/restart/finish free `MAX_ACTIVE_GAMES` slots immediately; finished tip
   snapshots are not retained for coaching.
+- Mid-game leave→landing→rejoin should reclaim the leaver's own `player_id`
+  when the client still has a reclaim store; multi-vacant joins without identity
+  use the picker instead of silently claiming seat-order first vacant.

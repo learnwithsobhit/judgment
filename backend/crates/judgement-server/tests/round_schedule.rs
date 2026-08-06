@@ -194,6 +194,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                 max_players: 6,
                 turn_timeout_seconds: None,
                 first_trump: Some(judgement_domain::Suit::Spades),
+                trump_cycle: None,
                 round_schedule: RoundSchedule {
                     mode: RoundScheduleMode::Manual,
                     steps: Some(vec![ManualRoundStep { cards: 12, repeat: 1 }]),

@@ -40,6 +40,9 @@ pub struct StoredRoom {
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
+    /// Custom 4-suit trump cycle when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trump_cycle: Option<Vec<Suit>>,
     /// Automatic descending or manual `{cards, repeat}` steps.
     #[serde(default)]
     pub round_schedule: RoundSchedule,
@@ -130,6 +133,8 @@ pub struct StoredScheduledEvent {
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trump_cycle: Option<Vec<Suit>>,
     #[serde(default)]
     pub round_schedule: RoundSchedule,
     pub status: String,

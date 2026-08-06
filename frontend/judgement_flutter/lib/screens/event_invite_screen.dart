@@ -7,6 +7,7 @@ import '../screens/legal/legal_screens.dart';
 import '../util/app_update.dart';
 import '../util/avatar_pack.dart';
 import '../util/legal_consent.dart';
+import '../util/room_rejoin.dart';
 import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
@@ -115,14 +116,18 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
     setState(() => _busy = true);
     try {
       await TableMediaSession.prepareBeforeNetwork();
-      final session = await _api.createGuestSession(nickname);
-      await _api.setAvatar(_selectedAvatarId);
-      final joined = await _api.joinRoom(code);
+      final joined = await joinRoomWithReclaim(
+        context: context,
+        api: _api,
+        roomCode: code,
+        nickname: nickname,
+        avatarId: _selectedAvatarId,
+      );
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => LobbyScreen(
           api: _api,
-          nickname: session.nickname,
+          nickname: joined.nickname,
           initialRoom: joined.room,
           myPlayerId: joined.playerId,
         ),

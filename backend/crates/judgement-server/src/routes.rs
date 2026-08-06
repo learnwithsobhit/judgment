@@ -9,8 +9,8 @@ use axum::http::HeaderMap;
 use axum::Json;
 use chrono::Utc;
 use judgement_domain::{
-    ActionId, GameId, GameRules, PlayerId, PlayerState, RoomId, SessionId, TrumpRule, MAX_PLAYERS,
-    MIN_PLAYERS,
+    trump_rule_from_config, validate_trump_cycle, ActionId, GameId, GameRules, PlayerId,
+    PlayerState, RoomId, SessionId, Suit, MAX_PLAYERS, MIN_PLAYERS,
 };
 use judgement_engine::GameEngine;
 use judgement_persistence::{NewGamePlayer, StoredRoom};
@@ -147,8 +147,9 @@ pub async fn create_room(
     let turn_timeout_seconds = body.turn_timeout_seconds.map(|t| t.clamp(5, 300));
 
     let round_schedule = body.round_schedule.unwrap_or_default();
+    let (trump_cycle, first_trump) = normalize_trump_config(body.trump_cycle, body.first_trump)?;
     // Validate against table size at create; start_game re-checks seated count.
-    let reveal_trump = body.first_trump.is_none();
+    let reveal_trump = trump_cycle.is_none() && first_trump.is_none();
     round_schedule
         .resolve_pattern(max_players, reveal_trump)
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
@@ -181,7 +182,8 @@ pub async fn create_room(
         status: RoomStatus::Lobby,
         max_players,
         turn_timeout_seconds,
-        first_trump: body.first_trump,
+        first_trump,
+        trump_cycle,
         round_schedule,
         dealer_total_restriction: body.dealer_total_restriction,
     };
@@ -210,9 +212,54 @@ pub async fn get_room(
 ) -> Result<Json<RoomView>, ApiError> {
     state.authenticate(&headers)?;
     let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
-    let rooms = state.rooms.lock().unwrap();
-    let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
-    Ok(Json(room.view()))
+    let mut view = {
+        let rooms = state.rooms.lock().unwrap();
+        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+        room.view()
+    };
+    enrich_room_vacancy(&state, &mut view).await;
+    Ok(Json(view))
+}
+
+/// Mark vacant in-game seats on a [`RoomView`] for reclaim / picker UIs.
+async fn enrich_room_vacancy(state: &AppState, view: &mut RoomView) {
+    let Some(game_id) = view.game_id else {
+        return;
+    };
+    let commands = {
+        let games = state.games.lock().unwrap();
+        games.get(&game_id).map(|info| info.commands.clone())
+    };
+    let Some(commands) = commands else {
+        return;
+    };
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if commands
+        .send(ActorMessage::QueryPresence { reply: reply_tx })
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok(presence) = reply_rx.await else {
+        return;
+    };
+    for seat in &mut view.seats {
+        seat.vacant = presence.vacant_player_ids.contains(&seat.player_id);
+    }
+}
+
+fn map_claim_error(message: String) -> ApiError {
+    if message.starts_with("SEAT_NOT_VACANT") {
+        ApiError::SeatNotVacant(
+            message
+                .strip_prefix("SEAT_NOT_VACANT: ")
+                .unwrap_or(message.as_str())
+                .to_string(),
+        )
+    } else {
+        ApiError::Conflict(message)
+    }
 }
 
 pub async fn join_room(
@@ -221,7 +268,7 @@ pub async fn join_room(
     Path(room_ref): Path<String>,
     body: Option<Json<JoinRoomRequest>>,
 ) -> Result<Json<JoinRoomResponse>, ApiError> {
-    let _ = body;
+    let preferred = body.and_then(|j| j.0.player_id);
     let session = state.authenticate(&headers)?;
     let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
 
@@ -235,7 +282,8 @@ pub async fn join_room(
             None
         }
     };
-    if let Some((room, player_id)) = already_seated {
+    if let Some((mut room, player_id)) = already_seated {
+        enrich_room_vacancy(&state, &mut room).await;
         return Ok(Json(JoinRoomResponse { room, player_id }));
     }
     let needs_claim = {
@@ -250,7 +298,9 @@ pub async fn join_room(
             &state,
             &session,
             room_id,
-            ClaimSeatRequest { player_id: None },
+            ClaimSeatRequest {
+                player_id: preferred,
+            },
         )
         .await?;
         return Ok(Json(JoinRoomResponse {
@@ -354,7 +404,7 @@ async fn claim_seat_inner(
     let player_id = reply_rx
         .await
         .map_err(|_| ApiError::Conflict("claim reply dropped".into()))?
-        .map_err(ApiError::Conflict)?;
+        .map_err(map_claim_error)?;
 
     // Remap session → player in GameInfo and room seats.
     let snapshot = {
@@ -390,13 +440,14 @@ async fn claim_seat_inner(
         .await
         .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
 
-    let view = {
+    let mut view = {
         let rooms = state.rooms.lock().unwrap();
         rooms
             .get(&room_id)
             .ok_or(ApiError::NotFound("room"))?
             .view()
     };
+    enrich_room_vacancy(state, &mut view).await;
     Ok(ClaimSeatResponse {
         room: view,
         player_id,
@@ -774,6 +825,7 @@ async fn start_game_inner(
         session_to_player,
         turn_timeout_seconds,
         first_trump,
+        trump_cycle,
         round_schedule,
         dealer_total_restriction,
         game_players,
@@ -824,6 +876,7 @@ async fn start_game_inner(
             mapping,
             room.turn_timeout_seconds,
             room.first_trump,
+            room.trump_cycle.clone(),
             room.round_schedule.clone(),
             room.dealer_total_restriction,
             game_players,
@@ -832,11 +885,12 @@ async fn start_game_inner(
 
     let game_id = GameId::new();
     let seated = players.len() as u8;
-    let trump_rule = match first_trump {
-        Some(suit) => TrumpRule::rotating_from(suit),
-        None => TrumpRule::RevealUndealtCard,
-    };
-    let reveal_trump = matches!(trump_rule, TrumpRule::RevealUndealtCard);
+    let trump_rule = trump_rule_from_config(trump_cycle.as_deref(), first_trump)
+        .map_err(ApiError::Conflict)?;
+    let reveal_trump = matches!(
+        trump_rule,
+        judgement_domain::TrumpRule::RevealUndealtCard
+    );
     let round_pattern = round_schedule
         .resolve_pattern(seated, reveal_trump)
         .map_err(|e| {
@@ -1227,4 +1281,19 @@ fn ensure_game_participant(
     // permit any authenticated caller who knows the id — history is not secret
     // beyond ranking (hands are not included). Tighten in Phase 9 if needed.
     Ok(())
+}
+
+/// Prefer `trump_cycle` when present; coerce `first_trump` to `cycle[0]`.
+pub(crate) fn normalize_trump_config(
+    trump_cycle: Option<Vec<Suit>>,
+    first_trump: Option<Suit>,
+) -> Result<(Option<Vec<Suit>>, Option<Suit>), ApiError> {
+    match trump_cycle {
+        Some(cycle) => {
+            validate_trump_cycle(&cycle).map_err(ApiError::BadRequest)?;
+            let first = Some(cycle[0]);
+            Ok((Some(cycle), first))
+        }
+        None => Ok((None, first_trump)),
+    }
 }

@@ -18,9 +18,9 @@ pub use ids::{
 };
 pub use player::{ConnectionStatus, PlayerState};
 pub use rules::{
-    max_cards_per_player, BiddingRule, GameRules, ManualRoundStep, RoundPattern, RoundSchedule,
-    RoundScheduleError, RoundScheduleMode, ScoringRule, TrumpRule, EVENT_SEAT_CAP,
-    EVENT_WAITLIST_CAP, MAX_MANUAL_REPEAT, MAX_MANUAL_ROUNDS, MAX_PLAYERS, MIN_PLAYERS,
-    TRUMP_ROTATION,
+    max_cards_per_player, trump_rule_from_config, validate_trump_cycle, BiddingRule, GameRules,
+    ManualRoundStep, RoundPattern, RoundSchedule, RoundScheduleError, RoundScheduleMode,
+    ScoringRule, TrumpRule, EVENT_SEAT_CAP, EVENT_WAITLIST_CAP, MAX_MANUAL_REPEAT,
+    MAX_MANUAL_ROUNDS, MAX_PLAYERS, MIN_PLAYERS, TRUMP_ROTATION,
 };
 pub use score::{RankedPlayer, RoundScoreEntry, ScoreTable};

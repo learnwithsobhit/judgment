@@ -65,8 +65,11 @@ pub struct Room {
     pub max_players: u8,
     /// `None` disables the turn timer (ADR 0003).
     pub turn_timeout_seconds: Option<u16>,
-    /// `None` ⇒ revealed-card trump; `Some` ⇒ rotation from this suit.
+    /// `None` ⇒ revealed-card trump; `Some` ⇒ rotation from this suit
+    /// (or `trump_cycle[0]` when a custom cycle is set).
     pub first_trump: Option<Suit>,
+    /// Custom 4-suit cycle when set; `None` ⇒ legacy first_trump / reveal.
+    pub trump_cycle: Option<Vec<Suit>>,
     /// Resolved into `GameRules.round_pattern` at start.
     pub round_schedule: RoundSchedule,
     /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
@@ -93,6 +96,7 @@ impl Room {
                 ready: s.ready,
                 is_host: s.session_id == self.host_session,
                 avatar_id: s.avatar_id.clone(),
+                vacant: false,
             })
             .collect();
         seats.sort_by_key(|s| s.seat);
@@ -105,6 +109,7 @@ impl Room {
             min_players: MIN_PLAYERS,
             turn_timeout_seconds: self.turn_timeout_seconds,
             first_trump: self.first_trump,
+            trump_cycle: self.trump_cycle.clone(),
             round_schedule: self.round_schedule.clone(),
             round_schedule_summary: self.round_schedule.summary(self.max_players),
             dealer_total_restriction: self.dealer_total_restriction,
@@ -148,6 +153,7 @@ pub struct ScheduledEvent {
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
+    pub trump_cycle: Option<Vec<Suit>>,
     pub round_schedule: RoundSchedule,
     pub status: GameEventStatus,
     pub room_id: Option<RoomId>,

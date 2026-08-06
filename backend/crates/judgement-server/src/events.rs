@@ -116,6 +116,7 @@ impl ScheduledEvent {
             max_players: EVENT_SEAT_CAP,
             turn_timeout_seconds: self.turn_timeout_seconds,
             first_trump: self.first_trump,
+            trump_cycle: self.trump_cycle.clone(),
             round_schedule: self.round_schedule.clone(),
             // Summary for the eventual lobby size (going, or seat cap if empty).
             round_schedule_summary: self.round_schedule.summary(
@@ -155,6 +156,7 @@ impl ScheduledEvent {
             max_players: self.max_players,
             turn_timeout_seconds: self.turn_timeout_seconds,
             first_trump: self.first_trump,
+            trump_cycle: self.trump_cycle.clone(),
             round_schedule: self.round_schedule.clone(),
             status: status_to_str(self.status).into(),
             room_id: self.room_id,
@@ -190,6 +192,11 @@ impl ScheduledEvent {
             max_players: stored.max_players,
             turn_timeout_seconds: stored.turn_timeout_seconds,
             first_trump: stored.first_trump,
+            trump_cycle: stored.trump_cycle.and_then(|cycle| {
+                judgement_domain::validate_trump_cycle(&cycle)
+                    .ok()
+                    .map(|_| cycle)
+            }),
             round_schedule: stored.round_schedule,
             status: status_from_str(&stored.status),
             room_id: stored.room_id,
@@ -321,9 +328,12 @@ pub async fn create_event(
     let _ = body.max_players;
     let turn_timeout_seconds = body.turn_timeout_seconds.map(|t| t.clamp(5, 300));
     let round_schedule = body.round_schedule.unwrap_or_default();
+    let (trump_cycle, first_trump) =
+        crate::routes::normalize_trump_config(body.trump_cycle, body.first_trump)?;
     // Validate deal schedule against the largest possible table (8).
+    let reveal_trump = trump_cycle.is_none() && first_trump.is_none();
     round_schedule
-        .resolve_pattern(EVENT_SEAT_CAP, body.first_trump.is_none())
+        .resolve_pattern(EVENT_SEAT_CAP, reveal_trump)
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
     let manage_token = generate_secret();
@@ -348,7 +358,8 @@ pub async fn create_event(
         duration_minutes: body.duration_minutes,
         max_players: EVENT_SEAT_CAP,
         turn_timeout_seconds,
-        first_trump: body.first_trump,
+        first_trump,
+        trump_cycle,
         round_schedule,
         status: GameEventStatus::Open,
         room_id: None,
@@ -622,7 +633,7 @@ pub async fn open_lobby(
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    let (event_id, max_players, turn_timeout_seconds, first_trump, round_schedule) = {
+    let (event_id, max_players, turn_timeout_seconds, first_trump, trump_cycle, round_schedule) = {
         let events = state.events.lock().unwrap();
         let event = events
             .values()
@@ -641,10 +652,11 @@ pub async fn open_lobby(
             )));
         }
         let max_players = going.min(MAX_PLAYERS);
+        let reveal_trump = event.trump_cycle.is_none() && event.first_trump.is_none();
         // Re-validate deal schedule for the actual lobby size.
         event
             .round_schedule
-            .resolve_pattern(max_players, event.first_trump.is_none())
+            .resolve_pattern(max_players, reveal_trump)
             .map_err(|e| {
                 ApiError::Conflict(format!(
                     "round schedule is not valid for {max_players} going players: {e}"
@@ -655,6 +667,7 @@ pub async fn open_lobby(
             max_players,
             event.turn_timeout_seconds,
             event.first_trump,
+            event.trump_cycle.clone(),
             event.round_schedule.clone(),
         )
     };
@@ -687,6 +700,7 @@ pub async fn open_lobby(
         max_players,
         turn_timeout_seconds,
         first_trump,
+        trump_cycle,
         round_schedule: round_schedule.clone(),
         dealer_total_restriction: false,
     };

@@ -521,3 +521,199 @@ async fn host_end_removes_actor_and_returns_lobby() {
     assert!(room.game_id.is_none());
     assert_eq!(room.seats.len(), 3);
 }
+
+async fn leave_game(client: &mut Client, game_id: GameId) {
+    let view = client.last.as_ref().unwrap();
+    let envelope = ClientEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        action_id: ActionId::new(),
+        game_id,
+        expected_state_version: view.state_version,
+        action: ClientCommand::LeaveGame,
+    };
+    let ws = client.ws.as_mut().unwrap();
+    ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
+        .await
+        .unwrap();
+    client.ws = None;
+}
+
+#[tokio::test]
+async fn two_vacants_preferred_claims_restore_own_seats() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    let seat_b = clients[1].player_id;
+    let seat_c = clients[2].player_id;
+    let table_seat_b = clients[1].last.as_ref().unwrap().own_seat;
+    let table_seat_c = clients[2].last.as_ref().unwrap().own_seat;
+    leave_game(&mut clients[1], game_id).await;
+    leave_game(&mut clients[2], game_id).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let http = reqwest::Client::new();
+    // Rejoin as C first with preferred C — must not steal B's lower seat index.
+    let mut rejoin_c = Client::guest(&base, "C2").await;
+    let claimed_c: ClaimSeatResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/claim"))
+        .headers(rejoin_c.headers())
+        .json(&serde_json::json!({ "player_id": seat_c }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed_c.player_id, seat_c);
+
+    let mut rejoin_b = Client::guest(&base, "B2").await;
+    let claimed_b: JoinRoomResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/join"))
+        .headers(rejoin_b.headers())
+        .json(&serde_json::json!({ "player_id": seat_b }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed_b.player_id, seat_b);
+
+    rejoin_c.player_id = seat_c;
+    rejoin_b.player_id = seat_b;
+    rejoin_c.connect_ws(&base, game_id).await;
+    rejoin_b.connect_ws(&base, game_id).await;
+    assert_eq!(rejoin_c.last.as_ref().unwrap().own_seat, table_seat_c);
+    assert_eq!(rejoin_b.last.as_ref().unwrap().own_seat, table_seat_b);
+}
+
+#[tokio::test]
+async fn two_vacants_unscoped_claim_uses_first_vacant() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    // Leave higher seat index first, then lower — first vacant is still seat order.
+    let seat_b = clients[1].player_id;
+    leave_game(&mut clients[2], game_id).await;
+    leave_game(&mut clients[1], game_id).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let http = reqwest::Client::new();
+    let mut replacer = Client::guest(&base, "X").await;
+    let claimed: ClaimSeatResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/claim"))
+        .headers(replacer.headers())
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        claimed.player_id, seat_b,
+        "unscoped claim must take first vacant in seat order"
+    );
+}
+
+#[tokio::test]
+async fn preferred_claim_when_seat_taken_returns_seat_not_vacant() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    let seat_b = clients[1].player_id;
+    leave_game(&mut clients[1], game_id).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let http = reqwest::Client::new();
+    let mut first = Client::guest(&base, "X").await;
+    let claimed: ClaimSeatResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/claim"))
+        .headers(first.headers())
+        .json(&serde_json::json!({ "player_id": seat_b }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed.player_id, seat_b);
+
+    let mut second = Client::guest(&base, "Y").await;
+    let resp = http
+        .post(format!("{base}/api/v1/rooms/{code}/join"))
+        .headers(second.headers())
+        .json(&serde_json::json!({ "player_id": seat_b }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CONFLICT);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "SEAT_NOT_VACANT");
+}
+
+#[tokio::test]
+async fn unique_nickname_hint_reclaims_matching_vacant_seat() {
+    let state = bootstrap(Arc::new(MemoryStore::new())).await.unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    let seat_c = clients[2].player_id;
+    leave_game(&mut clients[1], game_id).await;
+    leave_game(&mut clients[2], game_id).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let http = reqwest::Client::new();
+    // Nickname "C" uniquely matches vacant seat C even though B is first vacant.
+    let mut rejoin_c = Client::guest(&base, "C").await;
+    let claimed: ClaimSeatResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/claim"))
+        .headers(rejoin_c.headers())
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed.player_id, seat_c);
+}
