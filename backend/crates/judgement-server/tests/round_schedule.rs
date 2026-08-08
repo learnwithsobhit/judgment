@@ -199,6 +199,8 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                     steps: Some(vec![ManualRoundStep { cards: 12, repeat: 1 }]),
                 },
                 dealer_total_restriction: false,
+                spectators_allowed: false,
+                list_on_live_now: false,
             },
         );
         codes.insert(code.clone(), room_id);

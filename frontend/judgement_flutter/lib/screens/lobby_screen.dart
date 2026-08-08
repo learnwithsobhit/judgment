@@ -206,6 +206,26 @@ class _LobbyScreenState extends State<LobbyScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _setAudience({
+    required bool spectatorsAllowed,
+    bool? listOnLiveNow,
+  }) async {
+    setState(() => _busy = true);
+    try {
+      final room = await widget.api.updateAudienceSettings(
+        _room.roomId,
+        spectatorsAllowed: spectatorsAllowed,
+        listOnLiveNow: listOnLiveNow ?? (_room.listOnLiveNow && spectatorsAllowed),
+      );
+      if (!mounted) return;
+      setState(() => _room = room);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _showCapacityFull(String message) {
     if (!mounted) return;
     showDialog<void>(
@@ -358,6 +378,30 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   selectedId: _myAvatarId,
                   onSelected: _busy ? (_) {} : _pickAvatar,
                 ),
+                if (_amHost) ...[
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Allow audience'),
+                    subtitle: const Text('Friends can watch with a code'),
+                    value: _room.spectatorsAllowed,
+                    onChanged: _busy
+                        ? null
+                        : (v) => _setAudience(spectatorsAllowed: v),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('List on Live Now'),
+                    subtitle: const Text('Show this table on the public watch screen'),
+                    value: _room.listOnLiveNow,
+                    onChanged: !_room.spectatorsAllowed || _busy
+                        ? null
+                        : (v) => _setAudience(
+                              spectatorsAllowed: true,
+                              listOnLiveNow: v,
+                            ),
+                  ),
+                ],
                 const SizedBox(height: 20),
                 Row(
                   children: [

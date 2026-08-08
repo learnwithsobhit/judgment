@@ -154,7 +154,61 @@ pub struct RoomView {
     /// Classic dealer bid restriction (default off).
     #[serde(default)]
     pub dealer_total_restriction: bool,
+    /// Host allows audience watchers (watch link / watch WS).
+    #[serde(default)]
+    pub spectators_allowed: bool,
+    /// Appear on the public Live Now catalog (requires spectators_allowed).
+    #[serde(default)]
+    pub list_on_live_now: bool,
     pub seats: Vec<SeatView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateAudienceSettingsRequest {
+    pub spectators_allowed: bool,
+    #[serde(default)]
+    pub list_on_live_now: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WatchRoomRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchRoomResponse {
+    pub game_id: GameId,
+    pub room_code: String,
+    pub room_id: RoomId,
+}
+
+/// Compact card for the public Live Now browse screen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveRoomCard {
+    pub room_code: String,
+    pub game_id: GameId,
+    pub host_nickname: String,
+    pub player_count: u8,
+    pub max_players: u8,
+    pub phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_rounds: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cards_per_player: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trump: Option<Suit>,
+    pub viewer_count: u32,
+    /// Soft engagement pulse (recent audience activity).
+    #[serde(default)]
+    pub energy: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveRoomsResponse {
+    pub rooms: Vec<LiveRoomCard>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

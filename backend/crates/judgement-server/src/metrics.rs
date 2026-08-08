@@ -42,6 +42,11 @@ pub struct Metrics {
     pub soundboard_broadcast: AtomicU64,
     pub voice_notes_broadcast: AtomicU64,
     pub audio_rejected: AtomicU64,
+    pub spectator_ws_connected: AtomicU64,
+    pub spectator_ws_disconnected: AtomicU64,
+    pub audience_rate_limited: AtomicU64,
+    pub crowd_prediction_updates: AtomicU64,
+    pub spectator_capacity_rejected: AtomicU64,
 }
 
 impl Metrics {
@@ -143,6 +148,31 @@ impl Metrics {
             "Soundboard/voice commands rejected (cooldown, size, mime, allow-list)",
             audio_rejected
         );
+        counter!(
+            "judgement_spectator_ws_connected_total",
+            "Spectator WebSocket upgrades accepted",
+            spectator_ws_connected
+        );
+        counter!(
+            "judgement_spectator_ws_disconnected_total",
+            "Spectator WebSocket disconnects",
+            spectator_ws_disconnected
+        );
+        counter!(
+            "judgement_audience_rate_limited_total",
+            "Audience write commands rejected by rate limit",
+            audience_rate_limited
+        );
+        counter!(
+            "judgement_crowd_prediction_updates_total",
+            "Crowd winner-prediction tally broadcasts",
+            crowd_prediction_updates
+        );
+        counter!(
+            "judgement_spectator_capacity_rejected_total",
+            "Watch/connect rejected by spectator capacity",
+            spectator_capacity_rejected
+        );
 
         out.push_str("# HELP judgement_persist_commit_duration_milliseconds Persist commit latency\n");
         out.push_str("# TYPE judgement_persist_commit_duration_milliseconds histogram\n");
@@ -175,9 +205,15 @@ impl Metrics {
             self.persist_commit_ms_count.load(Ordering::Relaxed)
         ));
 
-        out.push_str("# HELP judgement_active_websockets Approximate active WS connections\n");
+        out.push_str("# HELP judgement_active_websockets Approximate active player WS connections\n");
         out.push_str("# TYPE judgement_active_websockets gauge\n");
         out.push_str(&format!("judgement_active_websockets {}\n", gauges.active_websockets));
+        out.push_str("# HELP judgement_active_spectator_websockets Approximate active spectator WS\n");
+        out.push_str("# TYPE judgement_active_spectator_websockets gauge\n");
+        out.push_str(&format!(
+            "judgement_active_spectator_websockets {}\n",
+            gauges.active_spectator_websockets
+        ));
         out.push_str("# HELP judgement_active_rooms Lobby + in-game rooms\n");
         out.push_str("# TYPE judgement_active_rooms gauge\n");
         out.push_str(&format!("judgement_active_rooms {}\n", gauges.active_rooms));
@@ -194,6 +230,7 @@ impl Metrics {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Gauges {
     pub active_websockets: u64,
+    pub active_spectator_websockets: u64,
     pub active_rooms: u64,
     pub active_game_actors: u64,
 }

@@ -33,6 +33,7 @@ fn fill_active_games(state: &AppState, n: usize) {
             GameInfo {
                 room_id: judgement_domain::RoomId::new(),
                 players: HashMap::new(),
+                spectators: HashMap::new(),
                 commands: tx,
             },
         );

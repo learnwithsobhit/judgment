@@ -27,14 +27,16 @@ use judgement_protocol::{
     ClaimSeatRequest, ClaimSeatResponse, CoachingResponse, CreateGuestSessionRequest,
     CreateGuestSessionResponse, CreateRoomRequest, CreateRoomResponse, EndGameResponse,
     ExplanationResponse, GameHistoryResponse, GameResultResponse, HighlightsResponse,
-    JoinRoomRequest, JoinRoomResponse, ReadyRequest, RemovePlayerRequest, RestartGameResponse,
-    RoomView, RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest,
-    SetAvatarResponse, StartGameRequest, StartGameResponse,
+    JoinRoomRequest, JoinRoomResponse, LiveRoomCard, LiveRoomsResponse, ReadyRequest,
+    RemovePlayerRequest, RestartGameResponse, RoomView, RoundResultView, RoundSummaryResponse,
+    RulesQueryRequest, SetAvatarRequest, SetAvatarResponse, StartGameRequest, StartGameResponse,
+    UpdateAudienceSettingsRequest, WatchRoomRequest, WatchRoomResponse,
 };
 use crate::emotes::is_allowed_avatar;
 use tokio::sync::oneshot;
 
 use crate::actor::{self, ActorMessage, SpawnActor};
+use crate::audience::{admit_spectator, flags as audience_flags};
 use crate::capacity::{level_for, CapacityLevel, CAPACITY_FULL_MESSAGE};
 use crate::cleanup::{
     check_restart_rate_limit, make_aborted_hook, make_finished_hook, make_host_changed_hook,
@@ -184,6 +186,8 @@ pub async fn create_room(
         first_trump: body.first_trump,
         round_schedule,
         dealer_total_restriction: body.dealer_total_restriction,
+        spectators_allowed: false,
+        list_on_live_now: false,
     };
     let view = room.view();
     state
@@ -915,6 +919,7 @@ async fn start_game_inner(
         GameInfo {
             room_id,
             players: session_to_player,
+            spectators: HashMap::new(),
             commands,
         },
     );
@@ -1227,4 +1232,220 @@ fn ensure_game_participant(
     // permit any authenticated caller who knows the id — history is not secret
     // beyond ranking (hands are not included). Tighten in Phase 9 if needed.
     Ok(())
+}
+
+pub async fn update_audience_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(room_ref): Path<String>,
+    Json(body): Json<UpdateAudienceSettingsRequest>,
+) -> Result<Json<RoomView>, ApiError> {
+    if !audience_flags().audience_enabled {
+        return Err(ApiError::CapacityFull(
+            "audience watching is temporarily disabled".into(),
+        ));
+    }
+    let session = state.authenticate(&headers)?;
+    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+
+    let (view, game_id, closing) = {
+        let mut rooms = state.rooms.lock().unwrap();
+        let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
+        if room.host_session != session.id {
+            return Err(ApiError::Forbidden("only the host can change audience settings".into()));
+        }
+        let spectators_allowed = body.spectators_allowed;
+        let list_on_live_now = body.list_on_live_now && spectators_allowed;
+        let was_allowed = room.spectators_allowed;
+        room.spectators_allowed = spectators_allowed;
+        room.list_on_live_now = list_on_live_now;
+        let game_id = match room.status {
+            RoomStatus::InGame(id) => Some(id),
+            RoomStatus::Lobby => None,
+        };
+        let closing = was_allowed && !spectators_allowed;
+        (room.view(), game_id, closing)
+    };
+
+    if closing {
+        if let Some(game_id) = game_id {
+            let commands = state
+                .games
+                .lock()
+                .unwrap()
+                .get(&game_id)
+                .map(|g| g.commands.clone());
+            if let Some(commands) = commands {
+                let _ = commands
+                    .send(ActorMessage::CloseSpectators {
+                        reason: "host closed spectating".into(),
+                    })
+                    .await;
+            }
+            if let Some(info) = state.games.lock().unwrap().get_mut(&game_id) {
+                info.spectators.clear();
+            }
+        }
+    }
+
+    Ok(Json(view))
+}
+
+pub async fn watch_room(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(room_ref): Path<String>,
+    body: Option<Json<WatchRoomRequest>>,
+) -> Result<Json<WatchRoomResponse>, ApiError> {
+    if !audience_flags().audience_enabled {
+        return Err(ApiError::CapacityFull(
+            "audience watching is temporarily disabled".into(),
+        ));
+    }
+    let session = state.authenticate(&headers)?;
+    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+
+    let nickname = body
+        .and_then(|Json(b)| b.nickname)
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| session.nickname.clone());
+
+    let (game_id, room_code, already_player) = {
+        let rooms = state.rooms.lock().unwrap();
+        let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+        if !room.spectators_allowed {
+            return Err(ApiError::Forbidden(
+                "this table is not open for audience".into(),
+            ));
+        }
+        let RoomStatus::InGame(game_id) = room.status else {
+            return Err(ApiError::Conflict(
+                "game has not started yet — only live tables can be watched".into(),
+            ));
+        };
+        let already_player = room.seats.iter().any(|s| s.session_id == session.id);
+        (game_id, room.code.clone(), already_player)
+    };
+
+    if already_player {
+        return Err(ApiError::Conflict(
+            "you are seated at this table — open the player table instead".into(),
+        ));
+    }
+
+    let global = state
+        .active_spectator_websockets
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let per_game = {
+        let games = state.games.lock().unwrap();
+        let info = games.get(&game_id).ok_or(ApiError::NotFound("game"))?;
+        info.spectators.len()
+    };
+    if let Err(msg) = admit_spectator(global, per_game) {
+        state
+            .metrics
+            .spectator_capacity_rejected
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(ApiError::CapacityFull(msg.into()));
+    }
+
+    {
+        let mut games = state.games.lock().unwrap();
+        let info = games.get_mut(&game_id).ok_or(ApiError::NotFound("game"))?;
+        if info.players.contains_key(&session.id) {
+            return Err(ApiError::Conflict(
+                "you are seated at this table — open the player table instead".into(),
+            ));
+        }
+        info.spectators.insert(session.id, nickname);
+    }
+
+    Ok(Json(WatchRoomResponse {
+        game_id,
+        room_code,
+        room_id,
+    }))
+}
+
+pub async fn list_live_rooms(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<LiveRoomsResponse>, ApiError> {
+    if !audience_flags().live_now_enabled || !audience_flags().audience_enabled {
+        return Ok(Json(LiveRoomsResponse { rooms: vec![] }));
+    }
+
+    let candidates: Vec<(String, judgement_domain::GameId, String, u8, u8)> = {
+        let rooms = state.rooms.lock().unwrap();
+        rooms
+            .values()
+            .filter(|r| {
+                r.spectators_allowed
+                    && r.list_on_live_now
+                    && matches!(r.status, RoomStatus::InGame(_))
+            })
+            .filter_map(|r| {
+                let RoomStatus::InGame(game_id) = r.status else {
+                    return None;
+                };
+                let host_nick = r
+                    .seats
+                    .iter()
+                    .find(|s| s.session_id == r.host_session)
+                    .map(|s| s.nickname.clone())
+                    .unwrap_or_else(|| "Host".into());
+                Some((
+                    r.code.clone(),
+                    game_id,
+                    host_nick,
+                    r.seats.len() as u8,
+                    r.max_players,
+                ))
+            })
+            .collect()
+    };
+
+    let mut cards = Vec::with_capacity(candidates.len());
+    for (room_code, game_id, host_nickname, player_count, max_players) in candidates {
+        let commands = {
+            let games = state.games.lock().unwrap();
+            games.get(&game_id).map(|g| g.commands.clone())
+        };
+        let viewer_count = if let Some(commands) = commands {
+            let (tx, rx) = oneshot::channel();
+            if commands
+                .send(ActorMessage::QueryViewerCount { reply: tx })
+                .await
+                .is_ok()
+            {
+                tokio::time::timeout(Duration::from_millis(200), rx)
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .unwrap_or(0)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        // Phase label from a lightweight spectator view isn't free; keep list tiny.
+        cards.push(LiveRoomCard {
+            room_code,
+            game_id,
+            host_nickname,
+            player_count,
+            max_players,
+            phase: "live".into(),
+            round_index: None,
+            total_rounds: None,
+            cards_per_player: None,
+            trump: None,
+            viewer_count,
+            energy: viewer_count.saturating_mul(2),
+        });
+    }
+
+    cards.sort_by(|a, b| b.viewer_count.cmp(&a.viewer_count));
+    Ok(Json(LiveRoomsResponse { rooms: cards }))
 }

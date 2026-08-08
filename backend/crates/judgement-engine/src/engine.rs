@@ -11,7 +11,7 @@ use judgement_domain::{
 };
 
 use crate::events::GameEvent;
-use crate::projection::{self, PlayerGameView};
+use crate::projection::{self, PlayerGameView, SpectatorGameView};
 use crate::scoring::{scoring_strategy_for, ScoringContext};
 use crate::shuffle::{DeckShuffler, SecureShuffler, SeededShuffler};
 use crate::state::{CompletedTrick, GamePhase, InternalGameState, PlayedCard, RoundState};
@@ -174,6 +174,27 @@ impl GameEngine {
             return Err(GameError::PlayerNotInGame);
         }
         Ok(projection::project_for(&self.state, player_id, self.legal_bids(player_id), self.legal_cards(player_id)))
+    }
+
+    /// Hand-free public projection for audience watchers.
+    pub fn spectator_view(&self, viewer_count: u32) -> SpectatorGameView {
+        projection::project_spectator(&self.state, viewer_count)
+    }
+
+    /// True once the final round has begun (predictions lock).
+    pub fn predictions_locked(&self) -> bool {
+        let total = self.state.rules.round_pattern.rounds().len();
+        if total == 0 {
+            return true;
+        }
+        if self.state.phase == GamePhase::Finished {
+            return true;
+        }
+        self.state
+            .current_round
+            .as_ref()
+            .map(|r| r.round_index >= total.saturating_sub(1))
+            .unwrap_or(false)
     }
 
     // ------------------------------------------------------------------

@@ -7,14 +7,20 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use judgement_domain::{ActionId, ConnectionStatus, GameError, GameId, PlayerId};
+use judgement_domain::{ActionId, ConnectionStatus, GameError, GameId, PlayerId, SessionId};
 use judgement_engine::{GameEngine, GameEvent, GamePhase};
 use judgement_persistence::{GameStore, PersistError};
 use judgement_protocol::{
-    ClientCommand, ClientEnvelope, RejectReason, ServerMessage, TimerEvent, PROTOCOL_VERSION,
+    ClientCommand, ClientEnvelope, CrowdPredictionTally, CrowdPredictionView, RejectReason,
+    ServerMessage, TimerEvent, PROTOCOL_VERSION,
 };
 use tokio::sync::{mpsc, oneshot};
+use uuid::Uuid;
 
+use crate::audience::{
+    flags as audience_flags, AudienceChannel, AudienceRateLimiter, MAX_AUDIENCE_COMMENT_LEN,
+    MAX_AUDIENCE_VOICE_B64_BYTES, MAX_AUDIENCE_VOICE_DURATION_MS,
+};
 use crate::audio::{sound_ttl_ms, validate_voice_note, AUDIO_COOLDOWN_MS};
 use crate::emotes::{
     is_allowed_avatar, is_allowed_emoji, is_allowed_mood, resolve_emote_text, MAX_EMOTE_TEXT_LEN,
@@ -88,6 +94,26 @@ pub enum ActorMessage {
     NotifyRestarted {
         new_game_id: GameId,
     },
+    SpectatorConnect {
+        session_id: SessionId,
+        nickname: String,
+        outbound: mpsc::Sender<ServerMessage>,
+        rotated_token: Option<String>,
+    },
+    SpectatorDisconnect {
+        session_id: SessionId,
+    },
+    SpectatorCommand {
+        session_id: SessionId,
+        envelope: ClientEnvelope,
+    },
+    /// Host toggled spectators_allowed off — disconnect watchers.
+    CloseSpectators {
+        reason: String,
+    },
+    QueryViewerCount {
+        reply: oneshot::Sender<u32>,
+    },
 }
 
 /// Presence view used by restart / cleanup.
@@ -154,6 +180,12 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         on_host_changed: config.on_host_changed,
         on_aborted: config.on_aborted,
         on_finished: config.on_finished,
+        spectators: HashMap::new(),
+        crowd_votes: HashMap::new(),
+        crowd_locked: false,
+        audience_limiter: AudienceRateLimiter::default(),
+        audience_energy: 0,
+        dirty_spectators: HashSet::new(),
     };
     tokio::spawn(actor.run());
     tx
@@ -192,6 +224,17 @@ struct GameActor {
     on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
     on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
+    spectators: HashMap<SessionId, SpectatorClient>,
+    crowd_votes: HashMap<SessionId, PlayerId>,
+    crowd_locked: bool,
+    audience_limiter: AudienceRateLimiter,
+    audience_energy: u32,
+    dirty_spectators: HashSet<SessionId>,
+}
+
+struct SpectatorClient {
+    outbound: mpsc::Sender<ServerMessage>,
+    nickname: String,
 }
 
 impl GameActor {
@@ -268,9 +311,34 @@ impl GameActor {
                     self.broadcast(ServerMessage::GameRestarted {
                         game_id: new_game_id,
                     });
+                    self.close_spectators("game restarted".into());
+                }
+                ActorMessage::SpectatorConnect {
+                    session_id,
+                    nickname,
+                    outbound,
+                    rotated_token,
+                } => {
+                    self.handle_spectator_connect(session_id, nickname, outbound, rotated_token);
+                }
+                ActorMessage::SpectatorDisconnect { session_id } => {
+                    self.handle_spectator_disconnect(session_id);
+                }
+                ActorMessage::SpectatorCommand {
+                    session_id,
+                    envelope,
+                } => {
+                    self.handle_spectator_command(session_id, envelope);
+                }
+                ActorMessage::CloseSpectators { reason } => {
+                    self.close_spectators(reason);
+                }
+                ActorMessage::QueryViewerCount { reply } => {
+                    let _ = reply.send(self.spectators.len() as u32);
                 }
             }
             self.flush_dirty_snapshots();
+            self.flush_dirty_spectator_snapshots();
         }
     }
 
@@ -576,9 +644,10 @@ impl GameActor {
                 .games_ended_vacancy
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.broadcast(ServerMessage::GameEnded {
-                reason,
+                reason: reason.clone(),
                 aborted: Some(true),
             });
+            self.close_spectators(reason);
             if let Some(hook) = &self.on_aborted {
                 hook(cleanup.clone());
             }
@@ -839,7 +908,11 @@ impl GameActor {
             | ClientCommand::SendEmoteText { .. }
             | ClientCommand::AvatarFlash { .. }
             | ClientCommand::SendSoundboard { .. }
-            | ClientCommand::SendVoiceNote { .. } => unreachable!(),
+            | ClientCommand::SendVoiceNote { .. }
+            | ClientCommand::AudienceComment { .. }
+            | ClientCommand::AudienceReaction { .. }
+            | ClientCommand::AudienceVoiceNote { .. }
+            | ClientCommand::SetWinnerPrediction { .. } => unreachable!(),
         };
 
         match result {
@@ -908,6 +981,8 @@ impl GameActor {
                     sticker_id: None,
                     sound_id: None,
                     ttl_ms: 1800,
+                    from_audience: false,
+                    audience_nickname: None,
                 }
             }
             ClientCommand::SendEmoteText { text } => {
@@ -933,6 +1008,8 @@ impl GameActor {
                     sticker_id: style.sticker_id,
                     sound_id: None,
                     ttl_ms: 2200,
+                    from_audience: false,
+                    audience_nickname: None,
                 }
             }
             ClientCommand::AvatarFlash { mood } => {
@@ -956,6 +1033,8 @@ impl GameActor {
                     sticker_id: None,
                     sound_id: None,
                     ttl_ms: 1600,
+                    from_audience: false,
+                    audience_nickname: None,
                 }
             }
             _ => unreachable!(),
@@ -1020,6 +1099,8 @@ impl GameActor {
                     sticker_id: None,
                     sound_id: Some(sound_id),
                     ttl_ms,
+                    from_audience: false,
+                    audience_nickname: None,
                 }
             }
             ClientCommand::SendVoiceNote {
@@ -1100,6 +1181,8 @@ impl GameActor {
                         sticker_id: Some("laugh".into()),
                         sound_id: None,
                         ttl_ms: 1600,
+                    from_audience: false,
+                    audience_nickname: None,
                     });
                 }
                 GameEvent::RoundCompleted { .. } => {
@@ -1123,6 +1206,8 @@ impl GameActor {
                             sticker_id: Some("crown".into()),
                             sound_id: None,
                             ttl_ms: 2000,
+                    from_audience: false,
+                    audience_nickname: None,
                         });
                     }
                 }
@@ -1138,6 +1223,8 @@ impl GameActor {
                             sticker_id: Some("fire".into()),
                             sound_id: None,
                             ttl_ms: 2500,
+                    from_audience: false,
+                    audience_nickname: None,
                         });
                     }
                 }
@@ -1368,6 +1455,8 @@ impl GameActor {
                 });
             }
             // Free admission slot; return room to Lobby for rematch.
+            // Stable token so clients can show celebration/results instead of hard-pop.
+            self.close_spectators("game_finished".into());
             if let Some(hook) = &self.on_finished {
                 hook(self.game_id);
             }
@@ -1476,6 +1565,11 @@ impl GameActor {
         for player_id in players {
             self.send_snapshot(player_id);
         }
+        self.broadcast_spectator_snapshots();
+        if self.engine.predictions_locked() && !self.crowd_locked {
+            self.crowd_locked = true;
+            self.broadcast_crowd_prediction(None);
+        }
     }
 
     fn flush_dirty_snapshots(&mut self) {
@@ -1523,6 +1617,407 @@ impl GameActor {
             self.dirty_clients.remove(&player_id);
         }
     }
+
+    fn handle_spectator_connect(
+        &mut self,
+        session_id: SessionId,
+        nickname: String,
+        outbound: mpsc::Sender<ServerMessage>,
+        rotated_token: Option<String>,
+    ) {
+        self.spectators.insert(
+            session_id,
+            SpectatorClient {
+                outbound,
+                nickname,
+            },
+        );
+        if let Some(token) = rotated_token {
+            self.send_to_spectator(session_id, ServerMessage::TokenRotated { token });
+        }
+        self.send_spectator_snapshot(session_id);
+        self.send_to_spectator(
+            session_id,
+            ServerMessage::CrowdPredictionUpdated {
+                prediction: self.crowd_view(Some(session_id)),
+            },
+        );
+    }
+
+    fn handle_spectator_disconnect(&mut self, session_id: SessionId) {
+        self.spectators.remove(&session_id);
+        self.dirty_spectators.remove(&session_id);
+        // Keep crowd vote for stable tally.
+    }
+
+    fn close_spectators(&mut self, reason: String) {
+        let ids: Vec<_> = self.spectators.keys().copied().collect();
+        for session_id in ids {
+            self.send_to_spectator(
+                session_id,
+                ServerMessage::SpectatingClosed {
+                    reason: reason.clone(),
+                },
+            );
+        }
+        self.spectators.clear();
+        self.dirty_spectators.clear();
+    }
+
+    fn handle_spectator_command(&mut self, session_id: SessionId, envelope: ClientEnvelope) {
+        let action_id = envelope.action_id;
+        if !self.spectators.contains_key(&session_id) {
+            return;
+        }
+        if envelope.protocol_version != PROTOCOL_VERSION {
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::UnsupportedProtocolVersion {
+                    supported: PROTOCOL_VERSION,
+                    received: envelope.protocol_version,
+                },
+            );
+            return;
+        }
+        if envelope.game_id != self.game_id {
+            self.reject_spectator(session_id, Some(action_id), RejectReason::WrongGame);
+            return;
+        }
+
+        match envelope.action {
+            ClientCommand::RequestStateSync => {
+                self.send_spectator_snapshot(session_id);
+                self.send_to_spectator(
+                    session_id,
+                    ServerMessage::CrowdPredictionUpdated {
+                        prediction: self.crowd_view(Some(session_id)),
+                    },
+                );
+            }
+            ClientCommand::AudienceComment { text } => {
+                self.handle_audience_comment(session_id, action_id, text);
+            }
+            ClientCommand::AudienceReaction { emoji } => {
+                self.handle_audience_reaction(session_id, action_id, emoji);
+            }
+            ClientCommand::AudienceVoiceNote {
+                mime,
+                duration_ms,
+                audio_b64,
+            } => {
+                self.handle_audience_voice(session_id, action_id, mime, duration_ms, audio_b64);
+            }
+            ClientCommand::SetWinnerPrediction { player_id } => {
+                self.handle_set_prediction(session_id, action_id, player_id);
+            }
+            _ => {
+                self.reject_spectator(session_id, Some(action_id), RejectReason::UnsupportedCommand);
+            }
+        }
+    }
+
+    fn rate_limit_or_reject(
+        &mut self,
+        session_id: SessionId,
+        action_id: ActionId,
+        channel: AudienceChannel,
+    ) -> bool {
+        if let Err(ch) = self.audience_limiter.check(session_id, channel) {
+            self.metrics
+                .audience_rate_limited
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::AudienceRateLimited {
+                    channel: ch.as_str().into(),
+                },
+            );
+            return false;
+        }
+        true
+    }
+
+    fn handle_audience_comment(&mut self, session_id: SessionId, action_id: ActionId, text: String) {
+        if !self.rate_limit_or_reject(session_id, action_id, AudienceChannel::Comment) {
+            return;
+        }
+        let trimmed = text.trim();
+        if trimmed.is_empty() || trimmed.chars().count() > MAX_AUDIENCE_COMMENT_LEN {
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: format!("comment must be 1–{MAX_AUDIENCE_COMMENT_LEN} characters"),
+                },
+            );
+            return;
+        }
+        let nickname = self
+            .spectators
+            .get(&session_id)
+            .map(|s| s.nickname.clone())
+            .unwrap_or_else(|| "Audience".into());
+        self.accept_spectator(session_id, action_id);
+        self.audience_energy = self.audience_energy.saturating_add(1);
+        self.broadcast_spectators(ServerMessage::AudienceCommentEvent {
+            from_nickname: nickname,
+            text: trimmed.to_string(),
+            ttl_ms: 4000,
+        });
+    }
+
+    fn handle_audience_reaction(&mut self, session_id: SessionId, action_id: ActionId, emoji: String) {
+        if !self.rate_limit_or_reject(session_id, action_id, AudienceChannel::Reaction) {
+            return;
+        }
+        if !is_allowed_emoji(&emoji) {
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "emoji not allowed".into(),
+                },
+            );
+            return;
+        }
+        let nickname = self
+            .spectators
+            .get(&session_id)
+            .map(|s| s.nickname.clone())
+            .unwrap_or_else(|| "Audience".into());
+        self.accept_spectator(session_id, action_id);
+        self.audience_energy = self.audience_energy.saturating_add(2);
+        let event = ServerMessage::TableEvent {
+            kind: "reaction".into(),
+            from: PlayerId(Uuid::nil()),
+            target: None,
+            emojis: vec![emoji],
+            text: None,
+            mood: None,
+            sticker_id: None,
+            sound_id: None,
+            ttl_ms: 1800,
+            from_audience: true,
+            audience_nickname: Some(nickname),
+        };
+        self.broadcast(event.clone());
+        self.broadcast_spectators(event);
+    }
+
+    fn handle_audience_voice(
+        &mut self,
+        session_id: SessionId,
+        action_id: ActionId,
+        mime: String,
+        duration_ms: u32,
+        audio_b64: String,
+    ) {
+        if !audience_flags().audience_voice_enabled {
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "audience voice is disabled".into(),
+                },
+            );
+            return;
+        }
+        if !self.rate_limit_or_reject(session_id, action_id, AudienceChannel::Voice) {
+            return;
+        }
+        if duration_ms > MAX_AUDIENCE_VOICE_DURATION_MS || audio_b64.len() > MAX_AUDIENCE_VOICE_B64_BYTES
+        {
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "voice note too large for audience".into(),
+                },
+            );
+            return;
+        }
+        if let Err(detail) = validate_voice_note(&mime, duration_ms, &audio_b64) {
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::MalformedMessage { detail },
+            );
+            return;
+        }
+        let nickname = self
+            .spectators
+            .get(&session_id)
+            .map(|s| s.nickname.clone())
+            .unwrap_or_else(|| "Audience".into());
+        self.accept_spectator(session_id, action_id);
+        self.broadcast_spectators(ServerMessage::AudienceVoiceNoteEvent {
+            from_nickname: nickname,
+            mime,
+            duration_ms,
+            audio_b64: Arc::<str>::from(audio_b64),
+            ttl_ms: duration_ms.saturating_add(400),
+        });
+    }
+
+    fn handle_set_prediction(
+        &mut self,
+        session_id: SessionId,
+        action_id: ActionId,
+        player_id: PlayerId,
+    ) {
+        if !self.rate_limit_or_reject(session_id, action_id, AudienceChannel::Prediction) {
+            return;
+        }
+        if self.crowd_locked || self.engine.predictions_locked() {
+            self.crowd_locked = true;
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "predictions locked — final round".into(),
+                },
+            );
+            return;
+        }
+        if !self.engine.state().contains_player(player_id) {
+            self.reject_spectator(
+                session_id,
+                Some(action_id),
+                RejectReason::MalformedMessage {
+                    detail: "unknown player".into(),
+                },
+            );
+            return;
+        }
+        self.crowd_votes.insert(session_id, player_id);
+        self.accept_spectator(session_id, action_id);
+        self.metrics
+            .crowd_prediction_updates
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.broadcast_crowd_prediction(None);
+    }
+
+    fn crowd_view(&self, for_session: Option<SessionId>) -> CrowdPredictionView {
+        let mut counts: HashMap<PlayerId, u32> = HashMap::new();
+        for pid in self.crowd_votes.values() {
+            *counts.entry(*pid).or_default() += 1;
+        }
+        let mut tallies: Vec<_> = counts
+            .into_iter()
+            .map(|(player_id, count)| CrowdPredictionTally { player_id, count })
+            .collect();
+        tallies.sort_by(|a, b| b.count.cmp(&a.count).then(a.player_id.0.cmp(&b.player_id.0)));
+        CrowdPredictionView {
+            locked: self.crowd_locked || self.engine.predictions_locked(),
+            tallies,
+            total_voters: self.crowd_votes.len() as u32,
+            my_pick: for_session.and_then(|s| self.crowd_votes.get(&s).copied()),
+        }
+    }
+
+    fn broadcast_crowd_prediction(&mut self, only_session: Option<SessionId>) {
+        if let Some(session_id) = only_session {
+            let view = self.crowd_view(Some(session_id));
+            self.send_to_spectator(
+                session_id,
+                ServerMessage::CrowdPredictionUpdated { prediction: view },
+            );
+            return;
+        }
+        let aggregate = self.crowd_view(None);
+        self.broadcast(ServerMessage::CrowdPredictionUpdated {
+            prediction: aggregate.clone(),
+        });
+        let ids: Vec<_> = self.spectators.keys().copied().collect();
+        for session_id in ids {
+            let view = self.crowd_view(Some(session_id));
+            self.send_to_spectator(
+                session_id,
+                ServerMessage::CrowdPredictionUpdated { prediction: view },
+            );
+        }
+    }
+
+    fn broadcast_spectator_snapshots(&mut self) {
+        let ids: Vec<_> = self.spectators.keys().copied().collect();
+        for session_id in ids {
+            self.send_spectator_snapshot(session_id);
+        }
+    }
+
+    fn send_spectator_snapshot(&mut self, session_id: SessionId) {
+        let view = self
+            .engine
+            .spectator_view(self.spectators.len() as u32);
+        self.send_to_spectator(session_id, ServerMessage::SpectatorStateSnapshot { view });
+    }
+
+    fn flush_dirty_spectator_snapshots(&mut self) {
+        let dirty: Vec<_> = self.dirty_spectators.iter().copied().collect();
+        for session_id in dirty {
+            if !self.spectators.contains_key(&session_id) {
+                self.dirty_spectators.remove(&session_id);
+                continue;
+            }
+            self.dirty_spectators.remove(&session_id);
+            self.send_spectator_snapshot(session_id);
+        }
+    }
+
+    fn broadcast_spectators(&mut self, message: ServerMessage) {
+        let ids: Vec<_> = self.spectators.keys().copied().collect();
+        for session_id in ids {
+            self.send_to_spectator(session_id, message.clone());
+        }
+    }
+
+    fn send_to_spectator(&mut self, session_id: SessionId, message: ServerMessage) {
+        let Some(client) = self.spectators.get(&session_id) else {
+            return;
+        };
+        let is_snapshot = matches!(message, ServerMessage::SpectatorStateSnapshot { .. });
+        if client.outbound.try_send(message).is_err() {
+            if is_snapshot {
+                self.dirty_spectators.insert(session_id);
+                self.metrics
+                    .outbound_snapshot_drops
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        } else if is_snapshot {
+            self.dirty_spectators.remove(&session_id);
+        }
+    }
+
+    fn accept_spectator(&mut self, session_id: SessionId, action_id: ActionId) {
+        self.send_to_spectator(
+            session_id,
+            ServerMessage::CommandAccepted {
+                action_id,
+                new_state_version: self.engine.version(),
+            },
+        );
+    }
+
+    fn reject_spectator(
+        &mut self,
+        session_id: SessionId,
+        action_id: Option<ActionId>,
+        reason: RejectReason,
+    ) {
+        let retryable = reason.retryable();
+        let message = reject_message(&reason);
+        self.send_to_spectator(
+            session_id,
+            ServerMessage::CommandRejected {
+                action_id,
+                reason,
+                retryable,
+                message,
+            },
+        );
+    }
 }
 
 fn now_ms() -> u64 {
@@ -1547,6 +2042,9 @@ fn reject_message(reason: &RejectReason) -> String {
         RejectReason::WrongGame => "this connection belongs to a different game".to_string(),
         RejectReason::UnsupportedCommand => {
             "this command is not available on the game socket".to_string()
+        }
+        RejectReason::AudienceRateLimited { channel } => {
+            format!("slow down — audience {channel} rate limit")
         }
     }
 }

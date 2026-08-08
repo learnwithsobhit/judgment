@@ -129,6 +129,9 @@ class GameController extends ChangeNotifier {
   /// Mutes emoji blasts + table audio (soundboard / voice).
   bool muteReactions = false;
 
+  /// Live crowd winner-prediction tallies from audience (read-only for players).
+  CrowdPredictionView? crowdPrediction;
+
   final TableAudioPlayer audio = TableAudioPlayer();
   bool voiceRecording = false;
   String? audioQueueFullHint;
@@ -422,6 +425,15 @@ class GameController extends ChangeNotifier {
             PlayerConnected() ||
             PlayerDisconnected():
         _notify();
+      case CrowdPredictionUpdated(:final prediction):
+        crowdPrediction = prediction;
+        _notify();
+      case SpectatorStateSnapshot() ||
+            AudienceCommentEvent() ||
+            AudienceVoiceNoteEvent() ||
+            SpectatingClosed():
+        // Player socket should not receive these; ignore safely.
+        break;
       case UnknownMessage():
         break;
     }

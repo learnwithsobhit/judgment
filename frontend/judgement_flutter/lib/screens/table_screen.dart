@@ -194,6 +194,9 @@ class _TableScreenState extends State<TableScreen> {
             child: Column(
               children: [
                 _TopBar(controller: controller, showScoreboardButton: !wide),
+                if (controller.crowdPrediction != null &&
+                    controller.crowdPrediction!.totalVoters > 0)
+                  _CrowdPickStrip(controller: controller),
                 if (controller.savingInProgress)
                   Material(
                     color: const Color(0xFF243B3A),
@@ -499,6 +502,38 @@ class _PauseBanner extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Crowd winner prediction (audience → players)
+// ---------------------------------------------------------------------------
+
+class _CrowdPickStrip extends StatelessWidget {
+  final GameController controller;
+  const _CrowdPickStrip({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final crowd = controller.crowdPrediction!;
+    final leader = crowd.tallies.isEmpty ? null : crowd.tallies.first;
+    final name = leader == null ? null : controller.nicknameOf(leader.playerId);
+    return Material(
+      color: const Color(0xFF243B3A),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Text(
+          crowd.locked
+              ? 'Crowd pick locked${name == null ? '' : ' — $name (${leader!.count})'}'
+              : 'Crowd pick${name == null ? '' : ' — $name leads (${leader!.count}/${crowd.totalVoters})'}',
+          style: const TextStyle(
+            color: Color(0xFF7EB8B2),
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
         ),
       ),
     );

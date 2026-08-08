@@ -84,7 +84,12 @@ pub async fn rate_limit_middleware(
 ) -> Response {
     let path = req.uri().path().to_string();
     // Health/metrics must remain reachable under load (for probes & scrapers).
-    if path == "/healthz" || path == "/readyz" || path == "/metrics" {
+    // Live Now catalog is intentionally polled; keep it off the shared game REST budget.
+    if path == "/healthz"
+        || path == "/readyz"
+        || path == "/metrics"
+        || path == "/api/v1/live-rooms"
+    {
         return next.run(req).await;
     }
 

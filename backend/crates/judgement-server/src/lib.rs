@@ -1,6 +1,7 @@
 //! Axum room service and per-game actors (PLAN.md Phase 3 + Phase 5 + Phase 9).
 
 pub mod actor;
+pub mod audience;
 pub mod audio;
 pub mod capacity;
 pub mod cleanup;
@@ -51,6 +52,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/rooms/{room_ref}/ready", post(routes::set_ready))
         .route("/api/v1/rooms/{room_ref}/start", post(routes::start_game))
+        .route(
+            "/api/v1/rooms/{room_ref}/audience-settings",
+            post(routes::update_audience_settings),
+        )
+        .route("/api/v1/rooms/{room_ref}/watch", post(routes::watch_room))
+        .route("/api/v1/live-rooms", get(routes::list_live_rooms))
         .route("/api/v1/events", post(events::create_event))
         .route("/api/v1/events/{slug}", get(events::get_event))
         .route("/api/v1/events/{slug}/rsvps", post(events::create_rsvp))
@@ -75,6 +82,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/ai/rules/query", post(routes::ai_rules_query))
         .route("/api/v1/games/{game_id}/ws", any(ws::game_ws))
+        .route("/api/v1/games/{game_id}/watch-ws", any(ws::watch_ws))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
@@ -100,6 +108,9 @@ async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> String {
     let gauges = Gauges {
         active_websockets: state
             .active_websockets
+            .load(std::sync::atomic::Ordering::Relaxed),
+        active_spectator_websockets: state
+            .active_spectator_websockets
             .load(std::sync::atomic::Ordering::Relaxed),
         active_rooms: state.rooms.lock().unwrap().len() as u64,
         active_game_actors: state.games.lock().unwrap().len() as u64,

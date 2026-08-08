@@ -4,6 +4,7 @@ import '../networking/api_client.dart';
 import '../screens/event_invite_screen.dart';
 import '../screens/event_manage_screen.dart';
 import '../screens/landing_screen.dart';
+import '../screens/live_now_screen.dart';
 import '../util/app_update.dart';
 import '../util/room_share.dart';
 import '../util/share_analytics.dart';
@@ -63,6 +64,15 @@ Widget initialHomeFromUri(Uri uri) {
       return LandingScreen(initialJoinCode: code);
     }
     return const LandingScreen(invalidJoinLink: true);
+  }
+  if (segments.length >= 2 && segments[0] == 'w') {
+    final code = normalizeRoomCode(segments[1]);
+    return LiveNowScreen(initialWatchCode: code);
+  }
+  final watchParam = q['watch'];
+  if (watchParam != null && watchParam.isNotEmpty) {
+    final code = normalizeRoomCode(watchParam);
+    return LiveNowScreen(initialWatchCode: code);
   }
   return const LandingScreen();
 }

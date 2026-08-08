@@ -368,6 +368,8 @@ sealed class ServerMessage {
           stickerId: json['sticker_id'] as String?,
           soundId: json['sound_id'] as String?,
           ttlMs: json['ttl_ms'] as int? ?? 1600,
+          fromAudience: json['from_audience'] as bool? ?? false,
+          audienceNickname: json['audience_nickname'] as String?,
         );
       case 'voice_note':
         return VoiceNoteMessage(
@@ -377,6 +379,32 @@ sealed class ServerMessage {
           audioB64: json['audio_b64'] as String? ?? '',
           ttlMs: json['ttl_ms'] as int? ?? 0,
         );
+      case 'spectator_state_snapshot':
+        return SpectatorStateSnapshot(
+          view: SpectatorGameView.fromJson(json['view'] as Map<String, dynamic>),
+        );
+      case 'crowd_prediction_updated':
+        return CrowdPredictionUpdated(
+          prediction: CrowdPredictionView.fromJson(
+            json['prediction'] as Map<String, dynamic>,
+          ),
+        );
+      case 'audience_comment_event':
+        return AudienceCommentEvent(
+          fromNickname: json['from_nickname'] as String? ?? 'Audience',
+          text: json['text'] as String? ?? '',
+          ttlMs: json['ttl_ms'] as int? ?? 4000,
+        );
+      case 'audience_voice_note_event':
+        return AudienceVoiceNoteEvent(
+          fromNickname: json['from_nickname'] as String? ?? 'Audience',
+          mime: json['mime'] as String? ?? 'audio/webm',
+          durationMs: json['duration_ms'] as int? ?? 0,
+          audioB64: json['audio_b64'] as String? ?? '',
+          ttlMs: json['ttl_ms'] as int? ?? 0,
+        );
+      case 'spectating_closed':
+        return SpectatingClosed(reason: json['reason'] as String? ?? 'closed');
       default:
         return UnknownMessage(type: json['type'] as String);
     }
@@ -485,6 +513,8 @@ class TableEventMessage extends ServerMessage {
   final String? stickerId;
   final String? soundId;
   final int ttlMs;
+  final bool fromAudience;
+  final String? audienceNickname;
 
   TableEventMessage({
     required this.kind,
@@ -496,7 +526,175 @@ class TableEventMessage extends ServerMessage {
     required this.stickerId,
     required this.soundId,
     required this.ttlMs,
+    this.fromAudience = false,
+    this.audienceNickname,
   });
+}
+
+class SpectatorStateSnapshot extends ServerMessage {
+  final SpectatorGameView view;
+  SpectatorStateSnapshot({required this.view});
+}
+
+class CrowdPredictionUpdated extends ServerMessage {
+  final CrowdPredictionView prediction;
+  CrowdPredictionUpdated({required this.prediction});
+}
+
+class AudienceCommentEvent extends ServerMessage {
+  final String fromNickname;
+  final String text;
+  final int ttlMs;
+  AudienceCommentEvent({
+    required this.fromNickname,
+    required this.text,
+    required this.ttlMs,
+  });
+}
+
+class AudienceVoiceNoteEvent extends ServerMessage {
+  final String fromNickname;
+  final String mime;
+  final int durationMs;
+  final String audioB64;
+  final int ttlMs;
+  AudienceVoiceNoteEvent({
+    required this.fromNickname,
+    required this.mime,
+    required this.durationMs,
+    required this.audioB64,
+    required this.ttlMs,
+  });
+}
+
+class SpectatingClosed extends ServerMessage {
+  final String reason;
+  SpectatingClosed({required this.reason});
+}
+
+class CrowdPredictionTally {
+  final String playerId;
+  final int count;
+  CrowdPredictionTally.fromJson(Map<String, dynamic> json)
+      : playerId = json['player_id'] as String,
+        count = json['count'] as int;
+}
+
+class CrowdPredictionView {
+  final bool locked;
+  final List<CrowdPredictionTally> tallies;
+  final int totalVoters;
+  final String? myPick;
+
+  CrowdPredictionView.fromJson(Map<String, dynamic> json)
+      : locked = json['locked'] as bool? ?? false,
+        tallies = (json['tallies'] as List? ?? const [])
+            .map((t) => CrowdPredictionTally.fromJson(t as Map<String, dynamic>))
+            .toList(),
+        totalVoters = json['total_voters'] as int? ?? 0,
+        myPick = json['my_pick'] as String?;
+}
+
+class SpectatorSeatView {
+  final String playerId;
+  final String nickname;
+  final int seat;
+  final int cardCount;
+  final int? bid;
+  final int tricksWon;
+  final String connectionStatus;
+  final String? avatarId;
+
+  SpectatorSeatView.fromJson(Map<String, dynamic> json)
+      : playerId = json['player_id'] as String,
+        nickname = json['nickname'] as String,
+        seat = json['seat'] as int,
+        cardCount = json['card_count'] as int,
+        bid = json['bid'] as int?,
+        tricksWon = json['tricks_won'] as int,
+        connectionStatus = json['connection_status'] as String,
+        avatarId = json['avatar_id'] as String?;
+}
+
+class SpectatorGameView {
+  final String gameId;
+  final int stateVersion;
+  final String phase;
+  final List<SpectatorSeatView> seats;
+  final List<PlayedCard> currentTrick;
+  final CompletedTrickView? lastCompletedTrick;
+  final String? trump;
+  final CardModel? trumpCard;
+  final String? currentTurn;
+  final List<PublicBid> bids;
+  final List<PlayerScore> scores;
+  final List<RoundScoreView> roundHistory;
+  final LeaderView? leader;
+  final PublicRoundState? round;
+  final List<RankedPlayer>? finalRanking;
+  final int viewerCount;
+
+  SpectatorGameView.fromJson(Map<String, dynamic> json)
+      : gameId = json['game_id'] as String,
+        stateVersion = json['state_version'] as int,
+        phase = json['phase'] as String,
+        seats = (json['seats'] as List)
+            .map((s) => SpectatorSeatView.fromJson(s as Map<String, dynamic>))
+            .toList(),
+        currentTrick = (json['current_trick'] as List? ?? const [])
+            .map((p) => PlayedCard.fromJson(p as Map<String, dynamic>))
+            .toList(),
+        lastCompletedTrick = json['last_completed_trick'] == null
+            ? null
+            : CompletedTrickView.fromJson(
+                json['last_completed_trick'] as Map<String, dynamic>),
+        trump = json['trump'] as String?,
+        trumpCard = json['trump_card'] == null
+            ? null
+            : CardModel.fromJson(json['trump_card'] as Map<String, dynamic>),
+        currentTurn = json['current_turn'] as String?,
+        bids = (json['bids'] as List? ?? const [])
+            .map((b) => PublicBid.fromJson(b as Map<String, dynamic>))
+            .toList(),
+        scores = (json['scores'] as List? ?? const [])
+            .map((s) => PlayerScore.fromJson(s as Map<String, dynamic>))
+            .toList(),
+        roundHistory = (json['round_history'] as List? ?? const [])
+            .map((r) => RoundScoreView.fromJson(r as Map<String, dynamic>))
+            .toList(),
+        leader = json['leader'] == null
+            ? null
+            : LeaderView.fromJson(json['leader'] as Map<String, dynamic>),
+        round = json['round'] == null
+            ? null
+            : PublicRoundState.fromJson(json['round'] as Map<String, dynamic>),
+        finalRanking = (json['final_ranking'] as List?)
+            ?.map((r) => RankedPlayer.fromJson(r as Map<String, dynamic>))
+            .toList(),
+        viewerCount = json['viewer_count'] as int? ?? 0;
+
+  bool get isFinished => phase == 'finished';
+}
+
+class LiveRoomCard {
+  final String roomCode;
+  final String gameId;
+  final String hostNickname;
+  final int playerCount;
+  final int maxPlayers;
+  final String phase;
+  final int viewerCount;
+  final int energy;
+
+  LiveRoomCard.fromJson(Map<String, dynamic> json)
+      : roomCode = json['room_code'] as String,
+        gameId = json['game_id'] as String,
+        hostNickname = json['host_nickname'] as String? ?? 'Host',
+        playerCount = json['player_count'] as int? ?? 0,
+        maxPlayers = json['max_players'] as int? ?? 0,
+        phase = json['phase'] as String? ?? 'live',
+        viewerCount = json['viewer_count'] as int? ?? 0,
+        energy = json['energy'] as int? ?? 0;
 }
 
 class VoiceNoteMessage extends ServerMessage {
@@ -674,6 +872,8 @@ class RoomView {
   final RoundSchedule roundSchedule;
   final String roundScheduleSummary;
   final bool dealerTotalRestriction;
+  final bool spectatorsAllowed;
+  final bool listOnLiveNow;
   final List<SeatView> seats;
 
   RoomView.fromJson(Map<String, dynamic> json)
@@ -692,6 +892,8 @@ class RoomView {
             (json['round_schedule_summary'] as String?) ?? 'Automatic',
         dealerTotalRestriction =
             json['dealer_total_restriction'] as bool? ?? false,
+        spectatorsAllowed = json['spectators_allowed'] as bool? ?? false,
+        listOnLiveNow = json['list_on_live_now'] as bool? ?? false,
         seats = (json['seats'] as List)
             .map((s) => SeatView.fromJson(s as Map<String, dynamic>))
             .toList();

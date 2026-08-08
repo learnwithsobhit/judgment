@@ -165,6 +165,43 @@ class ApiClient {
     return Uri.parse('$ws/api/v1/games/$gameId/ws?token=$token');
   }
 
+  Uri watchSocketUri(String gameId) {
+    final ws = baseUrl.replaceFirst(RegExp('^http'), 'ws');
+    return Uri.parse('$ws/api/v1/games/$gameId/watch-ws?token=$token');
+  }
+
+  Future<RoomView> updateAudienceSettings(
+    String roomRef, {
+    required bool spectatorsAllowed,
+    bool listOnLiveNow = false,
+  }) async =>
+      RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/audience-settings', {
+        'spectators_allowed': spectatorsAllowed,
+        'list_on_live_now': listOnLiveNow,
+      }));
+
+  Future<({String gameId, String roomCode, String roomId})> watchRoom(
+    String roomRef, {
+    String? nickname,
+  }) async {
+    final json = await _post('/api/v1/rooms/$roomRef/watch', {
+      'nickname': ?nickname,
+    });
+    return (
+      gameId: json['game_id'] as String,
+      roomCode: json['room_code'] as String,
+      roomId: json['room_id'] as String,
+    );
+  }
+
+  Future<List<LiveRoomCard>> listLiveRooms() async {
+    final json = await _get('/api/v1/live-rooms');
+    final rooms = json['rooms'] as List? ?? const [];
+    return rooms
+        .map((r) => LiveRoomCard.fromJson(r as Map<String, dynamic>))
+        .toList();
+  }
+
   /// Curated FAQ / reason-code explanations. Safe to call when AI is degraded —
   /// the server falls back to deterministic templates.
   Future<ExplanationResponse> queryRules({

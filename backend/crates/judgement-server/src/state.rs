@@ -71,6 +71,10 @@ pub struct Room {
     pub round_schedule: RoundSchedule,
     /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
     pub dealer_total_restriction: bool,
+    /// Host allows audience watchers (watch link / watch WS).
+    pub spectators_allowed: bool,
+    /// Appear on public Live Now (requires spectators_allowed).
+    pub list_on_live_now: bool,
 }
 
 impl Room {
@@ -108,6 +112,8 @@ impl Room {
             round_schedule: self.round_schedule.clone(),
             round_schedule_summary: self.round_schedule.summary(self.max_players),
             dealer_total_restriction: self.dealer_total_restriction,
+            spectators_allowed: self.spectators_allowed,
+            list_on_live_now: self.list_on_live_now && self.spectators_allowed,
             seats,
         }
     }
@@ -119,6 +125,8 @@ impl Room {
 pub struct GameInfo {
     pub room_id: RoomId,
     pub players: HashMap<SessionId, PlayerId>,
+    /// Sessions authorised to open a watch WebSocket (not seated players).
+    pub spectators: HashMap<SessionId, String>,
     pub commands: mpsc::Sender<ActorMessage>,
 }
 
@@ -171,8 +179,10 @@ pub struct AppState {
     pub explanations: Arc<ExplanationService>,
     pub http_limiter: HttpRateLimiter,
     pub metrics: Arc<Metrics>,
-    /// Approximate active WebSocket count (Phase 9 gauges).
+    /// Approximate active **player** WebSocket count (Phase 9 gauges).
     pub active_websockets: std::sync::atomic::AtomicU64,
+    /// Approximate active **spectator** WebSocket count (isolated from player admission).
+    pub active_spectator_websockets: std::sync::atomic::AtomicU64,
     /// Per-room last host-restart time (load guard).
     pub restart_limits: Mutex<HashMap<RoomId, Instant>>,
 }
@@ -195,6 +205,7 @@ impl AppState {
             http_limiter: HttpRateLimiter::new(HttpLimitConfig::default()),
             metrics: Arc::new(Metrics::default()),
             active_websockets: std::sync::atomic::AtomicU64::new(0),
+            active_spectator_websockets: std::sync::atomic::AtomicU64::new(0),
             restart_limits: Mutex::default(),
         }
     }

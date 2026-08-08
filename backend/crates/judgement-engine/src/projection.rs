@@ -272,3 +272,124 @@ fn project_leader(scores: &[PlayerScore]) -> Option<LeaderView> {
         margin: best.total_score - second,
     })
 }
+
+/// Public seat row for spectators (never includes hand cards).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpectatorSeatView {
+    pub player_id: PlayerId,
+    pub nickname: String,
+    pub seat: u8,
+    pub card_count: usize,
+    pub bid: Option<u8>,
+    pub tricks_won: u8,
+    pub connection_status: ConnectionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+}
+
+/// Hand-free table projection for audience watchers (no `own_hand` / legal actions).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpectatorGameView {
+    pub game_id: GameId,
+    pub state_version: u64,
+    pub phase: GamePhase,
+    pub seats: Vec<SpectatorSeatView>,
+    pub current_trick: Vec<PlayedCard>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_completed_trick: Option<CompletedTrickView>,
+    pub trump: Option<Suit>,
+    pub trump_card: Option<Card>,
+    pub current_turn: Option<PlayerId>,
+    pub bids: Vec<PublicBid>,
+    pub scores: Vec<PlayerScore>,
+    #[serde(default)]
+    pub round_history: Vec<RoundScoreView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader: Option<LeaderView>,
+    pub round: Option<PublicRoundState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_ranking: Option<Vec<RankedPlayer>>,
+    pub viewer_count: u32,
+}
+
+/// Build the public spectator projection (never includes hands or legal actions).
+pub(crate) fn project_spectator(state: &InternalGameState, viewer_count: u32) -> SpectatorGameView {
+    let round = state.current_round.as_ref();
+    let total_rounds = state.rules.round_pattern.rounds().len();
+
+    let seats = state
+        .players
+        .iter()
+        .map(|p| SpectatorSeatView {
+            player_id: p.id,
+            nickname: p.nickname.clone(),
+            seat: p.seat,
+            card_count: round.and_then(|r| r.hands.get(&p.id)).map_or(0, Vec::len),
+            bid: round.and_then(|r| r.bids.get(&p.id)).copied(),
+            tricks_won: round
+                .and_then(|r| r.tricks_won.get(&p.id))
+                .copied()
+                .unwrap_or(0),
+            connection_status: p.connection_status,
+            avatar_id: p.avatar_id.clone(),
+        })
+        .collect();
+
+    let bids = round
+        .map(|r| {
+            r.bidding_order
+                .iter()
+                .filter_map(|&p| r.bids.get(&p).map(|&bid| PublicBid { player_id: p, bid }))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let scores: Vec<PlayerScore> = state
+        .players
+        .iter()
+        .map(|p| PlayerScore {
+            player_id: p.id,
+            total_score: state.score_table.total_score(p.id),
+        })
+        .collect();
+
+    let current_trick = round.map(|r| r.current_trick.clone()).unwrap_or_default();
+    let last_completed_trick = round.and_then(|r| {
+        if !current_trick.is_empty() {
+            return None;
+        }
+        r.completed_tricks.last().map(|t| CompletedTrickView {
+            trick_index: t.trick_index,
+            winner_id: t.winner,
+            plays: t.plays.clone(),
+        })
+    });
+
+    let final_ranking = (state.phase == GamePhase::Finished)
+        .then(|| state.score_table.final_ranking(&state.player_ids()));
+
+    SpectatorGameView {
+        game_id: state.game_id,
+        state_version: state.version,
+        phase: state.phase,
+        seats,
+        current_trick,
+        last_completed_trick,
+        trump: state.trump_suit(),
+        trump_card: state.trump_card,
+        current_turn: round.map(|r| r.current_turn),
+        bids,
+        round_history: project_round_history(state),
+        leader: project_leader(&scores),
+        scores,
+        round: round.map(|r| PublicRoundState {
+            round_index: r.round_index,
+            total_rounds,
+            cards_per_player: r.cards_per_player,
+            dealer: state.dealer,
+            tricks_completed: r.completed_tricks.len() as u32,
+        }),
+        final_ranking,
+        viewer_count,
+    }
+}

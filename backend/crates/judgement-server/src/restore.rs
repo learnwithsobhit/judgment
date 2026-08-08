@@ -70,6 +70,8 @@ pub async fn restore_from_store(
                     first_trump: stored.first_trump,
                     round_schedule: stored.round_schedule,
                     dealer_total_restriction: stored.dealer_total_restriction,
+                    spectators_allowed: false,
+                    list_on_live_now: false,
                 },
             );
         }
@@ -170,6 +172,7 @@ fn spawn_restored_actor(
         GameInfo {
             room_id: game.room_id,
             players,
+            spectators: HashMap::new(),
             commands,
         },
     );

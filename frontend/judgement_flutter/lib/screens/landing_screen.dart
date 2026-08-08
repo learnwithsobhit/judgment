@@ -11,6 +11,7 @@ import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/legal_consent_checkbox.dart';
+import 'live_now_screen.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
 import 'table_screen.dart';
@@ -623,6 +624,15 @@ class _LandingScreenState extends State<LandingScreen> {
                 const LegalFooterLinks(),
                 if (!_fromLink) ...[
                   const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => const LiveNowScreen(),
+                      ));
+                    },
+                    icon: const Icon(Icons.visibility_outlined),
+                    label: const Text('Watch live'),
+                  ),
                   TextButton(
                     onPressed: () {
                       Navigator.of(context).push(MaterialPageRoute(

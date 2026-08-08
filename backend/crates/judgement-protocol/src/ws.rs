@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use judgement_domain::{ActionId, GameError, GameId, PlayerId};
-use judgement_engine::PlayerGameView;
+use judgement_engine::{PlayerGameView, SpectatorGameView};
 
 /// Every client command travels in this envelope (PLAN.md §13.4).
 ///
@@ -53,6 +53,18 @@ pub enum ClientCommand {
         duration_ms: u32,
         audio_b64: String,
     },
+    /// Audience-only text comment (spectators only; never mutates game).
+    AudienceComment { text: String },
+    /// Soft cheer reaction from audience → player table blasts.
+    AudienceReaction { emoji: String },
+    /// Audience-only voice note (spectators only).
+    AudienceVoiceNote {
+        mime: String,
+        duration_ms: u32,
+        audio_b64: String,
+    },
+    /// Audience winner prediction (upsert until last round starts).
+    SetWinnerPrediction { player_id: PlayerId },
 }
 
 /// Why a command was rejected: either a domain rule or a protocol-level
@@ -73,6 +85,8 @@ pub enum RejectReason {
     /// The command is not available in this phase of the MVP (e.g. lobby
     /// commands over the game socket).
     UnsupportedCommand,
+    /// Audience messaging / prediction rate limit exceeded.
+    AudienceRateLimited { channel: String },
 }
 
 impl RejectReason {
@@ -82,6 +96,22 @@ impl RejectReason {
             RejectReason::QueueFull | RejectReason::PersistUnavailable
         )
     }
+}
+
+/// Aggregate crowd winner-prediction tally (shared with players + audience).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrowdPredictionTally {
+    pub player_id: PlayerId,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrowdPredictionView {
+    pub locked: bool,
+    pub tallies: Vec<CrowdPredictionTally>,
+    pub total_voters: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub my_pick: Option<PlayerId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -109,6 +139,26 @@ pub enum ServerMessage {
     /// Full personalised snapshot after every accepted command
     /// (locked decision 6 — no deltas in MVP).
     StateSnapshot { view: PlayerGameView },
+    /// Hand-free snapshot for audience WebSocket clients.
+    SpectatorStateSnapshot { view: SpectatorGameView },
+    /// Coalesced crowd prediction update (players + spectators).
+    CrowdPredictionUpdated { prediction: CrowdPredictionView },
+    /// Audience-only comment fan-out.
+    AudienceCommentEvent {
+        from_nickname: String,
+        text: String,
+        ttl_ms: u32,
+    },
+    /// Audience-only voice note fan-out.
+    AudienceVoiceNoteEvent {
+        from_nickname: String,
+        mime: String,
+        duration_ms: u32,
+        audio_b64: Arc<str>,
+        ttl_ms: u32,
+    },
+    /// Host revoked spectating or game ended for watchers.
+    SpectatingClosed { reason: String },
     PlayerConnected { player_id: PlayerId },
     PlayerDisconnected { player_id: PlayerId },
     HostChanged { new_host: PlayerId },
@@ -161,6 +211,11 @@ pub enum ServerMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sound_id: Option<String>,
         ttl_ms: u32,
+        /// True when the blast originated from an audience watcher.
+        #[serde(default)]
+        from_audience: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audience_nickname: Option<String>,
     },
     /// Ephemeral freeform voice note. Not stored in engine or DB.
     VoiceNote {

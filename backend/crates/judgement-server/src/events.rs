@@ -689,6 +689,8 @@ pub async fn open_lobby(
         first_trump,
         round_schedule: round_schedule.clone(),
         dealer_total_restriction: false,
+        spectators_allowed: false,
+        list_on_live_now: false,
     };
     let room_view = room.view();
     state
