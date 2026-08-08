@@ -22,6 +22,12 @@ const ALLOWED_VOICE_MIMES: &[&str] = &[
     "audio/webm;codecs=opus",
     "audio/ogg",
     "audio/ogg;codecs=opus",
+    // Native Android record package commonly emits AAC-in-MP4 or WAV.
+    "audio/mp4",
+    "audio/aac",
+    "audio/m4a",
+    "audio/wav",
+    "audio/x-wav",
 ];
 
 pub fn is_allowed_sound(id: &str) -> bool {
@@ -127,12 +133,16 @@ pub fn validate_voice_note(mime: &str, duration_ms: u32, audio_b64: &str) -> Res
     if !is_valid_b64_alphabet(audio_b64) {
         return Err("voice payload is not valid base64".into());
     }
-    let prefix = b64_prefix(audio_b64, 4).ok_or_else(|| "voice payload empty".to_string())?;
-    // Light container sniff: WebM/EBML or Ogg.
+    let prefix = b64_prefix(audio_b64, 12).ok_or_else(|| "voice payload empty".to_string())?;
+    // Light container sniff: WebM/EBML, Ogg, WAV/RIFF, or MP4/ftyp (AAC).
     let ok_magic = prefix.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) // EBML / WebM
-        || prefix.starts_with(b"OggS");
+        || prefix.starts_with(b"OggS")
+        || prefix.starts_with(b"RIFF")
+        || (prefix.len() >= 8 && &prefix[4..8] == b"ftyp")
+        || prefix.starts_with(&[0xFF, 0xF1]) // AAC ADTS
+        || prefix.starts_with(&[0xFF, 0xF9]);
     if !ok_magic {
-        return Err("voice payload must be WebM or Ogg/Opus".into());
+        return Err("voice payload must be WebM, Ogg/Opus, WAV, or AAC/MP4".into());
     }
     Ok(())
 }
@@ -158,5 +168,8 @@ mod tests {
         let huge = format!("GkXf{}", "A".repeat(MAX_VOICE_B64_BYTES));
         assert!(validate_voice_note("audio/webm", 1200, &huge).is_err());
         assert!(validate_voice_note("audio/webm", 1200, "!!!!").is_err());
+        // RIFF....WAVE → WAV
+        let wav = "UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+        assert!(validate_voice_note("audio/wav", 1200, wav).is_ok());
     }
 }

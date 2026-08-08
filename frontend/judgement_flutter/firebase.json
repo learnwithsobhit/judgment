@@ -266,21 +266,29 @@
       "redirects": [
         {
           "source": "/",
-          "destination": "/index.html?_b=20260805071741-ef07162",
+          "destination": "/index.html?_b=20260808030829-4a28e2d",
           "type": 302
         },
         {
           "source": "/r/:code",
-          "destination": "/index.html?_b=20260805071741-ef07162&room=:code",
+          "destination": "/index.html?_b=20260808030829-4a28e2d&room=:code",
           "type": 302
         },
         {
           "source": "/e/:slug",
-          "destination": "/index.html?_b=20260805071741-ef07162&event=:slug",
+          "destination": "/index.html?_b=20260808030829-4a28e2d&event=:slug",
           "type": 302
         }
       ],
       "rewrites": [
+        {
+          "source": "/privacy",
+          "destination": "/privacy/index.html"
+        },
+        {
+          "source": "/terms",
+          "destination": "/terms/index.html"
+        },
         {
           "source": "**",
           "destination": "/index.html"
@@ -554,21 +562,29 @@
       "redirects": [
         {
           "source": "/",
-          "destination": "/index.html?_b=20260805071741-ef07162",
+          "destination": "/index.html?_b=20260808030829-4a28e2d",
           "type": 302
         },
         {
           "source": "/r/:code",
-          "destination": "/index.html?_b=20260805071741-ef07162&room=:code",
+          "destination": "/index.html?_b=20260808030829-4a28e2d&room=:code",
           "type": 302
         },
         {
           "source": "/e/:slug",
-          "destination": "/index.html?_b=20260805071741-ef07162&event=:slug",
+          "destination": "/index.html?_b=20260808030829-4a28e2d&event=:slug",
           "type": 302
         }
       ],
       "rewrites": [
+        {
+          "source": "/privacy",
+          "destination": "/privacy/index.html"
+        },
+        {
+          "source": "/terms",
+          "destination": "/terms/index.html"
+        },
         {
           "source": "**",
           "destination": "/index.html"

@@ -1,0 +1,54 @@
+Running `(cd /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/; TMPDIR=/var/folders/dx/8hyj9xbd23v_bbmk1fgyw12r0000gn/T/ PATH=/Users/shobhit/.antigravity/antigravity/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/Applications/Cursor.app/Contents/Resources/app/node_modules/@vscode/ripgrep/bin:/Users/shobhit/.antigravity/antigravity/bin:/Users/shobhit/.cargo/bin:/Users/shobhit/Downloads/flutter/bin:/opt/homebrew/anaconda3/bin:/Users/shobhit/Downloads/flutter/bin:/opt/homebrew/anaconda3/bin HOME=/Users/shobhit /Users/shobhit/Downloads/flutter/bin/cache/dart-sdk/bin/dart --packages=/Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/package_config.json /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/objective_c/7ad245dadc/hook.dill --config=/Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/objective_c/7ad245dadc/input.json )`.
+INFO: 2026-08-06 15:37:22.353957: Using compiler /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang from BuildInput.cCompiler.cc.
+
+INFO: 2026-08-06 15:37:22.357114: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/include/dart_api_dl.c -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/include/dart_api_dl.c.o
+
+INFO: 2026-08-06 15:37:22.358007: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/objective_c.c -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c.c.o
+
+INFO: 2026-08-06 15:37:22.358164: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -x objective-c -fobjc-arc -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/input_stream_adapter.m -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/input_stream_adapter.m.o
+
+INFO: 2026-08-06 15:37:22.358288: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -x objective-c -fobjc-arc -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/objective_c.m -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c.m.o
+
+INFO: 2026-08-06 15:37:22.358397: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -x objective-c -fobjc-arc -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/observer.m -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/observer.m.o
+
+INFO: 2026-08-06 15:37:22.358535: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -x objective-c -fobjc-arc -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/ns_number.m -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/ns_number.m.o
+
+INFO: 2026-08-06 15:37:22.358838: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -x objective-c -fobjc-arc -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/protocol.m -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/protocol.m.o
+
+INFO: 2026-08-06 15:37:22.358967: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 -x objective-c -fobjc-arc -c /Users/shobhit/.pub-cache/hosted/pub.dev/objective_c-9.5.0/src/objective_c_bindings_generated.m -fpic -gline-tables-only -I src -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c_bindings_generated.m.o
+
+INFO: 2026-08-06 15:37:22.614843: 
+INFO: 2026-08-06 15:37:22.614973: 
+INFO: 2026-08-06 15:37:22.615020: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c.c.o
+
+INFO: 2026-08-06 15:37:22.615408: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/include/dart_api_dl.c.o
+
+INFO: 2026-08-06 15:37:22.619724: 
+INFO: 2026-08-06 15:37:22.619759: 
+INFO: 2026-08-06 15:37:22.619771: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/observer.m.o
+
+INFO: 2026-08-06 15:37:22.622529: 
+INFO: 2026-08-06 15:37:22.622567: 
+INFO: 2026-08-06 15:37:22.622578: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/protocol.m.o
+
+INFO: 2026-08-06 15:37:22.839259: 
+INFO: 2026-08-06 15:37:22.839297: 
+INFO: 2026-08-06 15:37:22.839308: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/ns_number.m.o
+
+INFO: 2026-08-06 15:37:22.848399: 
+INFO: 2026-08-06 15:37:22.848439: 
+INFO: 2026-08-06 15:37:22.848449: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c.m.o
+INFO: 2026-08-06 15:37:22.848493: 
+INFO: 2026-08-06 15:37:22.848504: 
+INFO: 2026-08-06 15:37:22.848513: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/input_stream_adapter.m.o
+
+INFO: 2026-08-06 15:37:22.879586: 
+INFO: 2026-08-06 15:37:22.879627: 
+INFO: 2026-08-06 15:37:22.879637: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c_bindings_generated.m.o
+
+INFO: 2026-08-06 15:37:22.879946: Running: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -shared -Wl,-encryptable -undefined dynamic_lookup -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -target arm64-apple-darwin -mmacos-version-min=13 /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/include/dart_api_dl.c.o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c.c.o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/input_stream_adapter.m.o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c.m.o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/observer.m.o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/ns_number.m.o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/protocol.m.o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/obj/src/objective_c_bindings_generated.m.o -o /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/objective_c.dylib
+
+INFO: 2026-08-06 15:37:22.988716: 
+INFO: 2026-08-06 15:37:22.988765: 
+INFO: 2026-08-06 15:37:22.988777: Generated /Users/shobhit/MyDevelopment/new_prject/judgement/frontend/shell_flutter/.dart_tool/hooks_runner/shared/objective_c/build/7ad245dadc/objective_c.dylib
+

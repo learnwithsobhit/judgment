@@ -1,16 +1,24 @@
 // Shareable room join URL helpers (`/r/{CODE}`).
 
-/// Production web origin used when [Uri.base] is not http(s) (e.g. unit tests).
-const kDefaultWebOrigin = 'https://judgment-lws-260731.web.app';
+/// Web origin for share links when [Uri.base] is not http(s) (native Android/iOS).
+///
+/// Bake at build time with `--dart-define=PUBLIC_WEB_ORIGIN=...` so join URLs
+/// match the API stack (Fly prod vs Railway test).
+const String kDefaultWebOrigin = String.fromEnvironment(
+  'PUBLIC_WEB_ORIGIN',
+  defaultValue: 'https://judgment-lws-260731.web.app',
+);
 
 /// Current app origin, or [kDefaultWebOrigin] outside a browser http(s) context.
 String webOrigin({String? override}) {
-  if (override != null && override.isNotEmpty) return override;
+  if (override != null && override.isNotEmpty) {
+    return override.replaceAll(RegExp(r'/+$'), '');
+  }
   final base = Uri.base;
   if (base.scheme == 'http' || base.scheme == 'https') {
     return base.origin;
   }
-  return kDefaultWebOrigin;
+  return kDefaultWebOrigin.replaceAll(RegExp(r'/+$'), '');
 }
 
 /// Normalize a path/query room code for join (uppercase, strip non-alnum).

@@ -1,5 +1,16 @@
-String? readLegalAcceptedVersion() => null;
+/// Native (IO) legal consent persistence.
+library;
 
-void writeLegalAcceptedVersion(String version) {}
+import 'native_kv_store.dart';
 
-void clearLegalAcceptedVersion() {}
+const _key = 'judgement_legal_accepted_v';
+
+String? readLegalAcceptedVersion() => NativeKvStore.getString(_key);
+
+void writeLegalAcceptedVersion(String version) {
+  NativeKvStore.setString(_key, version);
+}
+
+void clearLegalAcceptedVersion() {
+  NativeKvStore.remove(_key);
+}
