@@ -81,6 +81,13 @@ class GameController extends ChangeNotifier {
   /// True while auto-retrying a durable command after PersistUnavailable/QueueFull.
   bool savingInProgress = false;
 
+  /// Distinguishes stale resync from persist retry in the progress banner.
+  bool _resyncing = false;
+
+  /// Label for the in-table save/sync progress banner.
+  String get progressBannerLabel =>
+      _resyncing ? 'Syncing…' : 'Saving table…';
+
   /// Most recent rejection to surface to the user (cleared after display).
   String? lastRejection;
 
@@ -319,20 +326,21 @@ class GameController extends ChangeNotifier {
             (reasonKind == 'persist_unavailable' || reasonKind == 'queue_full') &&
             _pendingAction != null &&
             pendingActionId != null) {
+          // Progress only — do not set lastRejection (avoids error SnackBar).
+          _resyncing = false;
           savingInProgress = true;
-          lastRejection = 'Saving table…';
           _notify();
           _schedulePersistRetry();
           return;
         }
-        // Version skew: resync then resend same action_id with new expected version.
-        if (_pendingAction != null &&
-            pendingActionId != null &&
-            (reasonKind == 'game' ||
-                (errorCode?.toLowerCase().contains('stale') ?? false) ||
-                message.toLowerCase().contains('stale'))) {
+        // Version skew only (not every kind=game reject). Resync, then resend
+        // with the updated expected_state_version. Server also pushes a snapshot
+        // on STALE_STATE rejects.
+        final isStale = (errorCode?.toLowerCase().contains('stale') ?? false) ||
+            message.toLowerCase().contains('stale');
+        if (_pendingAction != null && pendingActionId != null && isStale) {
+          _resyncing = true;
           savingInProgress = true;
-          lastRejection = 'Syncing…';
           _notify();
           _sendAction({'type': 'request_state_sync'});
           _schedulePersistRetry(delayMs: 350);
@@ -809,6 +817,7 @@ class GameController extends ChangeNotifier {
     _pendingAction = Map<String, dynamic>.from(action);
     _persistRetryCount = 0;
     savingInProgress = false;
+    _resyncing = false;
     _notify();
     _send(actionId: actionId, stateVersion: v.stateVersion, action: action);
   }
@@ -818,8 +827,17 @@ class GameController extends ChangeNotifier {
     _pendingAction = null;
     _persistRetryCount = 0;
     savingInProgress = false;
+    _resyncing = false;
     _persistRetryTimer?.cancel();
     _persistRetryTimer = null;
+  }
+
+  /// User dismissed a stuck save/sync — drop the pending command.
+  void cancelPendingSave() {
+    _clearPendingCommand();
+    lastRejection = null;
+    lastRejectionCode = null;
+    _notify();
   }
 
   void _schedulePersistRetry({int delayMs = 600}) {
@@ -847,8 +865,8 @@ class GameController extends ChangeNotifier {
       return;
     }
     _persistRetryCount += 1;
+    _resyncing = false;
     savingInProgress = true;
-    lastRejection = 'Saving table…';
     _notify();
     _send(
       actionId: actionId,

@@ -112,6 +112,14 @@ class _TableScreenState extends State<TableScreen> {
     final reasonCode = controller.lastRejectionCode;
     if (rejection != null && mounted) {
       controller.clearRejection();
+      // Transient save/sync status uses the top progress banner, not a sticky
+      // error SnackBar (which has no Cancel and keeps resurfacing on retries).
+      if (rejection == 'Syncing…' ||
+          rejection == 'Saving table…' ||
+          rejection.startsWith('Syncing') ||
+          rejection.startsWith('Saving table')) {
+        return;
+      }
       if (reasonCode == 'CAPACITY_FULL') {
         showDialog<void>(
           context: context,
@@ -274,13 +282,19 @@ class _TableScreenState extends State<TableScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                           const SizedBox(width: 10),
-                          Text(
-                            controller.lastRejection ?? 'Saving table…',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.9),
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
+                          Expanded(
+                            child: Text(
+                              controller.progressBannerLabel,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
                             ),
+                          ),
+                          TextButton(
+                            onPressed: controller.cancelPendingSave,
+                            child: const Text('Cancel'),
                           ),
                         ],
                       ),

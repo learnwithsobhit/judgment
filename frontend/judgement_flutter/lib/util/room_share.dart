@@ -1,15 +1,22 @@
 // Shareable room join URL helpers (`/r/{CODE}`).
 
-/// Production web origin used when [Uri.base] is not http(s) (e.g. unit tests).
+/// Fallback when neither [Uri.base] nor `--dart-define=PUBLIC_WEB_ORIGIN` apply.
 const kDefaultWebOrigin = 'https://judgment-lws-260731.web.app';
 
-/// Current app origin, or [kDefaultWebOrigin] outside a browser http(s) context.
+/// Build-time web origin for native (Android/iOS) share/join links.
+const String kPublicWebOrigin = String.fromEnvironment(
+  'PUBLIC_WEB_ORIGIN',
+  defaultValue: '',
+);
+
+/// Current app origin, or build-time / default origin outside a browser http(s) context.
 String webOrigin({String? override}) {
   if (override != null && override.isNotEmpty) return override;
   final base = Uri.base;
   if (base.scheme == 'http' || base.scheme == 'https') {
     return base.origin;
   }
+  if (kPublicWebOrigin.isNotEmpty) return kPublicWebOrigin;
   return kDefaultWebOrigin;
 }
 

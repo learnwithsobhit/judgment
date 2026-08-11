@@ -23,6 +23,23 @@ pub const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 pub const LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
 
+/// Why a live game WebSocket ended — logged at disconnect for RCA.
+#[derive(Debug, Clone, Copy)]
+enum WsDisconnectReason {
+    /// No inbound frame (including Pong) within [`LIVENESS_TIMEOUT`].
+    LivenessTimeout,
+    /// Client sent a WebSocket Close frame.
+    ClientClose,
+    /// Underlying socket read failed.
+    SocketError,
+    /// Stream ended without an explicit Close frame (proxy/network drop).
+    StreamEnded,
+    /// Game actor command channel closed (game gone / actor dead).
+    ActorClosed,
+    /// Connect handoff to the actor failed before the read loop started.
+    ActorConnectFailed,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct WsQuery {
     token: String,
@@ -99,11 +116,24 @@ async fn handle_socket(
         .await
         .is_err()
     {
+        tracing::warn!(
+            %game_id,
+            %player_id,
+            reason = ?WsDisconnectReason::ActorConnectFailed,
+            "websocket disconnected"
+        );
+        let _ = state.active_websockets.fetch_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |n| Some(n.saturating_sub(1)),
+        );
         return;
     }
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
+    let writer_game_id = game_id;
+    let writer_player_id = player_id;
     let writer = tokio::spawn(async move {
         let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
         loop {
@@ -112,11 +142,23 @@ async fn handle_socket(
                     let Some(message) = message else { break };
                     let Ok(text) = serde_json::to_string(&message) else { break };
                     if ws_tx.send(Message::Text(text.into())).await.is_err() {
+                        tracing::info!(
+                            game_id = %writer_game_id,
+                            player_id = %writer_player_id,
+                            reason = "outbound_send_failed",
+                            "websocket writer stopping"
+                        );
                         break;
                     }
                 }
                 _ = heartbeat.tick() => {
                     if ws_tx.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        tracing::info!(
+                            game_id = %writer_game_id,
+                            player_id = %writer_player_id,
+                            reason = "ping_send_failed",
+                            "websocket writer stopping"
+                        );
                         break;
                     }
                 }
@@ -125,22 +167,31 @@ async fn handle_socket(
     });
 
     let mut last_seen = Instant::now();
-    loop {
+    let (disconnect_reason, disconnect_detail) = loop {
         let frame = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()).await;
         let message = match frame {
             Err(_elapsed) => {
-                if last_seen.elapsed() > LIVENESS_TIMEOUT {
-                    tracing::debug!(%player_id, "closing websocket: liveness timeout");
-                    break;
+                let idle = last_seen.elapsed();
+                if idle > LIVENESS_TIMEOUT {
+                    break (
+                        WsDisconnectReason::LivenessTimeout,
+                        format!("idle_ms={}", idle.as_millis()),
+                    );
                 }
                 continue;
             }
-            Ok(None) => break,
+            Ok(None) => {
+                break (
+                    WsDisconnectReason::StreamEnded,
+                    "read stream ended".into(),
+                );
+            }
             Ok(Some(Err(error))) => {
-                if error.to_string().to_lowercase().contains("capacity") {
+                let error_text = error.to_string();
+                if error_text.to_lowercase().contains("capacity") {
                     send_rejection(&outbound_tx, None, RejectReason::MessageTooLarge);
                 }
-                break;
+                break (WsDisconnectReason::SocketError, error_text);
             }
             Ok(Some(Ok(message))) => message,
         };
@@ -171,13 +222,37 @@ async fn handle_socket(
                     Err(mpsc::error::TrySendError::Full(_)) => {
                         send_rejection(&outbound_tx, Some(action_id), RejectReason::QueueFull);
                     }
-                    Err(mpsc::error::TrySendError::Closed(_)) => break,
+                    Err(mpsc::error::TrySendError::Closed(_)) => {
+                        break (
+                            WsDisconnectReason::ActorClosed,
+                            "actor command channel closed".into(),
+                        );
+                    }
                 }
             }
-            Message::Close(_) => break,
+            Message::Close(frame) => {
+                let detail = match frame {
+                    Some(frame) => format!(
+                        "code={} reason={}",
+                        u16::from(frame.code),
+                        frame.reason
+                    ),
+                    None => "close frame without code".into(),
+                };
+                break (WsDisconnectReason::ClientClose, detail);
+            }
             _ => {}
         }
-    }
+    };
+
+    tracing::info!(
+        %game_id,
+        %player_id,
+        reason = ?disconnect_reason,
+        detail = %disconnect_detail,
+        idle_ms = last_seen.elapsed().as_millis(),
+        "websocket disconnected"
+    );
 
     let _ = commands.send(ActorMessage::Disconnect { player_id }).await;
     writer.abort();
