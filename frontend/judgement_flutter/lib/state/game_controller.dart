@@ -66,9 +66,32 @@ class GameController extends ChangeNotifier {
   bool _suppressReconnect = false;
   /// Set when the player confirmed Leave so socket teardown is not logged as network drop.
   bool _intentionalLeave = false;
+  /// When the current socket first looked unstable; used to debounce chrome.
+  DateTime? _connectionUnstableSince;
 
   PlayerGameView? view;
   GameConnectionState connection = GameConnectionState.connecting;
+
+  static const reconnectChromeDelay = Duration(milliseconds: 1500);
+
+  /// Connection chrome for the table. Sub-1.5s blips stay green when the
+  /// last snapshot is still on screen.
+  GameConnectionState get displayedConnection {
+    if (connection == GameConnectionState.connected) {
+      return GameConnectionState.connected;
+    }
+    if (view == null) {
+      return connection;
+    }
+    final since = _connectionUnstableSince;
+    if (since == null) {
+      return connection;
+    }
+    if (DateTime.now().difference(since) < reconnectChromeDelay) {
+      return GameConnectionState.connected;
+    }
+    return connection;
+  }
 
   /// action_id of the command awaiting acknowledgement, if any.
   String? pendingActionId;
@@ -234,6 +257,7 @@ class GameController extends ChangeNotifier {
       _socket = socket;
       _subscription = socket.messages.listen(_handleMessage);
       connection = GameConnectionState.connected;
+      _connectionUnstableSince = null;
       _reconnectAttempts = 0;
       // A fresh personalised snapshot is pushed on connect; ask explicitly
       // as well in case this is a resumed session.
@@ -281,6 +305,7 @@ class GameController extends ChangeNotifier {
     // Unstick bid/play if the socket died before CommandAccepted.
     pendingActionId = null;
     connection = GameConnectionState.disconnected;
+    _connectionUnstableSince ??= DateTime.now();
     _notify();
     if (_suppressReconnect || gameAborted || (view?.isFinished ?? false)) {
       return;
@@ -440,9 +465,9 @@ class GameController extends ChangeNotifier {
       case BotTookOver() ||
             PlayerResumedControl() ||
             PlayerConnected() ||
-            PlayerDisconnected():
-        _notify();
-      case UnknownMessage():
+            PlayerDisconnected() ||
+            KeepAlive() ||
+            UnknownMessage():
         break;
     }
   }

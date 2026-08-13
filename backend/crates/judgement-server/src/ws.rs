@@ -20,7 +20,7 @@ use crate::persist::stored_session;
 use crate::state::AppState;
 
 pub const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 pub const LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Why a live game WebSocket ended — logged at disconnect for RCA.
@@ -38,6 +38,19 @@ enum WsDisconnectReason {
     ActorClosed,
     /// Connect handoff to the actor failed before the read loop started.
     ActorConnectFailed,
+}
+
+impl WsDisconnectReason {
+    fn metrics_label(self) -> &'static str {
+        match self {
+            Self::LivenessTimeout => "liveness",
+            Self::ClientClose => "client_close",
+            Self::SocketError => "socket_error",
+            Self::StreamEnded => "stream_ended",
+            Self::ActorClosed => "actor_closed",
+            Self::ActorConnectFailed => "actor_connect_failed",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,6 +135,9 @@ async fn handle_socket(
             reason = ?WsDisconnectReason::ActorConnectFailed,
             "websocket disconnected"
         );
+        state
+            .metrics
+            .record_ws_disconnect(WsDisconnectReason::ActorConnectFailed.metrics_label());
         let _ = state.active_websockets.fetch_update(
             std::sync::atomic::Ordering::Relaxed,
             std::sync::atomic::Ordering::Relaxed,
@@ -136,6 +152,7 @@ async fn handle_socket(
     let writer_player_id = player_id;
     let writer = tokio::spawn(async move {
         let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+        heartbeat.tick().await; // skip immediate fire; first keepalive at HEARTBEAT_INTERVAL
         loop {
             tokio::select! {
                 message = outbound_rx.recv() => {
@@ -153,10 +170,23 @@ async fn handle_socket(
                 }
                 _ = heartbeat.tick() => {
                     if ws_tx.send(Message::Ping(Vec::new().into())).await.is_err() {
-                        tracing::info!(
+                        tracing::debug!(
                             game_id = %writer_game_id,
                             player_id = %writer_player_id,
                             reason = "ping_send_failed",
+                            "websocket writer stopping"
+                        );
+                        break;
+                    }
+                    // Text frame so HTTP/2 / Railway edges count traffic (Ping is often ignored).
+                    let Ok(keep_alive) = serde_json::to_string(&ServerMessage::KeepAlive) else {
+                        break;
+                    };
+                    if ws_tx.send(Message::Text(keep_alive.into())).await.is_err() {
+                        tracing::debug!(
+                            game_id = %writer_game_id,
+                            player_id = %writer_player_id,
+                            reason = "keep_alive_send_failed",
                             "websocket writer stopping"
                         );
                         break;
@@ -258,8 +288,7 @@ async fn handle_socket(
     writer.abort();
     state
         .metrics
-        .ws_disconnected
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        .record_ws_disconnect(disconnect_reason.metrics_label());
     let _ = state.active_websockets.fetch_update(
         std::sync::atomic::Ordering::Relaxed,
         std::sync::atomic::Ordering::Relaxed,

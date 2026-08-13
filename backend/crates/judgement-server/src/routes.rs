@@ -905,8 +905,10 @@ async fn start_game_inner(
         ..GameRules::mvp_for_players(seated)
     };
     rules.bidding_rule.dealer_total_restriction = dealer_total_restriction;
+    let reconnect_grace = state.reconnect_grace;
+    rules.reconnect_grace_seconds =
+        u16::try_from(reconnect_grace.as_secs()).unwrap_or(u16::MAX);
     let rules_for_store = rules.clone();
-    let reconnect_grace = Duration::from_secs(rules.reconnect_grace_seconds as u64);
     let turn_timeout = turn_timeout_seconds.map(|t| Duration::from_secs(t as u64));
 
     let mut engine = match seed {

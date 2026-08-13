@@ -171,6 +171,8 @@ pub enum ServerMessage {
         audio_b64: Arc<str>,
         ttl_ms: u32,
     },
+    /// Writer-local proxy keepalive. Not a game event; clients must ignore.
+    KeepAlive,
 }
 
 #[cfg(test)]
@@ -264,5 +266,13 @@ mod tests {
         assert_eq!(back, reason);
         assert!(!reason.retryable());
         assert!(RejectReason::QueueFull.retryable());
+    }
+
+    #[test]
+    fn keep_alive_wire_shape_is_type_only() {
+        let json = serde_json::to_value(&ServerMessage::KeepAlive).unwrap();
+        assert_eq!(json, serde_json::json!({"type": "keep_alive"}));
+        let back: ServerMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(back, ServerMessage::KeepAlive);
     }
 }

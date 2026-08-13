@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::http::HeaderMap;
 use rand::distr::Alphanumeric;
@@ -25,6 +25,19 @@ use crate::actor::ActorMessage;
 use crate::error::ApiError;
 use crate::http_limit::{HttpLimitConfig, HttpRateLimiter};
 use crate::metrics::Metrics;
+
+/// Live Railway default: absorb short WS blips without immediate vacant.
+pub const DEFAULT_RECONNECT_GRACE: Duration = Duration::from_secs(12);
+
+/// `RECONNECT_GRACE_SECONDS` (default 12, clamp 0..=120).
+pub fn reconnect_grace_from_env() -> Duration {
+    let secs = std::env::var("RECONNECT_GRACE_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RECONNECT_GRACE.as_secs())
+        .min(120);
+    Duration::from_secs(secs)
+}
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -181,6 +194,8 @@ pub struct AppState {
     pub active_websockets: std::sync::atomic::AtomicU64,
     /// Per-room last host-restart time (load guard).
     pub restart_limits: Mutex<HashMap<RoomId, Instant>>,
+    /// Applied at game start and persisted on `GameRules.reconnect_grace_seconds`.
+    pub reconnect_grace: Duration,
 }
 
 impl AppState {
@@ -202,6 +217,7 @@ impl AppState {
             metrics: Arc::new(Metrics::default()),
             active_websockets: std::sync::atomic::AtomicU64::new(0),
             restart_limits: Mutex::default(),
+            reconnect_grace: reconnect_grace_from_env(),
         }
     }
 

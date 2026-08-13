@@ -203,10 +203,23 @@ fn resolve_host_player_id(
 }
 
 /// Convenience for tests: build AppState and restore in one step.
+///
+/// Uses **zero** reconnect grace so existing tests keep immediate vacant-on-drop
+/// (production [`AppState::new`] reads `RECONNECT_GRACE_SECONDS`, default 12).
 pub async fn bootstrap(
     store: Arc<dyn GameStore>,
 ) -> Result<Arc<AppState>, judgement_persistence::PersistError> {
-    let state = Arc::new(AppState::new(store));
+    bootstrap_with_reconnect_grace(store, Duration::ZERO).await
+}
+
+/// Same as [`bootstrap`] with an explicit reconnect grace (silent-blip tests).
+pub async fn bootstrap_with_reconnect_grace(
+    store: Arc<dyn GameStore>,
+    reconnect_grace: Duration,
+) -> Result<Arc<AppState>, judgement_persistence::PersistError> {
+    let mut state = AppState::new(store);
+    state.reconnect_grace = reconnect_grace;
+    let state = Arc::new(state);
     restore_from_store(&state).await?;
     Ok(state)
 }

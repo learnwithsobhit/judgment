@@ -52,7 +52,9 @@ class _TableScreenState extends State<TableScreen> {
     _syncExitGuard();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
-      if (controller.turnDeadline != null || controller.pauseUntil != null) {
+      if (controller.turnDeadline != null ||
+          controller.pauseUntil != null ||
+          controller.connection != controller.displayedConnection) {
         setState(() {});
       }
     });
@@ -648,7 +650,7 @@ class _TopBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
               ],
-              _connectionDot(controller.connection),
+              _connectionDot(controller.displayedConnection),
               if (controller.canManualReconnect)
                 TextButton(
                   onPressed: controller.manualReconnect,

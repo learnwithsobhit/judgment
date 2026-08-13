@@ -159,6 +159,10 @@ void main() {
       expect(parse('{"type":"future_thing"}'), isA<UnknownMessage>());
     });
 
+    test('keep_alive is a documented no-op', () {
+      expect(parse('{"type":"keep_alive"}'), isA<KeepAlive>());
+    });
+
     test('table_event reaction', () {
       final message = parse(
         '{"type":"table_event","kind":"reaction","from":"p1","emojis":["🔥"],"ttl_ms":1800}',

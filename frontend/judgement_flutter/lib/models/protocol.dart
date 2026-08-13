@@ -407,6 +407,8 @@ sealed class ServerMessage {
           audioB64: json['audio_b64'] as String? ?? '',
           ttlMs: json['ttl_ms'] as int? ?? 0,
         );
+      case 'keep_alive':
+        return KeepAlive();
       default:
         return UnknownMessage(type: json['type'] as String);
     }
@@ -543,6 +545,11 @@ class VoiceNoteMessage extends ServerMessage {
     required this.audioB64,
     required this.ttlMs,
   });
+}
+
+/// Proxy keepalive. Must not affect table state or connection chrome.
+class KeepAlive extends ServerMessage {
+  KeepAlive();
 }
 
 class UnknownMessage extends ServerMessage {

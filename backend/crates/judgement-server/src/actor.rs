@@ -29,6 +29,8 @@ pub const CLIENT_BUFFER_CAPACITY: usize = 64;
 pub const PERSIST_TIMEOUT: Duration = Duration::from_secs(3);
 /// After grace, how long a vacant seat waits for a human claim before auto-end.
 pub const VACANCY_TTL: Duration = Duration::from_secs(10 * 60);
+/// Delay before peers see a reconnect pause banner (silent sub-3s blips).
+pub const PAUSE_BANNER_DELAY: Duration = Duration::from_secs(3);
 
 /// Pause after the last trick of a round so clients can hold the reveal
 /// (~1.6s) before the next deal or game-over screen.
@@ -54,6 +56,11 @@ pub enum ActorMessage {
     AdvanceAfterRoundReveal { advance_id: u64 },
     /// Reconnect-grace window expired for a seat.
     GraceExpired {
+        player_id: PlayerId,
+        grace_id: u64,
+    },
+    /// Show the pause banner if this seat is still in grace (debounced).
+    PauseBannerDue {
         player_id: PlayerId,
         grace_id: u64,
     },
@@ -145,8 +152,10 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         room_code: config.room_code,
         grace_ids: HashMap::new(),
         vacancy_ids: HashMap::new(),
+        pause_announced: HashSet::new(),
         dirty_clients: HashSet::new(),
         paused: false,
+        pause_banner_visible: false,
         ended: false,
         metrics: config.metrics,
         last_emote_at: HashMap::new(),
@@ -181,9 +190,13 @@ struct GameActor {
     grace_ids: HashMap<PlayerId, u64>,
     /// player → active vacancy id.
     vacancy_ids: HashMap<PlayerId, u64>,
+    /// Seats whose grace pause banner was shown to peers.
+    pause_announced: HashSet<PlayerId>,
     /// Clients whose outbound buffer dropped a snapshot — force resync.
     dirty_clients: HashSet<PlayerId>,
     paused: bool,
+    /// True after a `GamePaused` banner until the matching `GameResumed`.
+    pause_banner_visible: bool,
     ended: bool,
     /// Rate-limit cosmetic emotes (player → last emit millis).
     last_emote_at: HashMap<PlayerId, u64>,
@@ -225,6 +238,12 @@ impl GameActor {
                     grace_id,
                 } => {
                     self.handle_grace_expired(player_id, grace_id).await;
+                }
+                ActorMessage::PauseBannerDue {
+                    player_id,
+                    grace_id,
+                } => {
+                    self.handle_pause_banner_due(player_id, grace_id);
                 }
                 ActorMessage::VacancyExpired {
                     player_id,
@@ -297,6 +316,7 @@ impl GameActor {
         // Same-session reclaim: WS already authenticated to this player_id.
         // New humans still use claim REST (different session → different mapping).
         self.grace_ids.remove(&player_id);
+        self.pause_announced.remove(&player_id);
         if previous_status == Some(ConnectionStatus::Vacant) {
             self.vacancy_ids.remove(&player_id);
             self.metrics
@@ -340,7 +360,10 @@ impl GameActor {
             self.send_snapshot(other);
         }
         if was_paused && !self.paused {
-            self.broadcast(ServerMessage::GameResumed);
+            if self.pause_banner_visible {
+                self.broadcast(ServerMessage::GameResumed);
+                self.pause_banner_visible = false;
+            }
             self.resume_timers();
         }
     }
@@ -355,30 +378,20 @@ impl GameActor {
             .set_connection_status(player_id, ConnectionStatus::Disconnected);
         self.broadcast(ServerMessage::PlayerDisconnected { player_id });
 
-        // Host migration if the host seat dropped (locked decision 5).
-        if player_id == self.host_player_id {
-            self.migrate_host();
-        }
-
         // Zero grace ⇒ open seat for claim/replace immediately (no wait).
         if self.reconnect_grace.is_zero() {
+            if player_id == self.host_player_id {
+                self.migrate_host();
+            }
             self.mark_seat_vacant(player_id).await;
             return;
         }
 
-        // Start reconnect grace; pause the table while any seat is in grace.
+        // Silent grace: freeze play, do not vacant, do not steal host, no banner yet.
         self.grace_seq += 1;
         let grace_id = self.grace_seq;
         self.grace_ids.insert(player_id, grace_id);
         self.recompute_pause();
-
-        let remaining_ms = self.reconnect_grace.as_millis() as u64;
-        let name = self.nickname_of(player_id);
-        self.broadcast(ServerMessage::GamePaused {
-            reason: format!("Waiting for {name} to reconnect…"),
-            remaining_ms,
-        });
-        self.broadcast_snapshots();
 
         // Cancel turn / round-reveal timers while paused.
         self.deadline_seq += 1;
@@ -395,6 +408,39 @@ impl GameActor {
                 })
                 .await;
         });
+
+        if grace > PAUSE_BANNER_DELAY {
+            let tx = self.self_tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(PAUSE_BANNER_DELAY).await;
+                let _ = tx
+                    .send(ActorMessage::PauseBannerDue {
+                        player_id,
+                        grace_id,
+                    })
+                    .await;
+            });
+        }
+    }
+
+    fn handle_pause_banner_due(&mut self, player_id: PlayerId, grace_id: u64) {
+        if self.grace_ids.get(&player_id) != Some(&grace_id) {
+            return;
+        }
+        if !self.pause_announced.insert(player_id) {
+            return;
+        }
+        self.pause_banner_visible = true;
+        let remaining_ms = self
+            .reconnect_grace
+            .saturating_sub(PAUSE_BANNER_DELAY)
+            .as_millis() as u64;
+        let name = self.nickname_of(player_id);
+        self.broadcast(ServerMessage::GamePaused {
+            reason: format!("Waiting for {name} to reconnect…"),
+            remaining_ms,
+        });
+        self.broadcast_snapshots();
     }
 
     async fn handle_grace_expired(&mut self, player_id: PlayerId, grace_id: u64) {
@@ -402,7 +448,11 @@ impl GameActor {
             return; // stale — player already reconnected
         }
         self.grace_ids.remove(&player_id);
+        self.pause_announced.remove(&player_id);
         self.mark_seat_vacant(player_id).await;
+        if player_id == self.host_player_id {
+            self.migrate_host();
+        }
     }
 
     async fn handle_vacancy_expired(&mut self, player_id: PlayerId, vacancy_id: u64) {
@@ -436,6 +486,7 @@ impl GameActor {
         self.deadline_seq += 1;
         self.round_advance_seq += 1;
         let name = self.nickname_of(player_id);
+        self.pause_banner_visible = true;
         self.broadcast(ServerMessage::GamePaused {
             reason: format!("{name} left the table — share the room code so someone can take their seat"),
             remaining_ms: VACANCY_TTL.as_millis() as u64,
@@ -496,6 +547,7 @@ impl GameActor {
             .map_err(|e| e.to_string())?;
         self.vacancy_ids.remove(&player_id);
         self.grace_ids.remove(&player_id);
+        self.pause_announced.remove(&player_id);
         self.metrics
             .seat_claims
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -507,7 +559,10 @@ impl GameActor {
         self.recompute_pause();
         self.broadcast_snapshots();
         if was_paused && !self.paused {
-            self.broadcast(ServerMessage::GameResumed);
+            if self.pause_banner_visible {
+                self.broadcast(ServerMessage::GameResumed);
+                self.pause_banner_visible = false;
+            }
             self.resume_timers();
         }
         Ok(player_id)
@@ -677,6 +732,7 @@ impl GameActor {
             // Permanent leave: seat becomes vacant (replace-or-end).
             if self.clients.remove(&player_id).is_some() {
                 self.grace_ids.remove(&player_id);
+                self.pause_announced.remove(&player_id);
                 self.broadcast(ServerMessage::PlayerDisconnected { player_id });
                 if player_id == self.host_player_id {
                     self.migrate_host();

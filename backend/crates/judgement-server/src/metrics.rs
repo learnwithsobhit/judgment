@@ -11,6 +11,12 @@ pub struct Metrics {
     pub games_completed: AtomicU64,
     pub ws_connected: AtomicU64,
     pub ws_disconnected: AtomicU64,
+    pub ws_disconnected_socket_error: AtomicU64,
+    pub ws_disconnected_client_close: AtomicU64,
+    pub ws_disconnected_liveness: AtomicU64,
+    pub ws_disconnected_stream_ended: AtomicU64,
+    pub ws_disconnected_actor_closed: AtomicU64,
+    pub ws_disconnected_actor_connect_failed: AtomicU64,
     pub reconnects: AtomicU64,
     pub bot_takeovers: AtomicU64,
     pub seat_vacancies: AtomicU64,
@@ -69,6 +75,21 @@ impl Metrics {
         }
     }
 
+    /// Count a WS disconnect. `reason` is a stable `/metrics` label.
+    pub fn record_ws_disconnect(&self, reason: &'static str) {
+        self.ws_disconnected.fetch_add(1, Ordering::Relaxed);
+        let bucket = match reason {
+            "socket_error" => &self.ws_disconnected_socket_error,
+            "client_close" => &self.ws_disconnected_client_close,
+            "liveness" => &self.ws_disconnected_liveness,
+            "stream_ended" => &self.ws_disconnected_stream_ended,
+            "actor_closed" => &self.ws_disconnected_actor_closed,
+            "actor_connect_failed" => &self.ws_disconnected_actor_connect_failed,
+            _ => return,
+        };
+        bucket.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn render_prometheus(&self, gauges: Gauges) -> String {
         let mut out = String::with_capacity(2048);
         macro_rules! counter {
@@ -88,6 +109,12 @@ impl Metrics {
         counter!("judgement_games_completed_total", "Games completed", games_completed);
         counter!("judgement_ws_connected_total", "WebSocket upgrades accepted", ws_connected);
         counter!("judgement_ws_disconnected_total", "WebSocket disconnects observed", ws_disconnected);
+        counter!("judgement_ws_disconnected_socket_error_total", "WS disconnects from socket/TCP reset", ws_disconnected_socket_error);
+        counter!("judgement_ws_disconnected_client_close_total", "WS disconnects from client Close frames", ws_disconnected_client_close);
+        counter!("judgement_ws_disconnected_liveness_total", "WS disconnects from idle liveness timeout", ws_disconnected_liveness);
+        counter!("judgement_ws_disconnected_stream_ended_total", "WS disconnects from read stream end", ws_disconnected_stream_ended);
+        counter!("judgement_ws_disconnected_actor_closed_total", "WS disconnects because the game actor closed", ws_disconnected_actor_closed);
+        counter!("judgement_ws_disconnected_actor_connect_failed_total", "WS upgrades that failed actor Connect handoff", ws_disconnected_actor_connect_failed);
         counter!("judgement_reconnects_total", "Player reconnects that restored control", reconnects);
         counter!("judgement_bot_takeovers_total", "Legacy bot takeovers (unused in live replace-or-end)", bot_takeovers);
         counter!("judgement_seat_vacancies_total", "Seats marked vacant after grace/leave", seat_vacancies);

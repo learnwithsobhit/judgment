@@ -17,9 +17,17 @@ class GameSocket {
   GameSocket._(this._channel, {this.onDone, this.onError}) {
     _channel.stream.listen(
       (data) {
-        if (data is String) {
-          final json = jsonDecode(data) as Map<String, dynamic>;
-          _messages.add(ServerMessage.fromJson(json));
+        if (data is! String) {
+          return;
+        }
+        try {
+          final decoded = jsonDecode(data);
+          if (decoded is! Map<String, dynamic>) {
+            return;
+          }
+          _messages.add(ServerMessage.fromJson(decoded));
+        } catch (_) {
+          // Unknown or malformed server frames must not kill the listen loop.
         }
       },
       onDone: () {

@@ -13,7 +13,7 @@ use judgement_protocol::{
     CreateRoomResponse, JoinRoomResponse, RestartGameResponse, RoomView, ServerMessage,
     StartGameResponse, PROTOCOL_VERSION,
 };
-use judgement_server::restore::bootstrap;
+use judgement_server::restore::{bootstrap, bootstrap_with_reconnect_grace};
 use judgement_server::{build_router, state::AppState};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -716,4 +716,113 @@ async fn unique_nickname_hint_reclaims_matching_vacant_seat() {
         .await
         .unwrap();
     assert_eq!(claimed.player_id, seat_c);
+}
+
+#[tokio::test]
+async fn silent_ws_blip_reconnects_without_vacant_or_host_change() {
+    let state = bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
+        .await
+        .unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, _) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    let host_id = clients[0].player_id;
+    clients[0].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[0].ws = None;
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    clients[0].connect_ws(&base, game_id).await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(800);
+    let mut saw_vacant = false;
+    let mut saw_host_change = false;
+    let mut saw_pause = false;
+    let mut host_connected = false;
+    while tokio::time::Instant::now() < deadline {
+        let ws = clients[1].ws.as_mut().unwrap();
+        if let Ok(Some(Ok(Message::Text(text)))) =
+            tokio::time::timeout(Duration::from_millis(80), ws.next()).await
+        {
+            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
+            match msg {
+                ServerMessage::SeatVacant { .. } => saw_vacant = true,
+                ServerMessage::HostChanged { .. } => saw_host_change = true,
+                ServerMessage::GamePaused { .. } => saw_pause = true,
+                ServerMessage::StateSnapshot { view } => {
+                    let host_opp = view.opponents.iter().find(|o| o.player_id == host_id);
+                    if host_opp.is_none() {
+                        // Viewer is not host; host is in opponents when we are client 1.
+                    }
+                    if let Some(opp) = host_opp {
+                        host_connected = opp.connection_status == ConnectionStatus::Connected;
+                    }
+                    clients[1].last = Some(view);
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(!saw_vacant, "sub-grace reconnect must not vacant the seat");
+    assert!(!saw_host_change, "sub-grace reconnect must not steal the host");
+    assert!(!saw_pause, "sub-3s blip must not show a pause banner");
+    assert!(
+        host_connected,
+        "host seat should be connected after same-session reconnect"
+    );
+}
+
+#[tokio::test]
+async fn grace_expiry_vacates_and_migrates_host() {
+    let state =
+        bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_millis(250))
+            .await
+            .unwrap();
+    let addr = spawn_with(state).await;
+    let base = format!("http://{addr}");
+
+    let mut clients = Vec::new();
+    for name in ["A", "B", "C", "D"] {
+        clients.push(Client::guest(&base, name).await);
+    }
+    let (game_id, _) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    let host_id = clients[0].player_id;
+    clients[0].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[0].ws = None;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut saw_vacant = false;
+    let mut new_host = None;
+    while tokio::time::Instant::now() < deadline {
+        let ws = clients[1].ws.as_mut().unwrap();
+        if let Ok(Some(Ok(Message::Text(text)))) =
+            tokio::time::timeout(Duration::from_millis(80), ws.next()).await
+        {
+            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
+            match msg {
+                ServerMessage::SeatVacant { player_id, .. } if player_id == host_id => {
+                    saw_vacant = true;
+                }
+                ServerMessage::HostChanged { new_host: id } => new_host = Some(id),
+                _ => {}
+            }
+            if saw_vacant && new_host.is_some() {
+                break;
+            }
+        }
+    }
+    assert!(saw_vacant, "expired grace must vacant the seat");
+    assert!(new_host.is_some());
+    assert_ne!(new_host.unwrap(), host_id);
 }

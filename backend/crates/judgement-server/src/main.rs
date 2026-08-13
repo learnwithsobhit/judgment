@@ -50,11 +50,12 @@ async fn main() {
 
     spawn_reaper(state.clone());
 
+    let reconnect_grace_secs = state.reconnect_grace.as_secs();
     let router = build_router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .expect("failed to bind port");
-    tracing::info!(port, "judgement server listening");
+    tracing::info!(port, reconnect_grace_secs, "judgement server listening");
     axum::serve(listener, router).await.expect("server error");
 }
 
