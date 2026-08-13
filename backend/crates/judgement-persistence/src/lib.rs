@@ -96,6 +96,24 @@ pub trait GameStore: Send + Sync {
         older_than: chrono::DateTime<chrono::Utc>,
     ) -> Result<u64, PersistError>;
 
+    async fn upsert_user(&self, user: &StoredUser) -> Result<(), PersistError>;
+
+    async fn upsert_user_identity(&self, identity: &StoredUserIdentity) -> Result<(), PersistError>;
+
+    async fn find_user_by_identity(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> Result<Option<StoredUser>, PersistError>;
+
+    async fn load_user(&self, user_id: uuid::Uuid) -> Result<Option<StoredUser>, PersistError>;
+
+    async fn delete_user(&self, user_id: uuid::Uuid) -> Result<(), PersistError>;
+
+    async fn load_users(&self) -> Result<Vec<StoredUser>, PersistError>;
+
+    async fn load_user_identities(&self) -> Result<Vec<StoredUserIdentity>, PersistError>;
+
     /// Lightweight readiness probe (Phase 9). Memory store always succeeds;
     /// Postgres runs `SELECT 1`.
     async fn ping(&self) -> Result<(), PersistError>;

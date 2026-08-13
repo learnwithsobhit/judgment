@@ -23,6 +23,9 @@ struct MemoryInner {
     rooms: HashMap<RoomId, StoredRoom>,
     games: HashMap<GameId, StoredGame>,
     scheduled_events: HashMap<EventId, StoredScheduledEvent>,
+    users: HashMap<uuid::Uuid, StoredUser>,
+    /// (provider, subject) → user_id
+    identities: HashMap<(String, String), uuid::Uuid>,
 }
 
 type SessionKey = uuid::Uuid;
@@ -354,6 +357,75 @@ impl GameStore for MemoryStore {
         _older_than: chrono::DateTime<chrono::Utc>,
     ) -> Result<u64, PersistError> {
         Ok(0)
+    }
+
+    async fn upsert_user(&self, user: &StoredUser) -> Result<(), PersistError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .users
+            .insert(user.user_id, user.clone());
+        Ok(())
+    }
+
+    async fn upsert_user_identity(&self, identity: &StoredUserIdentity) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.identities.insert(
+            (identity.provider.clone(), identity.subject.clone()),
+            identity.user_id,
+        );
+        Ok(())
+    }
+
+    async fn find_user_by_identity(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> Result<Option<StoredUser>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let Some(user_id) = inner
+            .identities
+            .get(&(provider.to_string(), subject.to_string()))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        Ok(inner.users.get(&user_id).cloned())
+    }
+
+    async fn load_user(&self, user_id: uuid::Uuid) -> Result<Option<StoredUser>, PersistError> {
+        Ok(self.inner.lock().unwrap().users.get(&user_id).cloned())
+    }
+
+    async fn delete_user(&self, user_id: uuid::Uuid) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.users.remove(&user_id);
+        inner.identities.retain(|_, uid| *uid != user_id);
+        for session in inner.sessions.values_mut() {
+            if session.user_id == Some(user_id) {
+                session.user_id = None;
+            }
+        }
+        Ok(())
+    }
+
+    async fn load_users(&self) -> Result<Vec<StoredUser>, PersistError> {
+        Ok(self.inner.lock().unwrap().users.values().cloned().collect())
+    }
+
+    async fn load_user_identities(&self) -> Result<Vec<StoredUserIdentity>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .identities
+            .iter()
+            .map(|((provider, subject), user_id)| StoredUserIdentity {
+                user_id: *user_id,
+                provider: provider.clone(),
+                subject: subject.clone(),
+                email: None,
+                created_at: chrono::Utc::now(),
+            })
+            .collect())
     }
 
     async fn ping(&self) -> Result<(), PersistError> {

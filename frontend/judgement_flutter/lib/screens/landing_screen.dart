@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
+import '../auth/auth_service.dart';
+import '../auth/auth_store.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
@@ -12,6 +14,8 @@ import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/legal_consent_checkbox.dart';
+import '../widgets/player_avatar.dart';
+import '../widgets/profile_sheet.dart';
 import '../widgets/trump_cycle_editor.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
@@ -24,10 +28,13 @@ class LandingScreen extends StatefulWidget {
   /// True when `/r/...` was present but the code could not be parsed.
   final bool invalidJoinLink;
 
+  final AuthService? auth;
+
   const LandingScreen({
     super.key,
     this.initialJoinCode,
     this.invalidJoinLink = false,
+    this.auth,
   });
 
   @override
@@ -37,20 +44,30 @@ class LandingScreen extends StatefulWidget {
 class _LandingScreenState extends State<LandingScreen> {
   final _nickname = TextEditingController();
   final _roomCode = TextEditingController();
+  late final AuthService _auth;
   late bool _joining; // false = create, true = join
   bool _busy = false;
   bool _legalAccepted = false;
+  /// Guest nickname/avatar form (vs provider CTAs).
+  bool _guestForm = false;
   String _selectedAvatarId = defaultAvatarId;
   bool get _fromLink => widget.initialJoinCode != null;
+  bool get _signedIn => _auth.current?.isSignedIn == true;
 
   @override
   void initState() {
     super.initState();
+    _auth = widget.auth ?? AuthService();
     _legalAccepted = hasAcceptedCurrentLegalAgreement();
     final code = widget.initialJoinCode;
     _joining = code != null;
     if (code != null) {
       _roomCode.text = code;
+    }
+    final saved = _auth.current;
+    if (saved != null) {
+      _nickname.text = saved.nickname;
+      if (saved.avatarId != null) _selectedAvatarId = saved.avatarId!;
     }
     if (widget.invalidJoinLink) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -104,6 +121,10 @@ class _LandingScreenState extends State<LandingScreen> {
   }
 
   Future<void> _submit() async {
+    if (_signedIn) {
+      await _submitSignedIn();
+      return;
+    }
     final nickname = _nickname.text.trim();
     if (nickname.isEmpty) {
       _showError('Pick a nickname first');
@@ -169,43 +190,13 @@ class _LandingScreenState extends State<LandingScreen> {
         // Do not persist reclaim in lobby — invite join must mint a new seat.
       }
       if (!mounted) return;
-      if (capacityHint == 'busy') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Lots of games are in progress right now. '
-              'You can still make a room — starting may take a moment.',
-            ),
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
-      final gameId = room.gameId;
-      if (room.phase == 'in_game' && gameId != null) {
-        final controller = GameController(
-          api: api,
-          gameId: gameId,
-          myPlayerId: playerId,
-          myNickname: sessionNickname,
-        )
-          ..roomCode = room.code
-          ..amHost = room.seats.any(
-            (s) => s.playerId == playerId && s.isHost,
-          );
-        controller.connect();
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => TableScreen(controller: controller),
-        ));
-      } else {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => LobbyScreen(
-            api: api,
-            nickname: sessionNickname,
-            initialRoom: room,
-            myPlayerId: playerId,
-          ),
-        ));
-      }
+      await _navigateIntoRoom(
+        api: api,
+        room: room,
+        playerId: playerId,
+        sessionNickname: sessionNickname,
+        capacityHint: capacityHint,
+      );
     } on ApiException catch (error) {
       if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
         _showCapacityFull(error.message);
@@ -217,6 +208,164 @@ class _LandingScreenState extends State<LandingScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _submitSignedIn() async {
+    final profile = _auth.current;
+    if (profile == null) return;
+    if (_joining && _roomCode.text.trim().isEmpty) {
+      _showError('Enter the room code');
+      return;
+    }
+    if (!_joining) {
+      final scheduleError = _scheduleValidationError();
+      if (scheduleError != null) {
+        _showError(scheduleError);
+        return;
+      }
+    }
+    final fresh = await AppUpdateController.instance.ensureFreshOrReload();
+    if (!fresh || !mounted) return;
+
+    setState(() => _busy = true);
+    final api = _auth.api;
+    try {
+      await TableMediaSession.prepareBeforeNetwork();
+      late final RoomView room;
+      late final String playerId;
+      String? capacityHint;
+      if (_joining) {
+        final joined = await joinRoomWithReclaim(
+          context: context,
+          api: api,
+          roomCode: _roomCode.text,
+          nickname: profile.nickname,
+          avatarId: profile.avatarId ?? defaultAvatarId,
+        );
+        room = joined.room;
+        playerId = joined.playerId;
+      } else {
+        final schedule = _manualSchedule
+            ? RoundSchedule(mode: 'manual', steps: _manualSteps)
+            : RoundSchedule.automatic();
+        final created = await api.createRoom(
+          maxPlayers: _maxPlayers,
+          turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
+          trumpCycle: _trumpCycle,
+          roundSchedule: schedule,
+          dealerTotalRestriction: _dealerTotalRestriction,
+        );
+        room = created.room;
+        playerId = created.playerId;
+        capacityHint = created.capacity;
+      }
+      if (!mounted) return;
+      await _navigateIntoRoom(
+        api: api,
+        room: room,
+        playerId: playerId,
+        sessionNickname: profile.nickname,
+        capacityHint: capacityHint,
+      );
+    } on ApiException catch (error) {
+      if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
+        _showCapacityFull(error.message);
+      } else {
+        _showError(error.message);
+      }
+    } catch (_) {
+      _showError('Could not reach the server. Is it running?');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _navigateIntoRoom({
+    required ApiClient api,
+    required RoomView room,
+    required String playerId,
+    required String sessionNickname,
+    String? capacityHint,
+  }) async {
+    if (capacityHint == 'busy') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Lots of games are in progress right now. '
+            'You can still make a room — starting may take a moment.',
+          ),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+    final gameId = room.gameId;
+    if (room.phase == 'in_game' && gameId != null) {
+      final controller = GameController(
+        api: api,
+        gameId: gameId,
+        myPlayerId: playerId,
+        myNickname: sessionNickname,
+      )
+        ..roomCode = room.code
+        ..amHost = room.seats.any(
+          (s) => s.playerId == playerId && s.isHost,
+        );
+      controller.connect();
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => TableScreen(controller: controller),
+      ));
+    } else {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => LobbyScreen(
+          api: api,
+          nickname: sessionNickname,
+          initialRoom: room,
+          myPlayerId: playerId,
+        ),
+      ));
+    }
+  }
+
+  Future<void> _signInGoogle() async {
+    setState(() => _busy = true);
+    try {
+      await _auth.signInWithGoogle();
+      if (!mounted) return;
+      setState(() {
+        _nickname.text = _auth.current?.nickname ?? '';
+        _guestForm = false;
+      });
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _signInApple() async {
+    setState(() => _busy = true);
+    try {
+      await _auth.signInWithApple();
+      if (!mounted) return;
+      setState(() {
+        _nickname.text = _auth.current?.nickname ?? '';
+        _guestForm = false;
+      });
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openProfile() async {
+    final updated = await showProfileSheet(context: context, auth: _auth);
+    if (!mounted) return;
+    setState(() {
+      if (updated != null) {
+        _nickname.text = updated.nickname;
+      }
+    });
   }
 
   void _showError(String message) {
@@ -529,100 +678,246 @@ class _LandingScreenState extends State<LandingScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Enter a nickname to sit at the table',
+                            _signedIn
+                                ? 'Join with your profile, or play as guest'
+                                : 'Sign in or enter a nickname to sit at the table',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.7),
                               fontSize: 13,
                             ),
                           ),
-                        ] else ...[
-                          SegmentedButton<bool>(
-                            segments: const [
-                              ButtonSegment(
-                                  value: false, label: Text('Create room')),
-                              ButtonSegment(
-                                  value: true, label: Text('Join room')),
-                            ],
-                            selected: {_joining},
-                            onSelectionChanged: (selection) =>
-                                setState(() => _joining = selection.first),
-                          ),
+                          const SizedBox(height: 16),
                         ],
-                        const SizedBox(height: 20),
-                        TextField(
-                          controller: _nickname,
-                          autofocus: _fromLink,
-                          maxLength: 24,
-                          decoration: const InputDecoration(
-                            labelText: 'Nickname',
-                            border: OutlineInputBorder(),
-                            counterText: '',
+                        if (_signedIn) ...[
+                          InkWell(
+                            onTap: _busy ? null : _openProfile,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Row(
+                                children: [
+                                  PlayerAvatar(
+                                    avatarId: _auth.current?.avatarId,
+                                    avatarUrl: _auth.current?.avatarUrl,
+                                    nickname: _auth.current?.nickname ?? '?',
+                                    radius: 22,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _auth.current?.nickname ?? '',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Tap to edit profile',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.white
+                                                .withValues(alpha: 0.55),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right),
+                                ],
+                              ),
+                            ),
                           ),
-                          onSubmitted: (_) => _submit(),
-                        ),
-                        const SizedBox(height: 16),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Your avatar',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        AvatarPicker(
-                          selectedId: _selectedAvatarId,
-                          onSelected: (id) =>
-                              setState(() => _selectedAvatarId = id),
-                        ),
-                        if (_joining && !_fromLink) ...[
                           const SizedBox(height: 12),
+                          if (!_fromLink)
+                            SegmentedButton<bool>(
+                              segments: const [
+                                ButtonSegment(
+                                    value: false, label: Text('Create room')),
+                                ButtonSegment(
+                                    value: true, label: Text('Join room')),
+                              ],
+                              selected: {_joining},
+                              onSelectionChanged: (selection) =>
+                                  setState(() => _joining = selection.first),
+                            ),
+                          if (_joining && !_fromLink) ...[
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _roomCode,
+                              textCapitalization: TextCapitalization.characters,
+                              decoration: const InputDecoration(
+                                labelText: 'Room code',
+                                hintText: 'e.g. XK7P2Q',
+                                border: OutlineInputBorder(),
+                              ),
+                              onSubmitted: (_) => _submit(),
+                            ),
+                          ] else if (!_joining)
+                            _roomOptions(),
+                          const SizedBox(height: 16),
+                          ListenableBuilder(
+                            listenable: AppUpdateController.instance,
+                            builder: (context, _) {
+                              final updates = AppUpdateController.instance;
+                              final blocked = _busy ||
+                                  updates.awaitingInitialCheck ||
+                                  updates.updateAvailable;
+                              return SizedBox(
+                                width: double.infinity,
+                                height: 48,
+                                child: FilledButton(
+                                  onPressed: blocked ? null : _submit,
+                                  child: _busy
+                                      ? const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Text(
+                                          _joining ? 'Join game' : 'Create room',
+                                        ),
+                                ),
+                              );
+                            },
+                          ),
+                        ] else if (!_guestForm) ...[
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: FilledButton.icon(
+                              onPressed: _busy ? null : _signInGoogle,
+                              icon: const Icon(Icons.g_mobiledata, size: 28),
+                              label: const Text('Continue with Google'),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: OutlinedButton.icon(
+                              onPressed: _busy ? null : _signInApple,
+                              icon: const Icon(Icons.apple),
+                              label: const Text('Continue with Apple'),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: OutlinedButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => setState(() => _guestForm = true),
+                              child: const Text('Play as guest'),
+                            ),
+                          ),
+                          if (_busy) ...[
+                            const SizedBox(height: 16),
+                            const CircularProgressIndicator(strokeWidth: 2),
+                          ],
+                        ] else ...[
+                          if (!_fromLink)
+                            SegmentedButton<bool>(
+                              segments: const [
+                                ButtonSegment(
+                                    value: false, label: Text('Create room')),
+                                ButtonSegment(
+                                    value: true, label: Text('Join room')),
+                              ],
+                              selected: {_joining},
+                              onSelectionChanged: (selection) =>
+                                  setState(() => _joining = selection.first),
+                            ),
+                          const SizedBox(height: 16),
                           TextField(
-                            controller: _roomCode,
-                            textCapitalization: TextCapitalization.characters,
+                            controller: _nickname,
+                            autofocus: _fromLink,
+                            maxLength: 24,
                             decoration: const InputDecoration(
-                              labelText: 'Room code',
-                              hintText: 'e.g. XK7P2Q',
+                              labelText: 'Nickname',
                               border: OutlineInputBorder(),
+                              counterText: '',
                             ),
                             onSubmitted: (_) => _submit(),
                           ),
-                        ] else if (!_joining)
-                          _roomOptions(),
-                        const SizedBox(height: 16),
-                        LegalConsentCheckbox(
-                          value: _legalAccepted,
-                          onChanged: (v) => setState(() => _legalAccepted = v),
-                        ),
-                        const SizedBox(height: 16),
-                        ListenableBuilder(
-                          listenable: AppUpdateController.instance,
-                          builder: (context, _) {
-                            final updates = AppUpdateController.instance;
-                            final blocked = _busy ||
-                                !_legalAccepted ||
-                                updates.awaitingInitialCheck ||
-                                updates.updateAvailable;
-                            return SizedBox(
-                              width: double.infinity,
-                              height: 48,
-                              child: FilledButton(
-                                onPressed: blocked ? null : _submit,
-                                child: _busy
-                                    ? const SizedBox(
-                                        width: 22,
-                                        height: 22,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : Text(
-                                        _joining ? 'Join game' : 'Create room',
-                                      ),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Your avatar',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          AvatarPicker(
+                            selectedId: _selectedAvatarId,
+                            onSelected: (id) =>
+                                setState(() => _selectedAvatarId = id),
+                          ),
+                          if (_joining && !_fromLink) ...[
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _roomCode,
+                              textCapitalization:
+                                  TextCapitalization.characters,
+                              decoration: const InputDecoration(
+                                labelText: 'Room code',
+                                hintText: 'e.g. XK7P2Q',
+                                border: OutlineInputBorder(),
                               ),
-                            );
-                          },
-                        ),
+                              onSubmitted: (_) => _submit(),
+                            ),
+                          ] else if (!_joining)
+                            _roomOptions(),
+                          const SizedBox(height: 16),
+                          LegalConsentCheckbox(
+                            value: _legalAccepted,
+                            onChanged: (v) =>
+                                setState(() => _legalAccepted = v),
+                          ),
+                          const SizedBox(height: 16),
+                          ListenableBuilder(
+                            listenable: AppUpdateController.instance,
+                            builder: (context, _) {
+                              final updates = AppUpdateController.instance;
+                              final blocked = _busy ||
+                                  !_legalAccepted ||
+                                  updates.awaitingInitialCheck ||
+                                  updates.updateAvailable;
+                              return SizedBox(
+                                width: double.infinity,
+                                height: 48,
+                                child: FilledButton(
+                                  onPressed: blocked ? null : _submit,
+                                  child: _busy
+                                      ? const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Text(
+                                          _joining ? 'Join game' : 'Create room',
+                                        ),
+                                ),
+                              );
+                            },
+                          ),
+                          TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () => setState(() => _guestForm = false),
+                            child: const Text('Back to sign-in options'),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         const AppVersionBar(
                           autoReload: true,

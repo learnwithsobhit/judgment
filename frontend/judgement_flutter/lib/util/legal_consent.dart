@@ -4,7 +4,7 @@ library;
 import 'legal_storage.dart';
 
 /// Bump this when Terms or Privacy text changes to force re-acceptance.
-const String kLegalAgreementVersion = '2026-08-03';
+const String kLegalAgreementVersion = '2026-08-11';
 
 /// Operator contact shown on legal pages (replace before public marketing).
 const String kLegalOperatorName = 'Judgement';

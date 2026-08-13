@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-API_BASE="${API_BASE:-https://judgment-api.fly.dev}"
-PUBLIC_WEB_ORIGIN="${PUBLIC_WEB_ORIGIN:-https://judgment-lws-260731.web.app}"
+API_BASE="${API_BASE:-https://judgement-server-production-311f.up.railway.app}"
+PUBLIC_WEB_ORIGIN="${PUBLIC_WEB_ORIGIN:-https://judgment-railway-test.web.app}"
 # Normalize: no trailing slash
 PUBLIC_WEB_ORIGIN="${PUBLIC_WEB_ORIGIN%/}"
 APP_VERSION="$(sed -n 's/^version:[[:space:]]*\([^+]*\).*/\1/p' pubspec.yaml | head -1)"

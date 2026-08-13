@@ -30,6 +30,8 @@ pub async fn restore_from_store(
                     nickname: session.nickname,
                     token: session.token,
                     avatar_id: session.avatar_id,
+                    avatar_url: session.avatar_url,
+                    user_id: session.user_id,
                 },
             );
         }
@@ -62,6 +64,7 @@ pub async fn restore_from_store(
                             ready: p.ready,
                             joined_at: p.joined_at,
                             avatar_id: p.avatar_id,
+                            avatar_url: p.avatar_url,
                         })
                         .collect(),
                     status,

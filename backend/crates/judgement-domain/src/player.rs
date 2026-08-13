@@ -26,6 +26,9 @@ pub struct PlayerState {
     /// Built-in avatar pack id (cosmetic; not used by rules).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    /// HTTPS avatar when the player uploaded a photo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 impl PlayerState {
@@ -37,6 +40,7 @@ impl PlayerState {
             is_bot: false,
             connection_status: ConnectionStatus::Connected,
             avatar_id: None,
+            avatar_url: None,
         }
     }
 
@@ -48,11 +52,17 @@ impl PlayerState {
             is_bot: true,
             connection_status: ConnectionStatus::BotControlled,
             avatar_id: None,
+            avatar_url: None,
         }
     }
 
     pub fn with_avatar(mut self, avatar_id: impl Into<String>) -> Self {
         self.avatar_id = Some(avatar_id.into());
+        self
+    }
+
+    pub fn with_avatar_url(mut self, avatar_url: impl Into<String>) -> Self {
+        self.avatar_url = Some(avatar_url.into());
         self
     }
 }

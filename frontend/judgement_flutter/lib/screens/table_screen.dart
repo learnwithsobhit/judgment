@@ -887,6 +887,7 @@ class _TableArea extends StatelessWidget {
               onTap: () => _showAvatarPickerSheet(context),
               child: PlayerAvatar(
                 avatarId: view.ownAvatarId,
+                avatarUrl: view.ownAvatarUrl,
                 nickname: controller.myNickname,
                 radius: 12,
                 highlight: isMyTurn,
@@ -962,6 +963,7 @@ class _OpponentSeat extends StatelessWidget {
             children: [
               PlayerAvatar(
                 avatarId: opponent.avatarId,
+                avatarUrl: opponent.avatarUrl,
                 nickname: opponent.nickname,
                 highlight: isTurn || isLeader,
                 muted: disconnected,

@@ -22,6 +22,7 @@ use judgement_persistence::GameStore;
 use judgement_protocol::{GameEventStatus, RoomPhase, RoomView, SeatView};
 
 use crate::actor::ActorMessage;
+use crate::avatar_store::AvatarStore;
 use crate::error::ApiError;
 use crate::http_limit::{HttpLimitConfig, HttpRateLimiter};
 use crate::metrics::Metrics;
@@ -34,6 +35,10 @@ pub struct Session {
     pub token: String,
     /// Built-in avatar pack id (cosmetic).
     pub avatar_id: Option<String>,
+    /// HTTPS avatar when the player uploaded a photo.
+    pub avatar_url: Option<String>,
+    /// Durable account id when signed in via Google/Apple.
+    pub user_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +51,7 @@ pub struct RoomSeat {
     /// Connection order, used for host promotion (locked decision 5).
     pub joined_at: DateTime<Utc>,
     pub avatar_id: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +102,7 @@ impl Room {
                 ready: s.ready,
                 is_host: s.session_id == self.host_session,
                 avatar_id: s.avatar_id.clone(),
+                avatar_url: s.avatar_url.clone(),
                 vacant: false,
             })
             .collect();
@@ -181,6 +188,10 @@ pub struct AppState {
     pub active_websockets: std::sync::atomic::AtomicU64,
     /// Per-room last host-restart time (load guard).
     pub restart_limits: Mutex<HashMap<RoomId, Instant>>,
+    /// Avatar object storage (S3 / local / disabled).
+    pub avatar_store: AvatarStore,
+    /// Firebase project id for ID-token verification (`FIREBASE_PROJECT_ID`).
+    pub firebase_project_id: Option<String>,
 }
 
 impl AppState {
@@ -202,18 +213,52 @@ impl AppState {
             metrics: Arc::new(Metrics::default()),
             active_websockets: std::sync::atomic::AtomicU64::new(0),
             restart_limits: Mutex::default(),
+            avatar_store: AvatarStore::from_env(),
+            firebase_project_id: std::env::var("FIREBASE_PROJECT_ID")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         }
     }
 
     pub fn create_session(&self, nickname: String) -> Session {
-        let session = Session {
+        self.insert_session(Session {
             id: SessionId::new(),
             nickname,
             token: generate_token(),
             avatar_id: None,
-        };
-        self.sessions.lock().unwrap().insert(session.id, session.clone());
-        self.tokens.lock().unwrap().insert(session.token.clone(), session.id);
+            avatar_url: None,
+            user_id: None,
+        })
+    }
+
+    /// Mint a play session linked to a durable user account.
+    pub fn create_session_for_user(
+        &self,
+        nickname: String,
+        user_id: uuid::Uuid,
+        avatar_id: Option<String>,
+        avatar_url: Option<String>,
+    ) -> Session {
+        self.insert_session(Session {
+            id: SessionId::new(),
+            nickname,
+            token: generate_token(),
+            avatar_id,
+            avatar_url,
+            user_id: Some(user_id),
+        })
+    }
+
+    fn insert_session(&self, session: Session) -> Session {
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(session.id, session.clone());
+        self.tokens
+            .lock()
+            .unwrap()
+            .insert(session.token.clone(), session.id);
         session
     }
 
@@ -223,14 +268,89 @@ impl AppState {
             let mut sessions = self.sessions.lock().unwrap();
             let session = sessions.get_mut(&session_id)?;
             session.avatar_id = Some(avatar_id.clone());
+            session.avatar_url = None;
         }
         let mut rooms = self.rooms.lock().unwrap();
         for room in rooms.values_mut() {
             if let Some(seat) = room.seats.iter_mut().find(|s| s.session_id == session_id) {
                 seat.avatar_id = Some(avatar_id.clone());
+                seat.avatar_url = None;
             }
         }
         Some(avatar_id)
+    }
+
+    /// Persist an uploaded avatar URL on the session (and any lobby seat).
+    pub fn set_avatar_url(
+        &self,
+        session_id: SessionId,
+        avatar_url: String,
+    ) -> Option<String> {
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = sessions.get_mut(&session_id)?;
+            session.avatar_url = Some(avatar_url.clone());
+        }
+        let mut rooms = self.rooms.lock().unwrap();
+        for room in rooms.values_mut() {
+            if let Some(seat) = room.seats.iter_mut().find(|s| s.session_id == session_id) {
+                seat.avatar_url = Some(avatar_url.clone());
+            }
+        }
+        Some(avatar_url)
+    }
+
+    /// Drop the current bearer token (logout). Session row may remain until reaper.
+    pub fn invalidate_session(&self, session_id: SessionId) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        let mut tokens = self.tokens.lock().unwrap();
+        let Some(session) = sessions.remove(&session_id) else {
+            return false;
+        };
+        tokens.remove(&session.token);
+        true
+    }
+
+    /// Invalidate every in-memory session belonging to a user (account delete).
+    pub fn invalidate_user_sessions(&self, user_id: uuid::Uuid) -> Vec<SessionId> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let mut tokens = self.tokens.lock().unwrap();
+        let victim: Vec<_> = sessions
+            .iter()
+            .filter(|(_, s)| s.user_id == Some(user_id))
+            .map(|(id, s)| (*id, s.token.clone()))
+            .collect();
+        for (id, token) in &victim {
+            sessions.remove(id);
+            tokens.remove(token);
+        }
+        victim.into_iter().map(|(id, _)| id).collect()
+    }
+
+    pub fn update_session_nickname(&self, session_id: SessionId, nickname: String) -> bool {
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            let Some(session) = sessions.get_mut(&session_id) else {
+                return false;
+            };
+            session.nickname = nickname.clone();
+        }
+        let mut rooms = self.rooms.lock().unwrap();
+        for room in rooms.values_mut() {
+            if let Some(seat) = room.seats.iter_mut().find(|s| s.session_id == session_id) {
+                seat.nickname = nickname.clone();
+            }
+        }
+        true
+    }
+
+    /// True when this session currently occupies a seat in an in-progress game.
+    pub fn session_in_active_game(&self, session_id: SessionId) -> bool {
+        let rooms = self.rooms.lock().unwrap();
+        rooms.values().any(|room| {
+            matches!(room.status, RoomStatus::InGame(_))
+                && room.seats.iter().any(|s| s.session_id == session_id)
+        })
     }
 
     /// Resolve the bearer token from `Authorization: Bearer <token>`.

@@ -20,6 +20,8 @@ pub struct OpponentView {
     pub connection_status: ConnectionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +98,8 @@ pub struct PlayerGameView {
     pub own_tricks_won: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_avatar_url: Option<String>,
     pub opponents: Vec<OpponentView>,
     pub current_trick: Vec<PlayedCard>,
     /// Present after a trick completes until the next card is led.
@@ -161,6 +165,7 @@ pub(crate) fn project_for(
             tricks_won: round.and_then(|r| r.tricks_won.get(&p.id)).copied().unwrap_or(0),
             connection_status: p.connection_status,
             avatar_id: p.avatar_id.clone(),
+            avatar_url: p.avatar_url.clone(),
         })
         .collect();
 
@@ -210,6 +215,7 @@ pub(crate) fn project_for(
         own_bid,
         own_tricks_won,
         own_avatar_id: own_player.avatar_id.clone(),
+        own_avatar_url: own_player.avatar_url.clone(),
         opponents,
         current_trick,
         last_completed_trick,

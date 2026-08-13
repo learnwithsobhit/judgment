@@ -1,33 +1,46 @@
-# Railway + second Firebase Hosting site (test stack)
+# Railway + Firebase (test stack)
 
-Parallel environment for experimenting with Railway as the API host.  
-**Production** stays on Fly + default Hosting site — do not point prod traffic here.
+Default development / Android test environment:
 
-## Accounts
-
-| Piece | Where |
+| Piece | Value |
 |-------|--------|
-| API + Postgres | **Separate Railway account** (not the personal/dev account used for other projects) |
-| Web | Same Firebase project `judgment-lws-260731`, Hosting site **`judgment-railway-test`** |
-| Prod web | Hosting site **`judgment-lws-260731`** → Fly `judgment-api.fly.dev` |
+| API | https://judgement-server-production-311f.up.railway.app |
+| Web | https://judgment-railway-test.web.app |
+| Firebase Auth project | **`judgment-railway-test`** (`FIREBASE_PROJECT_ID`) |
+| Hosting deploy | Site `judgment-railway-test` (Firebase target `railway-test`; parent project may still be `judgment-lws-260731` for Hosting only) |
 
-Test site URL: https://judgment-railway-test.web.app  
-Railway API: https://judgement-server-production-311f.up.railway.app  
-Railway account: `chaturvedipriya23@gmail.com` · project `judgment-api-railway-test` · region asia-southeast (as configured in dashboard)
+Prod (Fly + `judgment-lws-260731` Hosting) is separate — set `API_BASE` / `PUBLIC_WEB_ORIGIN` explicitly when deploying prod.
 
-## Deploy commands (safe)
+## Auth setup
 
-Always name the Hosting **target**:
+1. In Firebase Console → project **`judgment-railway-test`**: enable **Google** and **Apple** sign-in.
+2. Register Web + Android apps; run:
+   ```bash
+   cd frontend/judgement_flutter
+   flutterfire configure --project=judgment-railway-test --platforms=web,android
+   ```
+3. On Railway API service, set:
+   ```text
+   FIREBASE_PROJECT_ID=judgment-railway-test
+   ALLOWED_ORIGINS=https://judgment-railway-test.web.app,https://judgment-railway-test.firebaseapp.com
+   PUBLIC_WEB_ORIGIN=https://judgment-railway-test.web.app
+   ```
+   (See `deployment/railway.env.example`.)
+
+Auth tokens are verified against `FIREBASE_PROJECT_ID`; it must match the project that issues the client ID tokens.
+
+## Deploy commands
 
 ```bash
-# TEST — Railway API baked in
+# TEST — Railway API + railway-test Hosting
 cd frontend/judgement_flutter
 API_BASE=https://judgement-server-production-311f.up.railway.app \
 PUBLIC_WEB_ORIGIN=https://judgment-railway-test.web.app \
   ./tool/build_web_release.sh
+# Hosting target still lives under judgment-lws-260731 in .firebaserc today:
 firebase deploy --only hosting:railway-test --project judgment-lws-260731
 
-# PROD — Fly API (CI uses hosting:prod)
+# PROD — Fly API (override defaults)
 API_BASE=https://judgment-api.fly.dev \
 PUBLIC_WEB_ORIGIN=https://judgment-lws-260731.web.app \
   ./tool/build_web_release.sh
@@ -38,33 +51,37 @@ firebase deploy --only hosting:prod --project judgment-lws-260731
 
 Never run bare `firebase deploy --only hosting` after multi-site is enabled (deploys all sites).
 
-## Railway setup (on the test account)
+## Flutter / Android against Railway
 
 ```bash
-railway login          # must show the test account email
-railway init -n judgment-api-railway-test
-railway add -d postgres
-railway add -s judgement-server
-# link service, set variables (see deployment/railway.env.example):
+# Web
+flutter run -d chrome \
+  --dart-define=API_BASE=https://judgement-server-production-311f.up.railway.app \
+  --dart-define=PUBLIC_WEB_ORIGIN=https://judgment-railway-test.web.app
+
+# Android AAB (script defaults already Railway + railway-test)
+./tool/build_android_release.sh
+```
+
+## Railway variables checklist
+
+```bash
+railway login
+# select judgment-api-railway-test
+# Variables (see deployment/railway.env.example):
 #   DATABASE_URL=${{Postgres….DATABASE_URL}}
 #   ALLOWED_ORIGINS=https://judgment-railway-test.web.app,https://judgment-railway-test.firebaseapp.com
 #   PUBLIC_WEB_ORIGIN=https://judgment-railway-test.web.app
+#   FIREBASE_PROJECT_ID=judgment-railway-test
 #   RAG_ENABLED=0
 #   JUDGEMENT_MIGRATIONS_DIR=/srv/migrations/persistence
-railway up -s judgement-server
-railway domain -s judgement-server
 ```
 
 Keep **replicas = 1**, disable app sleep. Set a monthly spend limit.
 
-## Tear-down / pause
-
-Pause or delete the Railway project when not testing to avoid always-on charges.  
-Firebase site `judgment-railway-test` can remain empty or be deleted from the console.
-
 ## Isolation checklist
 
 1. Prod URL network tab → `judgment-api.fly.dev`
-2. Test URL network tab → `*.up.railway.app` (or custom Railway domain)
-3. Fly secrets unchanged
-4. GH variable `API_BASE` still Fly for prod CI
+2. Test URL network tab → `*.up.railway.app`
+3. Auth ID tokens `aud` / `iss` → `judgment-railway-test`
+4. Fly secrets unchanged for prod

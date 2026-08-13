@@ -45,6 +45,21 @@ class ApiClient {
     return _decode(response);
   }
 
+  Future<Map<String, dynamic>> _patch(String path, Object body) async {
+    final response = await _http.patch(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
+    return _decode(response);
+  }
+
+  Future<Map<String, dynamic>> _delete(String path) async {
+    final response =
+        await _http.delete(Uri.parse('$baseUrl$path'), headers: _headers);
+    return _decode(response);
+  }
+
   Future<Map<String, dynamic>> _get(String path) async {
     final response =
         await _http.get(Uri.parse('$baseUrl$path'), headers: _headers);
@@ -150,6 +165,75 @@ class ApiClient {
   Future<String> setAvatar(String avatarId) async {
     final json = await _post('/api/v1/me/avatar', {'avatar_id': avatarId});
     return json['avatar_id'] as String;
+  }
+
+  Future<AuthSessionResult> authFirebase({
+    required String idToken,
+    String? displayName,
+    String? legalVersion,
+  }) async {
+    final json = await _post('/api/v1/auth/firebase', {
+      'id_token': idToken,
+      'display_name': ?displayName,
+      'legal_version': ?legalVersion,
+    });
+    final result = AuthSessionResult.fromJson(json);
+    token = result.session.token;
+    return result;
+  }
+
+  Future<MeResult> getMe() async => MeResult.fromJson(await _get('/api/v1/me'));
+
+  Future<MeResult> patchMe(String displayName) async =>
+      MeResult.fromJson(await _patch('/api/v1/me', {
+        'display_name': displayName,
+      }));
+
+  Future<void> logoutMe() async {
+    await _post('/api/v1/me/logout', {});
+    token = null;
+  }
+
+  Future<void> deleteMe() async {
+    await _delete('/api/v1/me');
+    token = null;
+  }
+
+  Future<AvatarPresign> presignAvatar(String contentType) async =>
+      AvatarPresign.fromJson(await _post('/api/v1/me/avatar/presign', {
+        'content_type': contentType,
+      }));
+
+  Future<String> confirmAvatar({
+    required String key,
+    required String contentType,
+    required int byteSize,
+  }) async {
+    final json = await _post('/api/v1/me/avatar/confirm', {
+      'key': key,
+      'content_type': contentType,
+      'byte_size': byteSize,
+    });
+    return json['avatar_url'] as String;
+  }
+
+  /// PUT bytes to a presigned URL. Do **not** send Judgement Authorization.
+  Future<void> putBinary(
+    String uploadUrl, {
+    required List<int> bytes,
+    required Map<String, String> headers,
+  }) async {
+    final uri = uploadUrl.startsWith('http')
+        ? Uri.parse(uploadUrl)
+        : Uri.parse('$baseUrl$uploadUrl');
+    final response = await _http.put(uri, headers: headers, body: bytes);
+    if (response.statusCode >= 400) {
+      throw ApiException(
+        response.statusCode,
+        'UPLOAD_FAILED',
+        'avatar upload failed (${response.statusCode})',
+      );
+    }
   }
 
   Future<RoomView> leaveRoom(String roomRef) async =>

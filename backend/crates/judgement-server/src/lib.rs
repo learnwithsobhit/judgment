@@ -2,6 +2,8 @@
 
 pub mod actor;
 pub mod audio;
+pub mod auth;
+pub mod avatar_store;
 pub mod capacity;
 pub mod cleanup;
 pub mod cors;
@@ -15,6 +17,7 @@ pub mod rag_boot;
 pub mod reaper;
 pub mod restore;
 pub mod routes;
+pub mod s3_presign;
 pub mod state;
 pub mod ws;
 
@@ -37,7 +40,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics_endpoint))
         .route("/api/v1/guest-sessions", post(routes::create_guest_session))
+        .route("/api/v1/auth/firebase", post(auth::auth_firebase))
+        .route("/api/v1/me", get(auth::get_me).patch(auth::patch_me).delete(auth::delete_me))
+        .route("/api/v1/me/logout", post(auth::logout_me))
         .route("/api/v1/me/avatar", post(routes::set_avatar))
+        .route("/api/v1/me/avatar/presign", post(auth::presign_avatar))
+        .route("/api/v1/me/avatar/confirm", post(auth::confirm_avatar))
         .route("/api/v1/rooms", post(routes::create_room))
         .route("/api/v1/rooms/{room_ref}", get(routes::get_room))
         .route("/api/v1/rooms/{room_ref}/join", post(routes::join_room))

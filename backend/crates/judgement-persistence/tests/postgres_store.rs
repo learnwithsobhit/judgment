@@ -30,6 +30,8 @@ async fn postgres_persists_and_restores_a_game() {
         .upsert_session(&StoredSession {
             session_id,
             nickname: "Ada".into(),
+            avatar_url: None,
+            user_id: None,
             token: format!("tok-{}", session_id),
             created_at: Utc::now(),
             avatar_id: None,
@@ -46,6 +48,8 @@ async fn postgres_persists_and_restores_a_game() {
         store
             .upsert_session(&StoredSession {
                 session_id: sid,
+                avatar_url: None,
+                user_id: None,
                 nickname: format!("P{seat}"),
                 token: format!("tok-{sid}"),
                 created_at: Utc::now(),
@@ -62,6 +66,7 @@ async fn postgres_persists_and_restores_a_game() {
             ready: true,
             joined_at: Utc::now(),
             avatar_id: None,
+            avatar_url: None,
         });
         players.push(PlayerState::human(pid, format!("P{seat}"), seat));
         game_players.push(NewGamePlayer {

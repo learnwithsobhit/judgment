@@ -177,6 +177,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
             ready: true,
             joined_at: Utc::now(),
             avatar_id: None,
+            avatar_url: None,
         });
     }
     let host_session = seats[0].session_id;

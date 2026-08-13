@@ -100,6 +100,7 @@ pub async fn set_avatar(
             .await
             .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
     }
+    crate::auth::mirror_pack_avatar_to_user(&state, &session, &avatar_id).await?;
     Ok(Json(SetAvatarResponse { avatar_id }))
 }
 
@@ -178,6 +179,7 @@ pub async fn create_room(
             ready: false,
             joined_at: Utc::now(),
             avatar_id: session.avatar_id.clone(),
+            avatar_url: session.avatar_url.clone(),
         }],
         status: RoomStatus::Lobby,
         max_players,
@@ -339,6 +341,7 @@ pub async fn join_room(
             ready: false,
             joined_at: Utc::now(),
             avatar_id: session.avatar_id.clone(),
+            avatar_url: session.avatar_url.clone(),
         });
         (room.view(), player_id, stored_room(room))
     };
@@ -397,6 +400,7 @@ async fn claim_seat_inner(
             preferred: req.player_id,
             nickname: session.nickname.clone(),
             avatar_id: session.avatar_id.clone(),
+            avatar_url: session.avatar_url.clone(),
             reply: reply_tx,
         })
         .await
@@ -423,6 +427,7 @@ async fn claim_seat_inner(
             seat.session_id = session.id;
             seat.nickname = session.nickname.clone();
             seat.avatar_id = session.avatar_id.clone();
+            seat.avatar_url = session.avatar_url.clone();
         } else {
             return Err(ApiError::Conflict("vacant seat missing from room".into()));
         }
@@ -857,6 +862,9 @@ async fn start_game_inner(
                 let mut p = PlayerState::human(s.player_id, s.nickname.clone(), s.seat);
                 if let Some(avatar) = &s.avatar_id {
                     p = p.with_avatar(avatar.clone());
+                }
+                if let Some(url) = &s.avatar_url {
+                    p = p.with_avatar_url(url.clone());
                 }
                 p
             })

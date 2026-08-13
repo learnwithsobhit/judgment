@@ -67,6 +67,7 @@ pub enum ActorMessage {
         preferred: Option<PlayerId>,
         nickname: String,
         avatar_id: Option<String>,
+        avatar_url: Option<String>,
         reply: oneshot::Sender<Result<PlayerId, String>>,
     },
     /// Host (or vacancy timeout via internal reason) ends the game.
@@ -236,9 +237,11 @@ impl GameActor {
                     preferred,
                     nickname,
                     avatar_id,
+                    avatar_url,
                     reply,
                 } => {
-                    let result = self.handle_claim_vacant(preferred, nickname, avatar_id);
+                    let result =
+                        self.handle_claim_vacant(preferred, nickname, avatar_id, avatar_url);
                     let _ = reply.send(result);
                 }
                 ActorMessage::EndGame {
@@ -459,6 +462,7 @@ impl GameActor {
         preferred: Option<PlayerId>,
         nickname: String,
         avatar_id: Option<String>,
+        avatar_url: Option<String>,
     ) -> Result<PlayerId, String> {
         if self.ended || self.engine.is_finished() {
             return Err("game is over".into());
@@ -492,7 +496,7 @@ impl GameActor {
             }
         };
         self.engine
-            .set_seat_identity(player_id, nickname.clone(), avatar_id)
+            .set_seat_identity(player_id, nickname.clone(), avatar_id, avatar_url)
             .map_err(|e| e.to_string())?;
         self.vacancy_ids.remove(&player_id);
         self.grace_ids.remove(&player_id);

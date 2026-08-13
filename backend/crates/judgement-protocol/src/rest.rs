@@ -180,6 +180,9 @@ pub struct SeatView {
     pub is_host: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    /// HTTPS URL when the seat uses an uploaded photo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
     /// True while this in-game seat is vacant and claimable (omit/false in lobby).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub vacant: bool,
@@ -193,6 +196,90 @@ pub struct SetAvatarRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetAvatarResponse {
     pub avatar_id: String,
+}
+
+// ---------------------------------------------------------------------------
+// Auth / profile (Firebase Google/Apple → Judgement session)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirebaseAuthRequest {
+    pub id_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legal_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserProfile {
+    pub user_id: uuid::Uuid,
+    pub display_name: String,
+    pub avatar_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionView {
+    pub session_id: SessionId,
+    pub nickname: String,
+    pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthSessionResponse {
+    pub session: SessionView,
+    pub user: UserProfile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeResponse {
+    pub session: SessionView,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<UserProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatchMeRequest {
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarPresignRequest {
+    pub content_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarPresignResponse {
+    pub method: String,
+    pub upload_url: String,
+    pub headers: std::collections::BTreeMap<String, String>,
+    pub key: String,
+    pub public_url: String,
+    pub expires_in_sec: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarConfirmRequest {
+    pub key: String,
+    pub content_type: String,
+    pub byte_size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarConfirmResponse {
+    pub avatar_url: String,
 }
 
 /// Uniform error body for REST endpoints.

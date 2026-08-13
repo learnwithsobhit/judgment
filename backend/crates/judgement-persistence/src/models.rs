@@ -18,6 +18,34 @@ pub struct StoredSession {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredUser {
+    pub user_id: uuid::Uuid,
+    pub display_name: String,
+    pub avatar_kind: String,
+    pub avatar_id: Option<String>,
+    pub avatar_url: Option<String>,
+    pub avatar_storage_key: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub legal_accepted_at: Option<DateTime<Utc>>,
+    pub legal_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredUserIdentity {
+    pub user_id: uuid::Uuid,
+    pub provider: String,
+    pub subject: String,
+    pub email: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +58,8 @@ pub struct StoredRoomPlayer {
     pub joined_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

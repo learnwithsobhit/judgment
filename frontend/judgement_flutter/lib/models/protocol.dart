@@ -109,6 +109,7 @@ class OpponentView {
   final int tricksWon;
   final String connectionStatus;
   final String? avatarId;
+  final String? avatarUrl;
 
   OpponentView.fromJson(Map<String, dynamic> json)
       : playerId = json['player_id'] as String,
@@ -118,7 +119,8 @@ class OpponentView {
         bid = json['bid'] as int?,
         tricksWon = json['tricks_won'] as int,
         connectionStatus = json['connection_status'] as String,
-        avatarId = json['avatar_id'] as String?;
+        avatarId = json['avatar_id'] as String?,
+        avatarUrl = json['avatar_url'] as String?;
 }
 
 class CompletedTrickView {
@@ -245,6 +247,7 @@ class PlayerGameView {
   final int? ownBid;
   final int ownTricksWon;
   final String? ownAvatarId;
+  final String? ownAvatarUrl;
   final List<OpponentView> opponents;
   final List<PlayedCard> currentTrick;
   final CompletedTrickView? lastCompletedTrick;
@@ -270,6 +273,7 @@ class PlayerGameView {
         ownBid = json['own_bid'] as int?,
         ownTricksWon = json['own_tricks_won'] as int,
         ownAvatarId = json['own_avatar_id'] as String?,
+        ownAvatarUrl = json['own_avatar_url'] as String?,
         opponents = (json['opponents'] as List)
             .map((o) => OpponentView.fromJson(o as Map<String, dynamic>))
             .toList(),
@@ -577,11 +581,89 @@ class GuestSession {
   final String sessionId;
   final String nickname;
   final String token;
+  final String? avatarId;
+  final String? avatarUrl;
+  final String? userId;
 
   GuestSession.fromJson(Map<String, dynamic> json)
       : sessionId = json['session_id'] as String,
         nickname = json['nickname'] as String,
-        token = json['token'] as String;
+        token = json['token'] as String,
+        avatarId = json['avatar_id'] as String?,
+        avatarUrl = json['avatar_url'] as String?,
+        userId = json['user_id'] as String?;
+}
+
+class UserProfile {
+  final String userId;
+  final String displayName;
+  final String avatarKind;
+  final String? avatarId;
+  final String? avatarUrl;
+  final String? provider;
+
+  UserProfile.fromJson(Map<String, dynamic> json)
+      : userId = json['user_id'] as String,
+        displayName = json['display_name'] as String,
+        avatarKind = json['avatar_kind'] as String? ?? 'pack',
+        avatarId = json['avatar_id'] as String?,
+        avatarUrl = json['avatar_url'] as String?,
+        provider = json['provider'] as String?;
+}
+
+class SessionView {
+  final String sessionId;
+  final String nickname;
+  final String token;
+  final String? avatarId;
+  final String? avatarUrl;
+  final String? userId;
+
+  SessionView.fromJson(Map<String, dynamic> json)
+      : sessionId = json['session_id'] as String,
+        nickname = json['nickname'] as String,
+        token = json['token'] as String,
+        avatarId = json['avatar_id'] as String?,
+        avatarUrl = json['avatar_url'] as String?,
+        userId = json['user_id'] as String?;
+}
+
+class AuthSessionResult {
+  final SessionView session;
+  final UserProfile user;
+
+  AuthSessionResult.fromJson(Map<String, dynamic> json)
+      : session = SessionView.fromJson(json['session'] as Map<String, dynamic>),
+        user = UserProfile.fromJson(json['user'] as Map<String, dynamic>);
+}
+
+class MeResult {
+  final SessionView session;
+  final UserProfile? user;
+
+  MeResult.fromJson(Map<String, dynamic> json)
+      : session = SessionView.fromJson(json['session'] as Map<String, dynamic>),
+        user = json['user'] == null
+            ? null
+            : UserProfile.fromJson(json['user'] as Map<String, dynamic>);
+}
+
+class AvatarPresign {
+  final String method;
+  final String uploadUrl;
+  final Map<String, String> headers;
+  final String key;
+  final String publicUrl;
+  final int expiresInSec;
+
+  AvatarPresign.fromJson(Map<String, dynamic> json)
+      : method = json['method'] as String,
+        uploadUrl = json['upload_url'] as String,
+        headers = (json['headers'] as Map<String, dynamic>)
+            .map((k, v) => MapEntry(k, v.toString())),
+        key = json['key'] as String,
+        publicUrl = json['public_url'] as String,
+        expiresInSec = json['expires_in_sec'] as int;
 }
 
 class SeatView {
@@ -591,6 +673,7 @@ class SeatView {
   final bool ready;
   final bool isHost;
   final String? avatarId;
+  final String? avatarUrl;
   final bool vacant;
 
   SeatView.fromJson(Map<String, dynamic> json)
@@ -600,6 +683,7 @@ class SeatView {
         ready = json['ready'] as bool,
         isHost = json['is_host'] as bool,
         avatarId = json['avatar_id'] as String?,
+        avatarUrl = json['avatar_url'] as String?,
         vacant = json['vacant'] as bool? ?? false;
 }
 

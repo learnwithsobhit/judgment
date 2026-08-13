@@ -22,7 +22,7 @@ if [[ -z "$APP_VERSION" ]]; then
   APP_VERSION="${APP_VERSION:-0.0.0}"
 fi
 
-PUBLIC_WEB_ORIGIN="${PUBLIC_WEB_ORIGIN:-https://judgment-lws-260731.web.app}"
+PUBLIC_WEB_ORIGIN="${PUBLIC_WEB_ORIGIN:-https://judgment-railway-test.web.app}"
 PUBLIC_WEB_ORIGIN="${PUBLIC_WEB_ORIGIN%/}"
 
 INDEX="$WEB/index.html"

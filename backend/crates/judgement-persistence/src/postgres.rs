@@ -77,12 +77,14 @@ impl GameStore for PostgresStore {
     async fn upsert_session(&self, session: &StoredSession) -> Result<(), PersistError> {
         sqlx::query(
             r#"
-            INSERT INTO guest_sessions (session_id, nickname, token, created_at, avatar_id)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO guest_sessions (session_id, nickname, token, created_at, avatar_id, avatar_url, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (session_id) DO UPDATE
               SET nickname = EXCLUDED.nickname,
                   token = EXCLUDED.token,
-                  avatar_id = EXCLUDED.avatar_id
+                  avatar_id = EXCLUDED.avatar_id,
+                  avatar_url = EXCLUDED.avatar_url,
+                  user_id = EXCLUDED.user_id
             "#,
         )
         .bind(session.session_id.0)
@@ -90,6 +92,8 @@ impl GameStore for PostgresStore {
         .bind(&session.token)
         .bind(session.created_at)
         .bind(&session.avatar_id)
+        .bind(&session.avatar_url)
+        .bind(session.user_id)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -141,8 +145,8 @@ impl GameStore for PostgresStore {
             sqlx::query(
                 r#"
                 INSERT INTO room_players (
-                    room_id, session_id, player_id, nickname, seat, ready, joined_at, avatar_id
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    room_id, session_id, player_id, nickname, seat, ready, joined_at, avatar_id, avatar_url
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                 "#,
             )
             .bind(room.room_id.0)
@@ -153,6 +157,7 @@ impl GameStore for PostgresStore {
             .bind(player.ready)
             .bind(player.joined_at)
             .bind(&player.avatar_id)
+            .bind(&player.avatar_url)
             .execute(&mut *tx)
             .await?;
         }
@@ -171,7 +176,7 @@ impl GameStore for PostgresStore {
 
     async fn load_sessions(&self) -> Result<Vec<StoredSession>, PersistError> {
         let rows = sqlx::query(
-            "SELECT session_id, nickname, token, created_at, avatar_id FROM guest_sessions",
+            "SELECT session_id, nickname, token, created_at, avatar_id, avatar_url, user_id FROM guest_sessions",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -184,6 +189,8 @@ impl GameStore for PostgresStore {
                 token: row.get("token"),
                 created_at: row.get("created_at"),
                 avatar_id: row.get("avatar_id"),
+                avatar_url: row.get("avatar_url"),
+                user_id: row.get("user_id"),
             })
             .collect())
     }
@@ -205,7 +212,7 @@ impl GameStore for PostgresStore {
             let room_id: Uuid = row.get("room_id");
             let players = sqlx::query(
                 r#"
-                SELECT session_id, player_id, nickname, seat, ready, joined_at, avatar_id
+                SELECT session_id, player_id, nickname, seat, ready, joined_at, avatar_id, avatar_url
                 FROM room_players WHERE room_id = $1 ORDER BY seat
                 "#,
             )
@@ -221,6 +228,7 @@ impl GameStore for PostgresStore {
                 ready: p.get("ready"),
                 joined_at: p.get("joined_at"),
                 avatar_id: p.get("avatar_id"),
+                avatar_url: p.get("avatar_url"),
             })
             .collect();
 
@@ -912,6 +920,179 @@ impl GameStore for PostgresStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    async fn upsert_user(&self, user: &StoredUser) -> Result<(), PersistError> {
+        sqlx::query(
+            r#"
+            INSERT INTO users (
+                user_id, display_name, avatar_kind, avatar_id, avatar_url, avatar_storage_key,
+                created_at, updated_at, last_seen_at, legal_accepted_at, legal_version
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            ON CONFLICT (user_id) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                avatar_kind = EXCLUDED.avatar_kind,
+                avatar_id = EXCLUDED.avatar_id,
+                avatar_url = EXCLUDED.avatar_url,
+                avatar_storage_key = EXCLUDED.avatar_storage_key,
+                updated_at = EXCLUDED.updated_at,
+                last_seen_at = EXCLUDED.last_seen_at,
+                legal_accepted_at = EXCLUDED.legal_accepted_at,
+                legal_version = EXCLUDED.legal_version
+            "#,
+        )
+        .bind(user.user_id)
+        .bind(&user.display_name)
+        .bind(&user.avatar_kind)
+        .bind(&user.avatar_id)
+        .bind(&user.avatar_url)
+        .bind(&user.avatar_storage_key)
+        .bind(user.created_at)
+        .bind(user.updated_at)
+        .bind(user.last_seen_at)
+        .bind(user.legal_accepted_at)
+        .bind(&user.legal_version)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn upsert_user_identity(&self, identity: &StoredUserIdentity) -> Result<(), PersistError> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_identities (user_id, provider, subject, email, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (provider, subject) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                email = EXCLUDED.email
+            "#,
+        )
+        .bind(identity.user_id)
+        .bind(&identity.provider)
+        .bind(&identity.subject)
+        .bind(&identity.email)
+        .bind(identity.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn find_user_by_identity(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> Result<Option<StoredUser>, PersistError> {
+        let row = sqlx::query(
+            r#"
+            SELECT u.user_id, u.display_name, u.avatar_kind, u.avatar_id, u.avatar_url,
+                   u.avatar_storage_key, u.created_at, u.updated_at, u.last_seen_at,
+                   u.legal_accepted_at, u.legal_version
+            FROM user_identities i
+            JOIN users u ON u.user_id = i.user_id
+            WHERE i.provider = $1 AND i.subject = $2
+            "#,
+        )
+        .bind(provider)
+        .bind(subject)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| StoredUser {
+            user_id: row.get("user_id"),
+            display_name: row.get("display_name"),
+            avatar_kind: row.get("avatar_kind"),
+            avatar_id: row.get("avatar_id"),
+            avatar_url: row.get("avatar_url"),
+            avatar_storage_key: row.get("avatar_storage_key"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+            last_seen_at: row.get("last_seen_at"),
+            legal_accepted_at: row.get("legal_accepted_at"),
+            legal_version: row.get("legal_version"),
+        }))
+    }
+
+    async fn load_user(&self, user_id: uuid::Uuid) -> Result<Option<StoredUser>, PersistError> {
+        let row = sqlx::query(
+            r#"
+            SELECT user_id, display_name, avatar_kind, avatar_id, avatar_url, avatar_storage_key,
+                   created_at, updated_at, last_seen_at, legal_accepted_at, legal_version
+            FROM users WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| StoredUser {
+            user_id: row.get("user_id"),
+            display_name: row.get("display_name"),
+            avatar_kind: row.get("avatar_kind"),
+            avatar_id: row.get("avatar_id"),
+            avatar_url: row.get("avatar_url"),
+            avatar_storage_key: row.get("avatar_storage_key"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+            last_seen_at: row.get("last_seen_at"),
+            legal_accepted_at: row.get("legal_accepted_at"),
+            legal_version: row.get("legal_version"),
+        }))
+    }
+
+    async fn delete_user(&self, user_id: uuid::Uuid) -> Result<(), PersistError> {
+        sqlx::query("UPDATE guest_sessions SET user_id = NULL WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM users WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn load_users(&self) -> Result<Vec<StoredUser>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT user_id, display_name, avatar_kind, avatar_id, avatar_url, avatar_storage_key,
+                   created_at, updated_at, last_seen_at, legal_accepted_at, legal_version
+            FROM users
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| StoredUser {
+                user_id: row.get("user_id"),
+                display_name: row.get("display_name"),
+                avatar_kind: row.get("avatar_kind"),
+                avatar_id: row.get("avatar_id"),
+                avatar_url: row.get("avatar_url"),
+                avatar_storage_key: row.get("avatar_storage_key"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                last_seen_at: row.get("last_seen_at"),
+                legal_accepted_at: row.get("legal_accepted_at"),
+                legal_version: row.get("legal_version"),
+            })
+            .collect())
+    }
+
+    async fn load_user_identities(&self) -> Result<Vec<StoredUserIdentity>, PersistError> {
+        let rows = sqlx::query(
+            "SELECT user_id, provider, subject, email, created_at FROM user_identities",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| StoredUserIdentity {
+                user_id: row.get("user_id"),
+                provider: row.get("provider"),
+                subject: row.get("subject"),
+                email: row.get("email"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
     }
 
     async fn ping(&self) -> Result<(), PersistError> {

@@ -19,6 +19,8 @@ pub fn stored_session(session: &Session) -> StoredSession {
         token: session.token.clone(),
         created_at: Utc::now(),
         avatar_id: session.avatar_id.clone(),
+        avatar_url: session.avatar_url.clone(),
+        user_id: session.user_id,
     }
 }
 
@@ -50,6 +52,7 @@ pub fn stored_room(room: &Room) -> StoredRoom {
                 ready: s.ready,
                 joined_at: s.joined_at,
                 avatar_id: s.avatar_id.clone(),
+                avatar_url: s.avatar_url.clone(),
             })
             .collect(),
         created_at: Utc::now(),

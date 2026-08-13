@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../util/avatar_pack.dart';
 
-/// Built-in pack avatar with optional cheer / flash scale bounce.
+/// Built-in pack avatar or uploaded photo, with optional cheer / flash bounce.
 class PlayerAvatar extends StatefulWidget {
   final String? avatarId;
+  final String? avatarUrl;
   final String nickname;
   final double radius;
   final bool highlight;
@@ -16,6 +17,7 @@ class PlayerAvatar extends StatefulWidget {
     super.key,
     required this.avatarId,
     required this.nickname,
+    this.avatarUrl,
     this.radius = 20,
     this.highlight = false,
     this.muted = false,
@@ -72,7 +74,15 @@ class _PlayerAvatarState extends State<PlayerAvatar>
   Widget build(BuildContext context) {
     final letter = widget.nickname.isNotEmpty ? widget.nickname[0] : '?';
     final glyph = avatarGlyph(widget.avatarId, fallbackLetter: letter);
-    final asset = avatarAssetPath(widget.avatarId);
+    final url = widget.avatarUrl;
+    final asset = (url == null || url.isEmpty)
+        ? avatarAssetPath(widget.avatarId)
+        : null;
+    final ImageProvider? bg = widget.muted
+        ? null
+        : (url != null && url.isNotEmpty)
+            ? NetworkImage(url)
+            : (asset != null ? AssetImage(asset) : null);
     final child = ScaleTransition(
       scale: _scale,
       child: AnimatedContainer(
@@ -92,13 +102,11 @@ class _PlayerAvatarState extends State<PlayerAvatar>
           backgroundColor: widget.muted
               ? Colors.grey.shade700
               : const Color(0xFF37474F),
-          backgroundImage: (!widget.muted && asset != null)
-              ? AssetImage(asset)
-              : null,
+          backgroundImage: bg,
           child: widget.muted
               ? Icon(Icons.wifi_off,
                   size: widget.radius * 0.9, color: Colors.white54)
-              : asset == null
+              : bg == null
                   ? Text(
                       glyph,
                       style: TextStyle(fontSize: widget.radius * 0.95),

@@ -18,6 +18,8 @@ async fn memory_store_finishes_game_and_records_history() {
         store
             .upsert_session(&StoredSession {
                 session_id,
+                avatar_url: None,
+                user_id: None,
                 nickname: format!("P{i}"),
                 token: format!("tok-{i}"),
                 created_at: Utc::now(),
@@ -65,6 +67,7 @@ async fn memory_store_finishes_game_and_records_history() {
                     ready: true,
                     joined_at: Utc::now(),
                     avatar_id: None,
+                    avatar_url: None,
                 })
                 .collect(),
             created_at: Utc::now(),
@@ -184,6 +187,7 @@ async fn action_committed_detects_durable_action_id() {
                     ready: true,
                     joined_at: Utc::now(),
                     avatar_id: None,
+                    avatar_url: None,
                 })
                 .collect(),
             created_at: Utc::now(),

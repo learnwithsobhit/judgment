@@ -1,7 +1,7 @@
 // Shareable room join URL helpers (`/r/{CODE}`).
 
 /// Fallback when neither [Uri.base] nor `--dart-define=PUBLIC_WEB_ORIGIN` apply.
-const kDefaultWebOrigin = 'https://judgment-lws-260731.web.app';
+const kDefaultWebOrigin = 'https://judgment-railway-test.web.app';
 
 /// Build-time web origin for native (Android/iOS) share/join links.
 const String kPublicWebOrigin = String.fromEnvironment(

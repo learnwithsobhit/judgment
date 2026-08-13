@@ -143,6 +143,24 @@ impl GameEngine {
             .find(|p| p.id == player_id)
             .ok_or(GameError::PlayerNotInGame)?;
         player.avatar_id = Some(avatar_id);
+        player.avatar_url = None;
+        self.state.version += 1;
+        Ok(())
+    }
+
+    /// Cosmetic uploaded avatar URL (does not affect rules).
+    pub fn set_avatar_url(
+        &mut self,
+        player_id: PlayerId,
+        avatar_url: String,
+    ) -> Result<(), GameError> {
+        let player = self
+            .state
+            .players
+            .iter_mut()
+            .find(|p| p.id == player_id)
+            .ok_or(GameError::PlayerNotInGame)?;
+        player.avatar_url = Some(avatar_url);
         self.state.version += 1;
         Ok(())
     }
@@ -153,6 +171,7 @@ impl GameEngine {
         player_id: PlayerId,
         nickname: String,
         avatar_id: Option<String>,
+        avatar_url: Option<String>,
     ) -> Result<(), GameError> {
         let player = self
             .state
@@ -162,6 +181,7 @@ impl GameEngine {
             .ok_or(GameError::PlayerNotInGame)?;
         player.nickname = nickname;
         player.avatar_id = avatar_id;
+        player.avatar_url = avatar_url;
         player.is_bot = false;
         player.connection_status = judgement_domain::ConnectionStatus::Connected;
         self.state.version += 1;

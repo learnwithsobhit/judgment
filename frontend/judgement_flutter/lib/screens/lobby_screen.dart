@@ -517,6 +517,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
             )
           : PlayerAvatar(
               avatarId: seat.avatarId,
+              avatarUrl: seat.avatarUrl,
               nickname: seat.nickname,
               radius: 18,
               highlight: isMe,
