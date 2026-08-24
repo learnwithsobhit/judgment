@@ -68,6 +68,10 @@ class GameController extends ChangeNotifier {
   bool _intentionalLeave = false;
   /// When the current socket first looked unstable; used to debounce chrome.
   DateTime? _connectionUnstableSince;
+  /// Ignore re-entrant [connect] while one handshake is in flight.
+  bool _connectInFlight = false;
+  /// Pending exponential-backoff reconnect timer (cancelled on new connect).
+  Timer? _reconnectTimer;
 
   PlayerGameView? view;
   GameConnectionState connection = GameConnectionState.connecting;
@@ -244,6 +248,13 @@ class GameController extends ChangeNotifier {
   }
 
   Future<void> connect() async {
+    if (_disposed || _suppressReconnect) return;
+    if (_connectInFlight) return;
+    _connectInFlight = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    // Close any prior channel first — avoids dual WS / orphan sockets.
+    _closeSocket();
     connection = _reconnectAttempts == 0
         ? GameConnectionState.connecting
         : GameConnectionState.reconnecting;
@@ -254,6 +265,11 @@ class GameController extends ChangeNotifier {
         onDone: _handleDisconnect,
         onError: (_) => _handleDisconnect(),
       );
+      if (_disposed || _suppressReconnect) {
+        socket.close();
+        _connectInFlight = false;
+        return;
+      }
       _socket = socket;
       _subscription = socket.messages.listen(_handleMessage);
       connection = GameConnectionState.connected;
@@ -263,7 +279,9 @@ class GameController extends ChangeNotifier {
       // as well in case this is a resumed session.
       _sendAction({'type': 'request_state_sync'});
       _notify();
+      _connectInFlight = false;
     } catch (_) {
+      _connectInFlight = false;
       _handleDisconnect();
     }
   }
@@ -302,6 +320,8 @@ class GameController extends ChangeNotifier {
 
   void _handleDisconnect() {
     if (_disposed) return;
+    // Closing the prior socket during [connect] must not schedule another reconnect.
+    if (_connectInFlight) return;
     // Unstick bid/play if the socket died before CommandAccepted.
     pendingActionId = null;
     connection = GameConnectionState.disconnected;
@@ -318,7 +338,8 @@ class GameController extends ChangeNotifier {
       _reconnectAttempts += 1;
       final delay =
           Duration(milliseconds: 500 * pow(2, _reconnectAttempts).toInt());
-      Timer(delay, () {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(delay, () {
         if (!_disposed && !_suppressReconnect && !gameAborted) connect();
       });
     }
@@ -475,6 +496,8 @@ class GameController extends ChangeNotifier {
   void leaveGame() {
     _intentionalLeave = true;
     _suppressReconnect = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _sendCommand({'type': 'leave_game'});
   }
 
@@ -545,6 +568,8 @@ class GameController extends ChangeNotifier {
       return;
     }
     _suppressReconnect = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _closeSocket();
     gameId = newGameId;
     gameAborted = false;
@@ -934,6 +959,8 @@ class GameController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _suppressReconnect = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _persistRetryTimer?.cancel();
     _holdTimer?.cancel();
     _bannerTimer?.cancel();
