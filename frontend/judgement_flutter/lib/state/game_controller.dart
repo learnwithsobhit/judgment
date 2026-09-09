@@ -72,6 +72,9 @@ class GameController extends ChangeNotifier {
   bool _connectInFlight = false;
   /// Pending exponential-backoff reconnect timer (cancelled on new connect).
   Timer? _reconnectTimer;
+  /// Inbound WS keepalive so Railway/proxy idle timers see client traffic.
+  Timer? _keepAliveTimer;
+  static const _keepAliveInterval = Duration(seconds: 10);
 
   PlayerGameView? view;
   GameConnectionState connection = GameConnectionState.connecting;
@@ -278,6 +281,7 @@ class GameController extends ChangeNotifier {
       // A fresh personalised snapshot is pushed on connect; ask explicitly
       // as well in case this is a resumed session.
       _sendAction({'type': 'request_state_sync'});
+      _startKeepAlive();
       _notify();
       _connectInFlight = false;
     } catch (_) {
@@ -320,6 +324,7 @@ class GameController extends ChangeNotifier {
 
   void _handleDisconnect() {
     if (_disposed) return;
+    _stopKeepAlive();
     // Closing the prior socket during [connect] must not schedule another reconnect.
     if (_connectInFlight) return;
     // Unstick bid/play if the socket died before CommandAccepted.
@@ -498,7 +503,22 @@ class GameController extends ChangeNotifier {
     _suppressReconnect = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _stopKeepAlive();
     _sendCommand({'type': 'leave_game'});
+  }
+
+  /// After foreground resume (tab/app visible), send one keepalive immediately
+  /// in case the periodic timer was throttled while hidden.
+  void onAppResumed() {
+    if (_disposed ||
+        _suppressReconnect ||
+        gameAborted ||
+        (view?.isFinished ?? false) ||
+        connection != GameConnectionState.connected ||
+        _socket == null) {
+      return;
+    }
+    _socket!.sendKeepAlive();
   }
 
   /// True while leaving the route would vacate a live seat (back/close guard).
@@ -589,10 +609,35 @@ class GameController extends ChangeNotifier {
   }
 
   void _closeSocket() {
+    _stopKeepAlive();
     _subscription?.cancel();
     _subscription = null;
     _socket?.close();
     _socket = null;
+  }
+
+  void _startKeepAlive() {
+    _stopKeepAlive();
+    void tick() {
+      if (_disposed ||
+          _suppressReconnect ||
+          gameAborted ||
+          (view?.isFinished ?? false) ||
+          connection != GameConnectionState.connected ||
+          _socket == null) {
+        _stopKeepAlive();
+        return;
+      }
+      _socket!.sendKeepAlive();
+    }
+
+    tick();
+    _keepAliveTimer = Timer.periodic(_keepAliveInterval, (_) => tick());
+  }
+
+  void _stopKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
   }
 
   void _applySnapshot(PlayerGameView next) {
@@ -656,6 +701,7 @@ class GameController extends ChangeNotifier {
 
     view = next;
     if (next.isFinished) {
+      _stopKeepAlive();
       _clearReclaimStore();
     } else {
       _persistReclaimStore();
@@ -961,6 +1007,7 @@ class GameController extends ChangeNotifier {
     _suppressReconnect = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _stopKeepAlive();
     _persistRetryTimer?.cancel();
     _holdTimer?.cancel();
     _bannerTimer?.cancel();

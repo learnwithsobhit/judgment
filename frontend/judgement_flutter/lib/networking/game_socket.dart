@@ -52,6 +52,18 @@ class GameSocket {
 
   Stream<ServerMessage> get messages => _messages.stream;
 
+  /// Inbound proxy keepalive — not a [ClientEnvelope]; must match server wire shape.
+  static const keepAlivePayload = '{"type":"keep_alive"}';
+
+  void sendKeepAlive() {
+    try {
+      _channel.sink.add(keepAlivePayload);
+    } catch (error) {
+      // Dead or half-open socket — surface through the same path as read errors.
+      onError?.call(error);
+    }
+  }
+
   void sendEnvelope(Map<String, dynamic> envelope) {
     _channel.sink.add(jsonEncode(envelope));
   }

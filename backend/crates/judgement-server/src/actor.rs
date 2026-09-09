@@ -43,9 +43,12 @@ pub enum ActorMessage {
         outbound: mpsc::Sender<ServerMessage>,
         /// Optional rotated token to push to the client (Phase 6 §15.1).
         rotated_token: Option<String>,
+        /// Per-upgrade id so a replaced socket cannot detach the live seat.
+        conn_gen: u64,
     },
     Disconnect {
         player_id: PlayerId,
+        conn_gen: u64,
     },
     Command {
         player_id: PlayerId,
@@ -140,6 +143,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         rx,
         self_tx: tx.clone(),
         clients: HashMap::new(),
+        conn_gens: HashMap::new(),
         processed: config.processed,
         deadline_seq: 0,
         round_advance_seq: 0,
@@ -174,6 +178,8 @@ struct GameActor {
     rx: mpsc::Receiver<ActorMessage>,
     self_tx: mpsc::Sender<ActorMessage>,
     clients: HashMap<PlayerId, mpsc::Sender<ServerMessage>>,
+    /// Live WS generation per seat. Stale Disconnects from a replaced socket must not match.
+    conn_gens: HashMap<PlayerId, u64>,
     processed: HashMap<ActionId, u64>,
     deadline_seq: u64,
     /// Cancels stale end-of-round reveal timers (same pattern as turn deadlines).
@@ -218,11 +224,15 @@ impl GameActor {
                     player_id,
                     outbound,
                     rotated_token,
+                    conn_gen,
                 } => {
-                    self.handle_connect(player_id, outbound, rotated_token);
+                    self.handle_connect(player_id, outbound, rotated_token, conn_gen);
                 }
-                ActorMessage::Disconnect { player_id } => {
-                    self.handle_disconnect(player_id).await;
+                ActorMessage::Disconnect {
+                    player_id,
+                    conn_gen,
+                } => {
+                    self.handle_disconnect(player_id, conn_gen).await;
                 }
                 ActorMessage::Command { player_id, envelope } => {
                     self.handle_command(player_id, envelope).await;
@@ -298,8 +308,11 @@ impl GameActor {
         player_id: PlayerId,
         outbound: mpsc::Sender<ServerMessage>,
         rotated_token: Option<String>,
+        conn_gen: u64,
     ) {
+        let replaced_existing = self.clients.contains_key(&player_id);
         self.clients.insert(player_id, outbound);
+        self.conn_gens.insert(player_id, conn_gen);
         self.dirty_clients.remove(&player_id);
         let previous_status = self
             .engine
@@ -366,17 +379,61 @@ impl GameActor {
             }
             self.resume_timers();
         }
+
+        tracing::info!(
+            game_id = %self.game_id,
+            %player_id,
+            conn_gen,
+            replaced_existing,
+            previous_status = ?previous_status,
+            paused = self.paused,
+            "ws_session_attached"
+        );
     }
 
-    async fn handle_disconnect(&mut self, player_id: PlayerId) {
-        if self.clients.remove(&player_id).is_none() {
+    async fn handle_disconnect(&mut self, player_id: PlayerId, conn_gen: u64) {
+        let live_conn_gen = self.conn_gens.get(&player_id).copied();
+        if live_conn_gen != Some(conn_gen) {
+            if live_conn_gen.is_some() {
+                self.metrics
+                    .ws_stale_disconnects
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::info!(
+                    game_id = %self.game_id,
+                    %player_id,
+                    conn_gen,
+                    live_conn_gen,
+                    "ws_stale_disconnect_ignored"
+                );
+            } else {
+                tracing::info!(
+                    game_id = %self.game_id,
+                    %player_id,
+                    conn_gen,
+                    "ws_disconnect_ignored_unattached"
+                );
+            }
             return;
         }
+        if self.clients.remove(&player_id).is_none() {
+            self.conn_gens.remove(&player_id);
+            return;
+        }
+        self.conn_gens.remove(&player_id);
         self.dirty_clients.remove(&player_id);
         let _ = self
             .engine
             .set_connection_status(player_id, ConnectionStatus::Disconnected);
         self.broadcast(ServerMessage::PlayerDisconnected { player_id });
+
+        let will_start_grace = !self.reconnect_grace.is_zero();
+        tracing::info!(
+            game_id = %self.game_id,
+            %player_id,
+            conn_gen,
+            will_start_grace,
+            "ws_session_detached"
+        );
 
         // Zero grace ⇒ open seat for claim/replace immediately (no wait).
         if self.reconnect_grace.is_zero() {
@@ -474,6 +531,11 @@ impl GameActor {
         self.metrics
             .seat_vacancies
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!(
+            game_id = %self.game_id,
+            %player_id,
+            "seat_marked_vacant"
+        );
         self.broadcast(ServerMessage::SeatVacant {
             player_id,
             room_code: self.room_code.clone(),
@@ -628,6 +690,7 @@ impl GameActor {
         self.paused = true;
         self.grace_ids.clear();
         self.vacancy_ids.clear();
+        self.conn_gens.clear();
         self.deadline_seq += 1;
         self.round_advance_seq += 1;
         if let Some(store) = &self.store {
@@ -730,6 +793,7 @@ impl GameActor {
 
         if matches!(envelope.action, ClientCommand::LeaveGame) {
             // Permanent leave: seat becomes vacant (replace-or-end).
+            self.conn_gens.remove(&player_id);
             if self.clients.remove(&player_id).is_some() {
                 self.grace_ids.remove(&player_id);
                 self.pause_announced.remove(&player_id);

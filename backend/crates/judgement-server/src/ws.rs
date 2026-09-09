@@ -1,5 +1,6 @@
 //! WebSocket endpoint for live gameplay (PLAN.md §13.2, Phase 6 reconnect).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +23,8 @@ use crate::state::AppState;
 pub const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 pub const LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
+
+static NEXT_CONN_GEN: AtomicU64 = AtomicU64::new(1);
 
 /// Why a live game WebSocket ended — logged at disconnect for RCA.
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +121,7 @@ async fn handle_socket(
     rotated_token: Option<String>,
     state: Arc<AppState>,
 ) {
+    let conn_gen = NEXT_CONN_GEN.fetch_add(1, Ordering::Relaxed);
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<ServerMessage>(CLIENT_BUFFER_CAPACITY);
 
     if commands
@@ -125,6 +129,7 @@ async fn handle_socket(
             player_id,
             outbound: outbound_tx.clone(),
             rotated_token,
+            conn_gen,
         })
         .await
         .is_err()
@@ -132,6 +137,7 @@ async fn handle_socket(
         tracing::warn!(
             %game_id,
             %player_id,
+            conn_gen,
             reason = ?WsDisconnectReason::ActorConnectFailed,
             "websocket disconnected"
         );
@@ -146,11 +152,18 @@ async fn handle_socket(
         return;
     }
 
+    tracing::info!(
+        %game_id,
+        %player_id,
+        conn_gen,
+        "websocket connected"
+    );
+
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     let writer_game_id = game_id;
     let writer_player_id = player_id;
-    let writer = tokio::spawn(async move {
+    let mut writer = tokio::spawn(async move {
         let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
         heartbeat.tick().await; // skip immediate fire; first keepalive at HEARTBEAT_INTERVAL
         loop {
@@ -198,7 +211,14 @@ async fn handle_socket(
 
     let mut last_seen = Instant::now();
     let (disconnect_reason, disconnect_detail) = loop {
-        let frame = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()).await;
+        tokio::select! {
+            _ = &mut writer => {
+                break (
+                    WsDisconnectReason::StreamEnded,
+                    "writer_stopped".into(),
+                );
+            }
+            frame = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()) => {
         let message = match frame {
             Err(_elapsed) => {
                 let idle = last_seen.elapsed();
@@ -229,6 +249,9 @@ async fn handle_socket(
 
         match message {
             Message::Text(text) => {
+                if is_client_keep_alive(&text) {
+                    continue;
+                }
                 let envelope: ClientEnvelope = match serde_json::from_str(&text) {
                     Ok(envelope) => envelope,
                     Err(error) => {
@@ -273,18 +296,26 @@ async fn handle_socket(
             }
             _ => {}
         }
+            }
+        }
     };
 
     tracing::info!(
         %game_id,
         %player_id,
+        conn_gen,
         reason = ?disconnect_reason,
         detail = %disconnect_detail,
         idle_ms = last_seen.elapsed().as_millis(),
         "websocket disconnected"
     );
 
-    let _ = commands.send(ActorMessage::Disconnect { player_id }).await;
+    let _ = commands
+        .send(ActorMessage::Disconnect {
+            player_id,
+            conn_gen,
+        })
+        .await;
     writer.abort();
     state
         .metrics
@@ -315,4 +346,42 @@ fn send_rejection(
         retryable,
         message,
     });
+}
+
+/// Client→server keepalive (`{"type":"keep_alive"}` only). Not a command envelope.
+fn is_client_keep_alive(text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
+        return false;
+    };
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    if obj.get("type").and_then(|v| v.as_str()) != Some("keep_alive") {
+        return false;
+    }
+    // Reject anything that looks like a partial ClientEnvelope.
+    !obj.contains_key("action_id")
+        && !obj.contains_key("protocol_version")
+        && !obj.contains_key("expected_state_version")
+        && !obj.contains_key("game_id")
+        && !obj.contains_key("action")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_client_keep_alive;
+
+    #[test]
+    fn client_keep_alive_is_recognized() {
+        assert!(is_client_keep_alive(r#"{"type":"keep_alive"}"#));
+        assert!(is_client_keep_alive("  {\"type\":\"keep_alive\"}  "));
+    }
+
+    #[test]
+    fn client_envelope_is_not_keep_alive() {
+        assert!(!is_client_keep_alive(
+            r#"{"type":"keep_alive","action_id":"x","protocol_version":1,"game_id":"00000000-0000-0000-0000-000000000001","expected_state_version":0,"action":{"type":"request_state_sync"}}"#
+        ));
+        assert!(!is_client_keep_alive(r#"{"type":"ready","protocol_version":1}"#));
+    }
 }

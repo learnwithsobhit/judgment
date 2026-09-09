@@ -1,0 +1,657 @@
+diff --git a/backend/crates/judgement-server/src/actor.rs b/backend/crates/judgement-server/src/actor.rs
+index 7044aa1..5104f9b 100644
+--- a/backend/crates/judgement-server/src/actor.rs
++++ b/backend/crates/judgement-server/src/actor.rs
+@@ -43,9 +43,12 @@ pub enum ActorMessage {
+         outbound: mpsc::Sender<ServerMessage>,
+         /// Optional rotated token to push to the client (Phase 6 §15.1).
+         rotated_token: Option<String>,
++        /// Per-upgrade id so a replaced socket cannot detach the live seat.
++        conn_gen: u64,
+     },
+     Disconnect {
+         player_id: PlayerId,
++        conn_gen: u64,
+     },
+     Command {
+         player_id: PlayerId,
+@@ -140,6 +143,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
+         rx,
+         self_tx: tx.clone(),
+         clients: HashMap::new(),
++        conn_gens: HashMap::new(),
+         processed: config.processed,
+         deadline_seq: 0,
+         round_advance_seq: 0,
+@@ -174,6 +178,8 @@ struct GameActor {
+     rx: mpsc::Receiver<ActorMessage>,
+     self_tx: mpsc::Sender<ActorMessage>,
+     clients: HashMap<PlayerId, mpsc::Sender<ServerMessage>>,
++    /// Live WS generation per seat. Stale Disconnects from a replaced socket must not match.
++    conn_gens: HashMap<PlayerId, u64>,
+     processed: HashMap<ActionId, u64>,
+     deadline_seq: u64,
+     /// Cancels stale end-of-round reveal timers (same pattern as turn deadlines).
+@@ -218,11 +224,15 @@ impl GameActor {
+                     player_id,
+                     outbound,
+                     rotated_token,
++                    conn_gen,
+                 } => {
+-                    self.handle_connect(player_id, outbound, rotated_token);
++                    self.handle_connect(player_id, outbound, rotated_token, conn_gen);
+                 }
+-                ActorMessage::Disconnect { player_id } => {
+-                    self.handle_disconnect(player_id).await;
++                ActorMessage::Disconnect {
++                    player_id,
++                    conn_gen,
++                } => {
++                    self.handle_disconnect(player_id, conn_gen).await;
+                 }
+                 ActorMessage::Command { player_id, envelope } => {
+                     self.handle_command(player_id, envelope).await;
+@@ -298,8 +308,11 @@ impl GameActor {
+         player_id: PlayerId,
+         outbound: mpsc::Sender<ServerMessage>,
+         rotated_token: Option<String>,
++        conn_gen: u64,
+     ) {
++        let replaced_existing = self.clients.contains_key(&player_id);
+         self.clients.insert(player_id, outbound);
++        self.conn_gens.insert(player_id, conn_gen);
+         self.dirty_clients.remove(&player_id);
+         let previous_status = self
+             .engine
+@@ -366,18 +379,62 @@ impl GameActor {
+             }
+             self.resume_timers();
+         }
++
++        tracing::info!(
++            game_id = %self.game_id,
++            %player_id,
++            conn_gen,
++            replaced_existing,
++            previous_status = ?previous_status,
++            paused = self.paused,
++            "ws_session_attached"
++        );
+     }
+ 
+-    async fn handle_disconnect(&mut self, player_id: PlayerId) {
++    async fn handle_disconnect(&mut self, player_id: PlayerId, conn_gen: u64) {
++        let live_conn_gen = self.conn_gens.get(&player_id).copied();
++        if live_conn_gen != Some(conn_gen) {
++            if live_conn_gen.is_some() {
++                self.metrics
++                    .ws_stale_disconnects
++                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                tracing::info!(
++                    game_id = %self.game_id,
++                    %player_id,
++                    conn_gen,
++                    live_conn_gen,
++                    "ws_stale_disconnect_ignored"
++                );
++            } else {
++                tracing::info!(
++                    game_id = %self.game_id,
++                    %player_id,
++                    conn_gen,
++                    "ws_disconnect_ignored_unattached"
++                );
++            }
++            return;
++        }
+         if self.clients.remove(&player_id).is_none() {
++            self.conn_gens.remove(&player_id);
+             return;
+         }
++        self.conn_gens.remove(&player_id);
+         self.dirty_clients.remove(&player_id);
+         let _ = self
+             .engine
+             .set_connection_status(player_id, ConnectionStatus::Disconnected);
+         self.broadcast(ServerMessage::PlayerDisconnected { player_id });
+ 
++        let will_start_grace = !self.reconnect_grace.is_zero();
++        tracing::info!(
++            game_id = %self.game_id,
++            %player_id,
++            conn_gen,
++            will_start_grace,
++            "ws_session_detached"
++        );
++
+         // Zero grace ⇒ open seat for claim/replace immediately (no wait).
+         if self.reconnect_grace.is_zero() {
+             if player_id == self.host_player_id {
+@@ -474,6 +531,11 @@ impl GameActor {
+         self.metrics
+             .seat_vacancies
+             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++        tracing::info!(
++            game_id = %self.game_id,
++            %player_id,
++            "seat_marked_vacant"
++        );
+         self.broadcast(ServerMessage::SeatVacant {
+             player_id,
+             room_code: self.room_code.clone(),
+@@ -628,6 +690,7 @@ impl GameActor {
+         self.paused = true;
+         self.grace_ids.clear();
+         self.vacancy_ids.clear();
++        self.conn_gens.clear();
+         self.deadline_seq += 1;
+         self.round_advance_seq += 1;
+         if let Some(store) = &self.store {
+@@ -730,6 +793,7 @@ impl GameActor {
+ 
+         if matches!(envelope.action, ClientCommand::LeaveGame) {
+             // Permanent leave: seat becomes vacant (replace-or-end).
++            self.conn_gens.remove(&player_id);
+             if self.clients.remove(&player_id).is_some() {
+                 self.grace_ids.remove(&player_id);
+                 self.pause_announced.remove(&player_id);
+diff --git a/backend/crates/judgement-server/src/metrics.rs b/backend/crates/judgement-server/src/metrics.rs
+index 22b712c..b6e76c3 100644
+--- a/backend/crates/judgement-server/src/metrics.rs
++++ b/backend/crates/judgement-server/src/metrics.rs
+@@ -17,6 +17,7 @@ pub struct Metrics {
+     pub ws_disconnected_stream_ended: AtomicU64,
+     pub ws_disconnected_actor_closed: AtomicU64,
+     pub ws_disconnected_actor_connect_failed: AtomicU64,
++    pub ws_stale_disconnects: AtomicU64,
+     pub reconnects: AtomicU64,
+     pub bot_takeovers: AtomicU64,
+     pub seat_vacancies: AtomicU64,
+@@ -115,6 +116,7 @@ impl Metrics {
+         counter!("judgement_ws_disconnected_stream_ended_total", "WS disconnects from read stream end", ws_disconnected_stream_ended);
+         counter!("judgement_ws_disconnected_actor_closed_total", "WS disconnects because the game actor closed", ws_disconnected_actor_closed);
+         counter!("judgement_ws_disconnected_actor_connect_failed_total", "WS upgrades that failed actor Connect handoff", ws_disconnected_actor_connect_failed);
++        counter!("judgement_ws_stale_disconnects_total", "Disconnects ignored because a newer WS already owns the seat", ws_stale_disconnects);
+         counter!("judgement_reconnects_total", "Player reconnects that restored control", reconnects);
+         counter!("judgement_bot_takeovers_total", "Legacy bot takeovers (unused in live replace-or-end)", bot_takeovers);
+         counter!("judgement_seat_vacancies_total", "Seats marked vacant after grace/leave", seat_vacancies);
+diff --git a/backend/crates/judgement-server/src/ws.rs b/backend/crates/judgement-server/src/ws.rs
+index ca4b1c7..0eb46a9 100644
+--- a/backend/crates/judgement-server/src/ws.rs
++++ b/backend/crates/judgement-server/src/ws.rs
+@@ -1,5 +1,6 @@
+ //! WebSocket endpoint for live gameplay (PLAN.md §13.2, Phase 6 reconnect).
+ 
++use std::sync::atomic::{AtomicU64, Ordering};
+ use std::sync::Arc;
+ use std::time::Duration;
+ 
+@@ -23,6 +24,8 @@ pub const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
+ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+ pub const LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
+ 
++static NEXT_CONN_GEN: AtomicU64 = AtomicU64::new(1);
++
+ /// Why a live game WebSocket ended — logged at disconnect for RCA.
+ #[derive(Debug, Clone, Copy)]
+ enum WsDisconnectReason {
+@@ -118,6 +121,7 @@ async fn handle_socket(
+     rotated_token: Option<String>,
+     state: Arc<AppState>,
+ ) {
++    let conn_gen = NEXT_CONN_GEN.fetch_add(1, Ordering::Relaxed);
+     let (outbound_tx, mut outbound_rx) = mpsc::channel::<ServerMessage>(CLIENT_BUFFER_CAPACITY);
+ 
+     if commands
+@@ -125,6 +129,7 @@ async fn handle_socket(
+             player_id,
+             outbound: outbound_tx.clone(),
+             rotated_token,
++            conn_gen,
+         })
+         .await
+         .is_err()
+@@ -132,6 +137,7 @@ async fn handle_socket(
+         tracing::warn!(
+             %game_id,
+             %player_id,
++            conn_gen,
+             reason = ?WsDisconnectReason::ActorConnectFailed,
+             "websocket disconnected"
+         );
+@@ -146,11 +152,18 @@ async fn handle_socket(
+         return;
+     }
+ 
++    tracing::info!(
++        %game_id,
++        %player_id,
++        conn_gen,
++        "websocket connected"
++    );
++
+     let (mut ws_tx, mut ws_rx) = socket.split();
+ 
+     let writer_game_id = game_id;
+     let writer_player_id = player_id;
+-    let writer = tokio::spawn(async move {
++    let mut writer = tokio::spawn(async move {
+         let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+         heartbeat.tick().await; // skip immediate fire; first keepalive at HEARTBEAT_INTERVAL
+         loop {
+@@ -198,7 +211,14 @@ async fn handle_socket(
+ 
+     let mut last_seen = Instant::now();
+     let (disconnect_reason, disconnect_detail) = loop {
+-        let frame = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()).await;
++        tokio::select! {
++            _ = &mut writer => {
++                break (
++                    WsDisconnectReason::StreamEnded,
++                    "writer_stopped".into(),
++                );
++            }
++            frame = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()) => {
+         let message = match frame {
+             Err(_elapsed) => {
+                 let idle = last_seen.elapsed();
+@@ -229,6 +249,9 @@ async fn handle_socket(
+ 
+         match message {
+             Message::Text(text) => {
++                if is_client_keep_alive(&text) {
++                    continue;
++                }
+                 let envelope: ClientEnvelope = match serde_json::from_str(&text) {
+                     Ok(envelope) => envelope,
+                     Err(error) => {
+@@ -273,18 +296,26 @@ async fn handle_socket(
+             }
+             _ => {}
+         }
++            }
++        }
+     };
+ 
+     tracing::info!(
+         %game_id,
+         %player_id,
++        conn_gen,
+         reason = ?disconnect_reason,
+         detail = %disconnect_detail,
+         idle_ms = last_seen.elapsed().as_millis(),
+         "websocket disconnected"
+     );
+ 
+-    let _ = commands.send(ActorMessage::Disconnect { player_id }).await;
++    let _ = commands
++        .send(ActorMessage::Disconnect {
++            player_id,
++            conn_gen,
++        })
++        .await;
+     writer.abort();
+     state
+         .metrics
+@@ -316,3 +347,41 @@ fn send_rejection(
+         message,
+     });
+ }
++
++/// Client→server keepalive (`{"type":"keep_alive"}` only). Not a command envelope.
++fn is_client_keep_alive(text: &str) -> bool {
++    let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
++        return false;
++    };
++    let Some(obj) = value.as_object() else {
++        return false;
++    };
++    if obj.get("type").and_then(|v| v.as_str()) != Some("keep_alive") {
++        return false;
++    }
++    // Reject anything that looks like a partial ClientEnvelope.
++    !obj.contains_key("action_id")
++        && !obj.contains_key("protocol_version")
++        && !obj.contains_key("expected_state_version")
++        && !obj.contains_key("game_id")
++        && !obj.contains_key("action")
++}
++
++#[cfg(test)]
++mod tests {
++    use super::is_client_keep_alive;
++
++    #[test]
++    fn client_keep_alive_is_recognized() {
++        assert!(is_client_keep_alive(r#"{"type":"keep_alive"}"#));
++        assert!(is_client_keep_alive("  {\"type\":\"keep_alive\"}  "));
++    }
++
++    #[test]
++    fn client_envelope_is_not_keep_alive() {
++        assert!(!is_client_keep_alive(
++            r#"{"type":"keep_alive","action_id":"x","protocol_version":1,"game_id":"00000000-0000-0000-0000-000000000001","expected_state_version":0,"action":{"type":"request_state_sync"}}"#
++        ));
++        assert!(!is_client_keep_alive(r#"{"type":"ready","protocol_version":1}"#));
++    }
++}
+diff --git a/backend/crates/judgement-server/tests/presence.rs b/backend/crates/judgement-server/tests/presence.rs
+index 6c05af3..8930d17 100644
+--- a/backend/crates/judgement-server/tests/presence.rs
++++ b/backend/crates/judgement-server/tests/presence.rs
+@@ -779,6 +779,94 @@ async fn silent_ws_blip_reconnects_without_vacant_or_host_change() {
+     );
+ }
+ 
++#[tokio::test]
++async fn replacing_ws_then_closing_old_socket_does_not_vacant_or_pause() {
++    let state = bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
++        .await
++        .unwrap();
++    let addr = spawn_with(state).await;
++    let base = format!("http://{addr}");
++
++    let mut clients = Vec::new();
++    for name in ["A", "B", "C", "D"] {
++        clients.push(Client::guest(&base, name).await);
++    }
++    let (game_id, _) = start_four_player_game(&base, &mut clients).await;
++    for client in &mut clients {
++        client.connect_ws(&base, game_id).await;
++    }
++
++    let host_id = clients[0].player_id;
++    let mut old_ws = clients[0].ws.take().expect("first socket");
++    clients[0].connect_ws(&base, game_id).await;
++
++    let attach_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
++    let mut host_connected = false;
++    while tokio::time::Instant::now() < attach_deadline && !host_connected {
++        let ws = clients[1].ws.as_mut().unwrap();
++        if let Ok(Some(Ok(Message::Text(text)))) =
++            tokio::time::timeout(Duration::from_millis(80), ws.next()).await
++        {
++            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
++            if let ServerMessage::StateSnapshot { view } = msg {
++                if let Some(opp) = view.opponents.iter().find(|o| o.player_id == host_id) {
++                    host_connected = opp.connection_status == ConnectionStatus::Connected;
++                }
++                clients[1].last = Some(view);
++            }
++        }
++    }
++    assert!(
++        host_connected,
++        "second WS should attach the host before the old socket closes"
++    );
++
++    old_ws.close(None).await.unwrap();
++
++    let deadline = tokio::time::Instant::now() + Duration::from_millis(2500);
++    let mut saw_vacant = false;
++    let mut saw_pause = false;
++    let mut saw_host_disconnected = false;
++    while tokio::time::Instant::now() < deadline {
++        let ws = clients[1].ws.as_mut().unwrap();
++        if let Ok(Some(Ok(Message::Text(text)))) =
++            tokio::time::timeout(Duration::from_millis(80), ws.next()).await
++        {
++            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
++            match msg {
++                ServerMessage::SeatVacant { .. } => saw_vacant = true,
++                ServerMessage::GamePaused { .. } => saw_pause = true,
++                ServerMessage::PlayerDisconnected { player_id } if player_id == host_id => {
++                    saw_host_disconnected = true;
++                }
++                ServerMessage::StateSnapshot { view } => {
++                    if let Some(opp) = view.opponents.iter().find(|o| o.player_id == host_id) {
++                        host_connected = opp.connection_status == ConnectionStatus::Connected;
++                    }
++                    clients[1].last = Some(view);
++                }
++                _ => {}
++            }
++        }
++    }
++    assert!(
++        !saw_vacant,
++        "closing a replaced socket must not vacant the live seat"
++    );
++    assert!(
++        !saw_pause,
++        "closing a replaced socket must not pause the table"
++    );
++    assert!(
++        !saw_host_disconnected,
++        "closing a replaced socket must not broadcast PlayerDisconnected for the live seat"
++    );
++    assert!(
++        host_connected,
++        "host must stay connected after the old WS closes"
++    );
++}
++
+ #[tokio::test]
+ async fn grace_expiry_vacates_and_migrates_host() {
+     let state =
+diff --git a/frontend/judgement_flutter/firebase.json b/frontend/judgement_flutter/firebase.json
+index 4c4db79..d547b9c 100644
+--- a/frontend/judgement_flutter/firebase.json
++++ b/frontend/judgement_flutter/firebase.json
+@@ -266,17 +266,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20260824165401-de0b676",
++          "destination": "/index.html?_b=20260829114353-ac22427",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20260824165401-de0b676&room=:code",
++          "destination": "/index.html?_b=20260829114353-ac22427&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20260824165401-de0b676&event=:slug",
++          "destination": "/index.html?_b=20260829114353-ac22427&event=:slug",
+           "type": 302
+         }
+       ],
+@@ -554,17 +554,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20260824165401-de0b676",
++          "destination": "/index.html?_b=20260829114353-ac22427",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20260824165401-de0b676&room=:code",
++          "destination": "/index.html?_b=20260829114353-ac22427&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20260824165401-de0b676&event=:slug",
++          "destination": "/index.html?_b=20260829114353-ac22427&event=:slug",
+           "type": 302
+         }
+       ],
+diff --git a/frontend/judgement_flutter/lib/networking/game_socket.dart b/frontend/judgement_flutter/lib/networking/game_socket.dart
+index 9afdbcd..9f87b2c 100644
+--- a/frontend/judgement_flutter/lib/networking/game_socket.dart
++++ b/frontend/judgement_flutter/lib/networking/game_socket.dart
+@@ -52,6 +52,18 @@ class GameSocket {
+ 
+   Stream<ServerMessage> get messages => _messages.stream;
+ 
++  /// Inbound proxy keepalive — not a [ClientEnvelope]; must match server wire shape.
++  static const keepAlivePayload = '{"type":"keep_alive"}';
++
++  void sendKeepAlive() {
++    try {
++      _channel.sink.add(keepAlivePayload);
++    } catch (error) {
++      // Dead or half-open socket — surface through the same path as read errors.
++      onError?.call(error);
++    }
++  }
++
+   void sendEnvelope(Map<String, dynamic> envelope) {
+     _channel.sink.add(jsonEncode(envelope));
+   }
+diff --git a/frontend/judgement_flutter/lib/screens/table_screen.dart b/frontend/judgement_flutter/lib/screens/table_screen.dart
+index b357910..ab1e729 100644
+--- a/frontend/judgement_flutter/lib/screens/table_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/table_screen.dart
+@@ -36,7 +36,7 @@ class TableScreen extends StatefulWidget {
+   State<TableScreen> createState() => _TableScreenState();
+ }
+ 
+-class _TableScreenState extends State<TableScreen> {
++class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
+   Timer? _ticker;
+   /// After the game ends, celebrate first; open results on demand.
+   bool _showResults = false;
+@@ -48,6 +48,7 @@ class _TableScreenState extends State<TableScreen> {
+   @override
+   void initState() {
+     super.initState();
++    WidgetsBinding.instance.addObserver(this);
+     controller.addListener(_onControllerChanged);
+     _syncExitGuard();
+     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
+@@ -67,6 +68,7 @@ class _TableScreenState extends State<TableScreen> {
+ 
+   @override
+   void dispose() {
++    WidgetsBinding.instance.removeObserver(this);
+     setGameExitGuard(false);
+     _ticker?.cancel();
+     controller.removeListener(_onControllerChanged);
+@@ -78,6 +80,13 @@ class _TableScreenState extends State<TableScreen> {
+     setGameExitGuard(!_leaving && controller.shouldGuardExit);
+   }
+ 
++  @override
++  void didChangeAppLifecycleState(AppLifecycleState state) {
++    if (state == AppLifecycleState.resumed) {
++      controller.onAppResumed();
++    }
++  }
++
+   Future<void> _confirmAndLeave({required String source}) async {
+     if (_leaveDialogOpen || _leaving || !controller.shouldGuardExit) return;
+     _leaveDialogOpen = true;
+diff --git a/frontend/judgement_flutter/lib/state/game_controller.dart b/frontend/judgement_flutter/lib/state/game_controller.dart
+index 2a32206..d8d3cbf 100644
+--- a/frontend/judgement_flutter/lib/state/game_controller.dart
++++ b/frontend/judgement_flutter/lib/state/game_controller.dart
+@@ -72,6 +72,9 @@ class GameController extends ChangeNotifier {
+   bool _connectInFlight = false;
+   /// Pending exponential-backoff reconnect timer (cancelled on new connect).
+   Timer? _reconnectTimer;
++  /// Inbound WS keepalive so Railway/proxy idle timers see client traffic.
++  Timer? _keepAliveTimer;
++  static const _keepAliveInterval = Duration(seconds: 10);
+ 
+   PlayerGameView? view;
+   GameConnectionState connection = GameConnectionState.connecting;
+@@ -278,6 +281,7 @@ class GameController extends ChangeNotifier {
+       // A fresh personalised snapshot is pushed on connect; ask explicitly
+       // as well in case this is a resumed session.
+       _sendAction({'type': 'request_state_sync'});
++      _startKeepAlive();
+       _notify();
+       _connectInFlight = false;
+     } catch (_) {
+@@ -320,6 +324,7 @@ class GameController extends ChangeNotifier {
+ 
+   void _handleDisconnect() {
+     if (_disposed) return;
++    _stopKeepAlive();
+     // Closing the prior socket during [connect] must not schedule another reconnect.
+     if (_connectInFlight) return;
+     // Unstick bid/play if the socket died before CommandAccepted.
+@@ -498,9 +503,24 @@ class GameController extends ChangeNotifier {
+     _suppressReconnect = true;
+     _reconnectTimer?.cancel();
+     _reconnectTimer = null;
++    _stopKeepAlive();
+     _sendCommand({'type': 'leave_game'});
+   }
+ 
++  /// After foreground resume (tab/app visible), send one keepalive immediately
++  /// in case the periodic timer was throttled while hidden.
++  void onAppResumed() {
++    if (_disposed ||
++        _suppressReconnect ||
++        gameAborted ||
++        (view?.isFinished ?? false) ||
++        connection != GameConnectionState.connected ||
++        _socket == null) {
++      return;
++    }
++    _socket!.sendKeepAlive();
++  }
++
+   /// True while leaving the route would vacate a live seat (back/close guard).
+   bool get shouldGuardExit =>
+       !gameAborted && !(view?.isFinished ?? false);
+@@ -589,12 +609,37 @@ class GameController extends ChangeNotifier {
+   }
+ 
+   void _closeSocket() {
++    _stopKeepAlive();
+     _subscription?.cancel();
+     _subscription = null;
+     _socket?.close();
+     _socket = null;
+   }
+ 
++  void _startKeepAlive() {
++    _stopKeepAlive();
++    void tick() {
++      if (_disposed ||
++          _suppressReconnect ||
++          gameAborted ||
++          (view?.isFinished ?? false) ||
++          connection != GameConnectionState.connected ||
++          _socket == null) {
++        _stopKeepAlive();
++        return;
++      }
++      _socket!.sendKeepAlive();
++    }
++
++    tick();
++    _keepAliveTimer = Timer.periodic(_keepAliveInterval, (_) => tick());
++  }
++
++  void _stopKeepAlive() {
++    _keepAliveTimer?.cancel();
++    _keepAliveTimer = null;
++  }
++
+   void _applySnapshot(PlayerGameView next) {
+     final prev = view;
+     final prevHistoryLen = prev?.roundHistory.length ?? 0;
+@@ -656,6 +701,7 @@ class GameController extends ChangeNotifier {
+ 
+     view = next;
+     if (next.isFinished) {
++      _stopKeepAlive();
+       _clearReclaimStore();
+     } else {
+       _persistReclaimStore();
+@@ -961,6 +1007,7 @@ class GameController extends ChangeNotifier {
+     _suppressReconnect = true;
+     _reconnectTimer?.cancel();
+     _reconnectTimer = null;
++    _stopKeepAlive();
+     _persistRetryTimer?.cancel();
+     _holdTimer?.cancel();
+     _bannerTimer?.cancel();

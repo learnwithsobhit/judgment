@@ -17,6 +17,7 @@ pub struct Metrics {
     pub ws_disconnected_stream_ended: AtomicU64,
     pub ws_disconnected_actor_closed: AtomicU64,
     pub ws_disconnected_actor_connect_failed: AtomicU64,
+    pub ws_stale_disconnects: AtomicU64,
     pub reconnects: AtomicU64,
     pub bot_takeovers: AtomicU64,
     pub seat_vacancies: AtomicU64,
@@ -115,6 +116,7 @@ impl Metrics {
         counter!("judgement_ws_disconnected_stream_ended_total", "WS disconnects from read stream end", ws_disconnected_stream_ended);
         counter!("judgement_ws_disconnected_actor_closed_total", "WS disconnects because the game actor closed", ws_disconnected_actor_closed);
         counter!("judgement_ws_disconnected_actor_connect_failed_total", "WS upgrades that failed actor Connect handoff", ws_disconnected_actor_connect_failed);
+        counter!("judgement_ws_stale_disconnects_total", "Disconnects ignored because a newer WS already owns the seat", ws_stale_disconnects);
         counter!("judgement_reconnects_total", "Player reconnects that restored control", reconnects);
         counter!("judgement_bot_takeovers_total", "Legacy bot takeovers (unused in live replace-or-end)", bot_takeovers);
         counter!("judgement_seat_vacancies_total", "Seats marked vacant after grace/leave", seat_vacancies);

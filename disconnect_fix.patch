@@ -1,0 +1,722 @@
+diff --git a/backend/crates/judgement-server/src/state.rs b/backend/crates/judgement-server/src/state.rs
+index 731278a..429fc1a 100644
+--- a/backend/crates/judgement-server/src/state.rs
++++ b/backend/crates/judgement-server/src/state.rs
+@@ -26,10 +26,13 @@ use crate::error::ApiError;
+ use crate::http_limit::{HttpLimitConfig, HttpRateLimiter};
+ use crate::metrics::Metrics;
+ 
+-/// Live Railway default: absorb short WS blips without immediate vacant.
+-pub const DEFAULT_RECONNECT_GRACE: Duration = Duration::from_secs(12);
++/// Live Railway default: absorb phone-call / network gaps without immediate vacant.
++pub const DEFAULT_RECONNECT_GRACE: Duration = Duration::from_secs(60);
+ 
+-/// `RECONNECT_GRACE_SECONDS` (default 12, clamp 0..=120).
++/// How long the previous bearer remains valid after WS token rotation.
++pub const TOKEN_OVERLAP: Duration = Duration::from_secs(60);
++
++/// `RECONNECT_GRACE_SECONDS` (default 60, clamp 0..=120).
+ pub fn reconnect_grace_from_env() -> Duration {
+     let secs = std::env::var("RECONNECT_GRACE_SECONDS")
+         .ok()
+@@ -196,6 +199,8 @@ pub struct AppState {
+     pub restart_limits: Mutex<HashMap<RoomId, Instant>>,
+     /// Applied at game start and persisted on `GameRules.reconnect_grace_seconds`.
+     pub reconnect_grace: Duration,
++    /// Previous bearers still accepted until this Instant (WS rotate overlap).
++    pub token_overlap_until: Mutex<HashMap<String, Instant>>,
+ }
+ 
+ impl AppState {
+@@ -218,6 +223,7 @@ impl AppState {
+             active_websockets: std::sync::atomic::AtomicU64::new(0),
+             restart_limits: Mutex::default(),
+             reconnect_grace: reconnect_grace_from_env(),
++            token_overlap_until: Mutex::default(),
+         }
+     }
+ 
+@@ -260,23 +266,73 @@ impl AppState {
+     }
+ 
+     pub fn session_for_token(&self, token: &str) -> Option<Session> {
++        self.purge_expired_overlap_tokens();
+         let session_id = *self.tokens.lock().unwrap().get(token)?;
+         self.sessions.lock().unwrap().get(&session_id).cloned()
+     }
+ 
+     /// Rotate the bearer token for a session (PLAN.md §15.1). Returns the new
+-    /// token; the previous token is invalidated immediately.
++    /// token. The previous token stays valid for [`TOKEN_OVERLAP`] so a client
++    /// that missed `TokenRotated` can still reconnect (phone-call kill race).
+     pub fn rotate_token(&self, session_id: SessionId) -> Option<String> {
+         let mut sessions = self.sessions.lock().unwrap();
+         let mut tokens = self.tokens.lock().unwrap();
++        let mut overlap = self.token_overlap_until.lock().unwrap();
+         let session = sessions.get_mut(&session_id)?;
+-        tokens.remove(&session.token);
++        let old_token = session.token.clone();
+         let new_token = generate_token();
+         session.token = new_token.clone();
+         tokens.insert(new_token.clone(), session_id);
++        // Keep old_token in `tokens` until overlap expires.
++        overlap.insert(old_token, Instant::now() + TOKEN_OVERLAP);
+         Some(new_token)
+     }
+ 
++    /// Drop every bearer mapped to this session (current + overlap).
++    pub fn invalidate_session_tokens(&self, session_id: SessionId) {
++        let mut tokens = self.tokens.lock().unwrap();
++        let mut overlap = self.token_overlap_until.lock().unwrap();
++        let doomed: Vec<String> = tokens
++            .iter()
++            .filter(|(_, sid)| **sid == session_id)
++            .map(|(t, _)| t.clone())
++            .collect();
++        for t in doomed {
++            tokens.remove(&t);
++            overlap.remove(&t);
++        }
++    }
++
++    fn purge_expired_overlap_tokens(&self) {
++        let now = Instant::now();
++        let expired: Vec<String> = {
++            let overlap = self.token_overlap_until.lock().unwrap();
++            overlap
++                .iter()
++                .filter(|(_, until)| now >= **until)
++                .map(|(t, _)| t.clone())
++                .collect()
++        };
++        if expired.is_empty() {
++            return;
++        }
++        let mut tokens = self.tokens.lock().unwrap();
++        let mut overlap = self.token_overlap_until.lock().unwrap();
++        let sessions = self.sessions.lock().unwrap();
++        for t in expired {
++            overlap.remove(&t);
++            if let Some(sid) = tokens.get(&t).copied() {
++                let is_current = sessions
++                    .get(&sid)
++                    .map(|s| s.token == t)
++                    .unwrap_or(false);
++                if !is_current {
++                    tokens.remove(&t);
++                }
++            }
++        }
++    }
++
+     /// Resolve a room by UUID or by join code.
+     pub fn resolve_room_id(&self, room_ref: &str) -> Option<RoomId> {
+         if let Ok(uuid) = room_ref.parse::<uuid::Uuid>() {
+@@ -306,3 +362,58 @@ pub fn generate_room_code() -> String {
+         .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
+         .collect()
+ }
++
++#[cfg(test)]
++mod token_overlap_tests {
++    use super::*;
++    use std::sync::Arc;
++    use std::time::Duration;
++
++    use judgement_persistence::MemoryStore;
++
++    #[test]
++    fn rotate_accepts_previous_token_during_overlap() {
++        let state = AppState::new(Arc::new(MemoryStore::new()));
++        let session = state.create_session("Ada".into());
++        let old = session.token.clone();
++        let new = state.rotate_token(session.id).expect("rotate");
++        assert_ne!(old, new);
++        assert_eq!(
++            state.session_for_token(&old).map(|s| s.id),
++            Some(session.id)
++        );
++        assert_eq!(
++            state.session_for_token(&new).map(|s| s.id),
++            Some(session.id)
++        );
++        assert_eq!(
++            state.sessions.lock().unwrap().get(&session.id).unwrap().token,
++            new
++        );
++    }
++
++    #[test]
++    fn expired_overlap_token_is_rejected() {
++        let state = AppState::new(Arc::new(MemoryStore::new()));
++        let session = state.create_session("Bob".into());
++        let old = session.token.clone();
++        let new = state.rotate_token(session.id).expect("rotate");
++        {
++            let mut overlap = state.token_overlap_until.lock().unwrap();
++            overlap.insert(old.clone(), Instant::now() - Duration::from_secs(1));
++        }
++        assert!(state.session_for_token(&old).is_none());
++        assert!(state.session_for_token(&new).is_some());
++    }
++
++    #[test]
++    fn invalidate_removes_current_and_overlap_tokens() {
++        let state = AppState::new(Arc::new(MemoryStore::new()));
++        let session = state.create_session("Cara".into());
++        let old = session.token.clone();
++        let new = state.rotate_token(session.id).expect("rotate");
++        state.invalidate_session_tokens(session.id);
++        assert!(state.session_for_token(&old).is_none());
++        assert!(state.session_for_token(&new).is_none());
++    }
++}
+diff --git a/deployment/railway.env.example b/deployment/railway.env.example
+index 45ba405..83c9f09 100644
+--- a/deployment/railway.env.example
++++ b/deployment/railway.env.example
+@@ -24,5 +24,9 @@ HTTP_RATE_LIMIT=120
+ HTTP_GUEST_RATE_LIMIT=20
+ HTTP_RATE_WINDOW_SECS=60
+ 
++# Reconnect grace while a seat is disconnected (seconds). Default 60.
++# Covers typical phone calls without immediate vacant/host migrate.
++# RECONNECT_GRACE_SECONDS=60
++
+ # Optional — only if enabling Rig / OpenAI features later
+ # OPENAI_API_KEY=
+diff --git a/docs/adr/0004-presence-grace-bot-takeover.md b/docs/adr/0004-presence-grace-bot-takeover.md
+index 1f18e60..fb074c1 100644
+--- a/docs/adr/0004-presence-grace-bot-takeover.md
++++ b/docs/adr/0004-presence-grace-bot-takeover.md
+@@ -1,6 +1,6 @@
+ # ADR 0004 — Phase 6 presence, grace, vacant seat, end, and restart
+ 
+-**Status:** Amended (2026-08-13)  
++**Status:** Amended (2026-08-24)  
+ **Amends:** PLAN.md §15 disconnect policy details.  
+ **Supersedes:** live bot takeover after grace/leave.
+ 
+@@ -9,7 +9,7 @@
+ 1. **Whole-table pause** while any seat is inside the reconnect grace window
+    **or** marked `Vacant`. `GameRules.reconnect_grace_seconds` in
+    `mvp_for_players` remains **0** for engine tests. Live games override via
+-   `RECONNECT_GRACE_SECONDS` (default **12**) at start; the value is persisted
++   `RECONNECT_GRACE_SECONDS` (default **60**) at start; the value is persisted
+    on the game rules so restore keeps the same window.
+ 2. **TCP / proxy blips are not leaves.** On WS drop with non-zero grace: do
+    **not** vacant, do **not** migrate host, and do **not** broadcast
+@@ -21,7 +21,11 @@
+    paused. Emit `SeatVacant { player_id, room_code }` so peers can invite a
+    replacement (or the same player can reclaim).
+ 4. **`LeaveGame` ⇒ immediate Vacant** (skips grace). Host migrates immediately.
+-5. **Rejoin / claim:** Same session may reclaim a vacant seat by reconnecting
++5. **Token rotation overlap:** on each successful game WS upgrade the bearer
++   rotates, but the **previous** token remains valid for **60 seconds** so a
++   client that missed `TokenRotated` (phone-call process kill) can reconnect.
++   Explicit session invalidation removes current and overlap tokens.
++6. **Rejoin / claim:** Same session may reclaim a vacant seat by reconnecting
+    the game WebSocket. A **new** session uses `POST /api/v1/rooms/{code}/claim`
+    (also used by `join` when in-game). Same `player_id` / seat / hand / scores;
+    nickname/avatar update; resume when no vacancies remain.
+@@ -34,30 +38,30 @@
+    replacement / sole vacant). Preferred seat that is not vacant returns
+    `SEAT_NOT_VACANT` (no silent remap). Client reclaim blob is kept across
+    intentional leave until foreign claim, game end/abort/restart, or ~10m TTL.
+-6. **End game:** host may `EndGame` (WS) or `POST .../end`. Vacancy older than
++7. **End game:** host may `EndGame` (WS) or `POST .../end`. Vacancy older than
+    **10 minutes** auto-ends (`aborted`). Abort removes the actor from
+    `state.games`, **hard-deletes** the game row (tip + events), and returns
+    the room to **Lobby** (vacant seats dropped). Natural finish does the same
+    delete + Lobby return; clients keep standings from the final WS snapshot.
+-7. **Restart (rematch):** host may `POST .../restart` while vacant if at least
++8. **Restart (rematch):** host may `POST .../restart` while vacant if at least
+    **3** players remain. Atomic path: abort + drop vacant seats → Lobby →
+    auto-ready → new `game_id`. Broadcast `GameRestarted { game_id }`. Rate
+    limited (30s per room). Metric `judgement_games_restarted_total` (not
+    vacancy-end).
+-8. **No live `RuleBasedBot` playout** for disconnects. Bots remain for offline
++9. **No live `RuleBasedBot` playout** for disconnects. Bots remain for offline
+    simulation/tests only. Optional turn-timer auto-move for a *connected*
+    slow human is separate.
+-9. **Safe restore boundary** = actor idle between messages; reconnect during
++10. **Safe restore boundary** = actor idle between messages; reconnect during
+    a non-zero grace restores control. After Vacant, same-session WS reclaim or
+    claim via room code.
+-10. **Token rotation** on every successful game WebSocket upgrade.
+-11. **Host migration** on host **leave** or **grace expiry** (not on every WS
++11. **Token rotation** on every successful game WebSocket upgrade.
++12. **Host migration** on host **leave** or **grace expiry** (not on every WS
+     flicker): prefer a Connected human; also sync `Room.host_session` so the
+     new host can Start/Restart.
+-12. **Abandonment GC:** lobby TTL 1h; reaper **4h** TTL is a backstop for any
++13. **Abandonment GC:** lobby TTL 1h; reaper **4h** TTL is a backstop for any
+     leftover finished/aborted rows (primary delete is on finish/abort); orphan
+     in-game rooms and guest sessions cleaned by the reaper.
+-13. **Application keepalive:** the WS writer sends Ping **and** a
++14. **Application keepalive:** the WS writer sends Ping **and** a
+     `{"type":"keep_alive"}` text frame every 10s so proxies that ignore Ping
+     still see traffic. Keepalive is writer-local (no actor, no
+     `state_version`). Clients ignore it.
+@@ -66,7 +70,7 @@
+ 
+ - Stops bot→DB write storms that froze tables under Postgres resource pressure.
+ - A 1–3s Railway/phone blip should be invisible: no vacant, no host theft, no
+-  pause banner. A truly gone player still opens the seat after grace (~12s).
++  pause banner. A truly gone player still opens the seat after grace (~60s).
+ - Games may pause until a human rejoins, the host restarts (≥3), the host ends,
+   or the 10m TTL fires.
+ - Abort/restart/finish free `MAX_ACTIVE_GAMES` slots immediately; finished tip
+diff --git a/frontend/judgement_flutter/firebase.json b/frontend/judgement_flutter/firebase.json
+index d3882bc..6e8bfa2 100644
+--- a/frontend/judgement_flutter/firebase.json
++++ b/frontend/judgement_flutter/firebase.json
+@@ -266,17 +266,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20260813152754-b549b52",
++          "destination": "/index.html?_b=20260824162151-de0b676",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20260813152754-b549b52&room=:code",
++          "destination": "/index.html?_b=20260824162151-de0b676&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20260813152754-b549b52&event=:slug",
++          "destination": "/index.html?_b=20260824162151-de0b676&event=:slug",
+           "type": 302
+         }
+       ],
+@@ -554,17 +554,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20260813152754-b549b52",
++          "destination": "/index.html?_b=20260824162151-de0b676",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20260813152754-b549b52&room=:code",
++          "destination": "/index.html?_b=20260824162151-de0b676&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20260813152754-b549b52&event=:slug",
++          "destination": "/index.html?_b=20260824162151-de0b676&event=:slug",
+           "type": 302
+         }
+       ],
+diff --git a/frontend/judgement_flutter/lib/screens/table_screen.dart b/frontend/judgement_flutter/lib/screens/table_screen.dart
+index b357910..2eb50c3 100644
+--- a/frontend/judgement_flutter/lib/screens/table_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/table_screen.dart
+@@ -36,7 +36,7 @@ class TableScreen extends StatefulWidget {
+   State<TableScreen> createState() => _TableScreenState();
+ }
+ 
+-class _TableScreenState extends State<TableScreen> {
++class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
+   Timer? _ticker;
+   /// After the game ends, celebrate first; open results on demand.
+   bool _showResults = false;
+@@ -48,6 +48,7 @@ class _TableScreenState extends State<TableScreen> {
+   @override
+   void initState() {
+     super.initState();
++    WidgetsBinding.instance.addObserver(this);
+     controller.addListener(_onControllerChanged);
+     _syncExitGuard();
+     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
+@@ -67,6 +68,7 @@ class _TableScreenState extends State<TableScreen> {
+ 
+   @override
+   void dispose() {
++    WidgetsBinding.instance.removeObserver(this);
+     setGameExitGuard(false);
+     _ticker?.cancel();
+     controller.removeListener(_onControllerChanged);
+@@ -74,6 +76,13 @@ class _TableScreenState extends State<TableScreen> {
+     super.dispose();
+   }
+ 
++  @override
++  void didChangeAppLifecycleState(AppLifecycleState state) {
++    if (state == AppLifecycleState.resumed) {
++      unawaited(controller.onAppResumed());
++    }
++  }
++
+   void _syncExitGuard() {
+     setGameExitGuard(!_leaving && controller.shouldGuardExit);
+   }
+diff --git a/frontend/judgement_flutter/lib/state/game_controller.dart b/frontend/judgement_flutter/lib/state/game_controller.dart
+index 1506981..ee3c5e6 100644
+--- a/frontend/judgement_flutter/lib/state/game_controller.dart
++++ b/frontend/judgement_flutter/lib/state/game_controller.dart
+@@ -68,6 +68,29 @@ class GameController extends ChangeNotifier {
+   bool _intentionalLeave = false;
+   /// When the current socket first looked unstable; used to debounce chrome.
+   DateTime? _connectionUnstableSince;
++  /// Ignore re-entrant [connect] while one handshake is in flight.
++  bool _connectInFlight = false;
++  /// Pending exponential-backoff reconnect timer (cancelled on resume).
++  Timer? _reconnectTimer;
++  /// Last [onAppResumed] time — debounce notification-shade flicker.
++  DateTime? _lastResumeAt;
++  /// Action id preserved across disconnect for one post-reconnect resend.
++  String? _resumeActionId;
++  /// One blob-token retry already attempted for this disconnect cycle.
++  bool _blobTokenRetried = false;
++  static const _resumeDebounce = Duration(milliseconds: 400);
++
++  /// Test-only: pretend a live socket is open (avoids real WS in unit tests).
++  @visibleForTesting
++  bool debugPretendSocketOpen = false;
++
++  /// Test hook: how many times a live socket was closed before reconnect.
++  @visibleForTesting
++  int debugCloseSocketCalls = 0;
++
++  /// Test hook: skip real WebSocket handshake (still runs close / state path).
++  @visibleForTesting
++  bool debugSkipNetworkConnect = false;
+ 
+   PlayerGameView? view;
+   GameConnectionState connection = GameConnectionState.connecting;
+@@ -183,6 +206,8 @@ class GameController extends ChangeNotifier {
+       audioQueueFullHint = null;
+     };
+     audio.applySessionUnlock();
++    // ignore: discarded_futures
++    warmGameReclaimStore();
+   }
+ 
+   bool get isPaused =>
+@@ -244,6 +269,18 @@ class GameController extends ChangeNotifier {
+   }
+ 
+   Future<void> connect() async {
++    if (_disposed || _suppressReconnect) return;
++    if (_connectInFlight) return;
++    _connectInFlight = true;
++    _reconnectTimer?.cancel();
++    _reconnectTimer = null;
++    _closeSocket();
++    if (debugSkipNetworkConnect) {
++      connection = GameConnectionState.disconnected;
++      _connectInFlight = false;
++      _notify();
++      return;
++    }
+     connection = _reconnectAttempts == 0
+         ? GameConnectionState.connecting
+         : GameConnectionState.reconnecting;
+@@ -254,17 +291,28 @@ class GameController extends ChangeNotifier {
+         onDone: _handleDisconnect,
+         onError: (_) => _handleDisconnect(),
+       );
++      if (_disposed || _suppressReconnect) {
++        socket.close();
++        _connectInFlight = false;
++        return;
++      }
+       _socket = socket;
+       _subscription = socket.messages.listen(_handleMessage);
+       connection = GameConnectionState.connected;
+       _connectionUnstableSince = null;
+       _reconnectAttempts = 0;
++      _blobTokenRetried = false;
+       // A fresh personalised snapshot is pushed on connect; ask explicitly
+       // as well in case this is a resumed session.
+       _sendAction({'type': 'request_state_sync'});
+       _notify();
++      _connectInFlight = false;
+     } catch (_) {
+-      _handleDisconnect();
++      _connectInFlight = false;
++      final retried = await _tryBlobTokenRetry();
++      if (!retried) {
++        _handleDisconnect();
++      }
+     }
+   }
+ 
+@@ -292,17 +340,70 @@ class GameController extends ChangeNotifier {
+   bool get canHostRestart =>
+       amHost && vacantPlayerId != null && remainingSeatCount >= 3;
+ 
++  /// Phone-call / app-foreground: reconnect immediately if the socket is down.
++  /// No-op when already connected (no socket churn / latency hit).
++  Future<void> onAppResumed() async {
++    if (!_shouldReconnectOnResume()) return;
++    final now = DateTime.now();
++    final last = _lastResumeAt;
++    if (last != null && now.difference(last) < _resumeDebounce) {
++      return;
++    }
++    _lastResumeAt = now;
++    _reconnectTimer?.cancel();
++    _reconnectTimer = null;
++    _reconnectAttempts = 0;
++    await connect();
++  }
++
++  bool _shouldReconnectOnResume() {
++    if (_disposed || _suppressReconnect || _intentionalLeave) return false;
++    if (gameAborted || (view?.isFinished ?? false)) return false;
++    if (connection == GameConnectionState.connected && _hasLiveSocket) {
++      return false;
++    }
++    return true;
++  }
++
++  bool get _hasLiveSocket => _socket != null || debugPretendSocketOpen;
++
++  /// Test hook: whether [onAppResumed] would attempt a reconnect now.
++  @visibleForTesting
++  bool get debugShouldReconnectOnResume => _shouldReconnectOnResume();
++
+   /// Reset attempt counter and reconnect after auto-retry exhaustion.
+   Future<void> manualReconnect() async {
+     if (_disposed) return;
+     _reconnectAttempts = 0;
++    // Keep _pendingAction for post-snapshot resend; clear in-flight UI latch.
+     pendingActionId = null;
+     await connect();
+   }
+ 
++  /// If connect failed (often stale token after rotate), retry once with the
++  /// persisted reclaim blob token. Returns true when a retry was started.
++  Future<bool> _tryBlobTokenRetry() async {
++    if (_blobTokenRetried || _disposed || _suppressReconnect) return false;
++    final code = roomCode ?? vacantRoomCode;
++    if (code == null) return false;
++    final blob = readGameReclaim(code);
++    final blobToken = blob?.token;
++    if (blobToken == null || blobToken.isEmpty) return false;
++    if (blobToken == api.token) return false;
++    _blobTokenRetried = true;
++    api.token = blobToken;
++    _reconnectAttempts = 0;
++    await connect();
++    return true;
++  }
++
+   void _handleDisconnect() {
+     if (_disposed) return;
+-    // Unstick bid/play if the socket died before CommandAccepted.
++    if (_connectInFlight) return;
++    // Preserve action payload for one resend after reconnect; unstick UI latch.
++    if (pendingActionId != null) {
++      _resumeActionId = pendingActionId;
++    }
+     pendingActionId = null;
+     connection = GameConnectionState.disconnected;
+     _connectionUnstableSince ??= DateTime.now();
+@@ -318,12 +419,31 @@ class GameController extends ChangeNotifier {
+       _reconnectAttempts += 1;
+       final delay =
+           Duration(milliseconds: 500 * pow(2, _reconnectAttempts).toInt());
+-      Timer(delay, () {
++      _reconnectTimer?.cancel();
++      _reconnectTimer = Timer(delay, () {
+         if (!_disposed && !_suppressReconnect && !gameAborted) connect();
+       });
+     }
+   }
+ 
++  /// After reconnect snapshot, resend a bid/play that was in flight on drop.
++  void _maybeResendPendingAfterSnapshot() {
++    final action = _pendingAction;
++    if (action == null || pendingActionId != null) return;
++    if (_disposed || connection != GameConnectionState.connected) return;
++    final v = view;
++    if (v == null || v.isFinished || isPaused) return;
++    final actionId = _resumeActionId ?? _uuid.v4();
++    _resumeActionId = null;
++    pendingActionId = actionId;
++    _notify();
++    _send(
++      actionId: actionId,
++      stateVersion: v.stateVersion,
++      action: action,
++    );
++  }
++
+   void _handleMessage(ServerMessage message) {
+     switch (message) {
+       case StateSnapshot(:final view):
+@@ -475,6 +595,9 @@ class GameController extends ChangeNotifier {
+   void leaveGame() {
+     _intentionalLeave = true;
+     _suppressReconnect = true;
++    _reconnectTimer?.cancel();
++    _clearPendingCommand();
++    _resumeActionId = null;
+     _sendCommand({'type': 'leave_game'});
+   }
+ 
+@@ -566,8 +689,27 @@ class GameController extends ChangeNotifier {
+   void _closeSocket() {
+     _subscription?.cancel();
+     _subscription = null;
++    if (_socket != null || debugPretendSocketOpen) {
++      debugCloseSocketCalls += 1;
++    }
+     _socket?.close();
+     _socket = null;
++    debugPretendSocketOpen = false;
++  }
++
++  /// Test hook: mark connected with a pretend live socket (resume no-op).
++  @visibleForTesting
++  void debugMarkConnected() {
++    connection = GameConnectionState.connected;
++    debugPretendSocketOpen = true;
++  }
++
++  /// Test hook: mark disconnected so resume should reconnect.
++  @visibleForTesting
++  void debugMarkDisconnected() {
++    connection = GameConnectionState.disconnected;
++    _socket = null;
++    debugPretendSocketOpen = false;
+   }
+ 
+   void _applySnapshot(PlayerGameView next) {
+@@ -636,6 +778,7 @@ class GameController extends ChangeNotifier {
+       _persistReclaimStore();
+     }
+     _notify();
++    _maybeResendPendingAfterSnapshot();
+   }
+ 
+   void _persistReclaimStore() {
+@@ -934,6 +1077,7 @@ class GameController extends ChangeNotifier {
+   void dispose() {
+     _disposed = true;
+     _suppressReconnect = true;
++    _reconnectTimer?.cancel();
+     _persistRetryTimer?.cancel();
+     _holdTimer?.cancel();
+     _bannerTimer?.cancel();
+diff --git a/frontend/judgement_flutter/lib/util/game_reclaim_store.dart b/frontend/judgement_flutter/lib/util/game_reclaim_store.dart
+index ec751a4..ba26579 100644
+--- a/frontend/judgement_flutter/lib/util/game_reclaim_store.dart
++++ b/frontend/judgement_flutter/lib/util/game_reclaim_store.dart
+@@ -2,7 +2,8 @@
+ library;
+ 
+ export 'game_reclaim_store_stub.dart'
+-    if (dart.library.js_interop) 'game_reclaim_store_web.dart';
++    if (dart.library.js_interop) 'game_reclaim_store_web.dart'
++    if (dart.library.io) 'game_reclaim_store_io.dart';
+ 
+ /// Vacancy TTL aligned with server (~10 minutes).
+ const Duration kReclaimTtl = Duration(minutes: 10);
+diff --git a/frontend/judgement_flutter/lib/util/game_reclaim_store_stub.dart b/frontend/judgement_flutter/lib/util/game_reclaim_store_stub.dart
+index 7728227..264e01f 100644
+--- a/frontend/judgement_flutter/lib/util/game_reclaim_store_stub.dart
++++ b/frontend/judgement_flutter/lib/util/game_reclaim_store_stub.dart
+@@ -5,3 +5,5 @@ GameReclaimBlob? readGameReclaim(String roomCode) => null;
+ void writeGameReclaim(GameReclaimBlob blob) {}
+ 
+ void clearGameReclaim([String? roomCode]) {}
++
++Future<void> warmGameReclaimStore() async {}
+diff --git a/frontend/judgement_flutter/lib/util/game_reclaim_store_web.dart b/frontend/judgement_flutter/lib/util/game_reclaim_store_web.dart
+index 2b225af..920522b 100644
+--- a/frontend/judgement_flutter/lib/util/game_reclaim_store_web.dart
++++ b/frontend/judgement_flutter/lib/util/game_reclaim_store_web.dart
+@@ -43,3 +43,5 @@ void clearGameReclaim([String? roomCode]) {
+     web.window.localStorage.removeItem(_key);
+   } catch (_) {}
+ }
++
++Future<void> warmGameReclaimStore() async {}
+diff --git a/frontend/judgement_flutter/pubspec.lock b/frontend/judgement_flutter/pubspec.lock
+index 010fd21..fbf40cc 100644
+--- a/frontend/judgement_flutter/pubspec.lock
++++ b/frontend/judgement_flutter/pubspec.lock
+@@ -464,6 +464,62 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "1.0.7"
++  shared_preferences:
++    dependency: "direct main"
++    description:
++      name: shared_preferences
++      sha256: c3025c5534b01739267eb7d76959bbc25a6d10f6988e1c2a3036940133dd10bf
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.5.5"
++  shared_preferences_android:
++    dependency: transitive
++    description:
++      name: shared_preferences_android
++      sha256: e8d4762b1e2e8578fc4d0fd548cebf24afd24f49719c08974df92834565e2c53
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.23"
++  shared_preferences_foundation:
++    dependency: transitive
++    description:
++      name: shared_preferences_foundation
++      sha256: "4e7eaffc2b17ba398759f1151415869a34771ba11ebbccd1b0145472a619a64f"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.5.6"
++  shared_preferences_linux:
++    dependency: transitive
++    description:
++      name: shared_preferences_linux
++      sha256: "580abfd40f415611503cae30adf626e6656dfb2f0cee8f465ece7b6defb40f2f"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.1"
++  shared_preferences_platform_interface:
++    dependency: transitive
++    description:
++      name: shared_preferences_platform_interface
++      sha256: "649dc798a33931919ea356c4305c2d1f81619ea6e92244070b520187b5140ef9"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.2"
++  shared_preferences_web:
++    dependency: transitive
++    description:
++      name: shared_preferences_web
++      sha256: c49bd060261c9a3f0ff445892695d6212ff603ef3115edbb448509d407600019
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.3"
++  shared_preferences_windows:
++    dependency: transitive
++    description:
++      name: shared_preferences_windows
++      sha256: "94ef0f72b2d71bc3e700e025db3710911bd51a71cefb65cc609dd0d9a982e3c1"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.1"
+   sky_engine:
+     dependency: transitive
+     description: flutter
+diff --git a/frontend/judgement_flutter/pubspec.yaml b/frontend/judgement_flutter/pubspec.yaml
+index 5072e3c..addb2b1 100644
+--- a/frontend/judgement_flutter/pubspec.yaml
++++ b/frontend/judgement_flutter/pubspec.yaml
+@@ -41,6 +41,7 @@ dependencies:
+   audioplayers: ^6.5.1
+   record: ^6.1.2
+   web: ^1.1.1
++  shared_preferences: ^2.5.3
+ 
+ dev_dependencies:
+   flutter_test:

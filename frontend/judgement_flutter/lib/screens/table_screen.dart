@@ -36,7 +36,7 @@ class TableScreen extends StatefulWidget {
   State<TableScreen> createState() => _TableScreenState();
 }
 
-class _TableScreenState extends State<TableScreen> {
+class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   Timer? _ticker;
   /// After the game ends, celebrate first; open results on demand.
   bool _showResults = false;
@@ -48,6 +48,7 @@ class _TableScreenState extends State<TableScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     controller.addListener(_onControllerChanged);
     _syncExitGuard();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
@@ -67,6 +68,7 @@ class _TableScreenState extends State<TableScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     setGameExitGuard(false);
     _ticker?.cancel();
     controller.removeListener(_onControllerChanged);
@@ -76,6 +78,13 @@ class _TableScreenState extends State<TableScreen> {
 
   void _syncExitGuard() {
     setGameExitGuard(!_leaving && controller.shouldGuardExit);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      controller.onAppResumed();
+    }
   }
 
   Future<void> _confirmAndLeave({required String source}) async {
