@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use judgement_domain::{ActionId, ConnectionStatus, GameError, GameId, PlayerId};
+use judgement_domain::{ActionId, CardId, ConnectionStatus, GameError, GameId, PlayerId};
 use judgement_engine::{GameEngine, GameEvent, GamePhase};
 use judgement_persistence::{GameStore, PersistError};
 use judgement_protocol::{
@@ -35,6 +35,11 @@ pub const PAUSE_BANNER_DELAY: Duration = Duration::from_secs(3);
 /// Pause after the last trick of a round so clients can hold the reveal
 /// (~1.6s) before the next deal or game-over screen.
 pub const ROUND_REVEAL_DELAY: Duration = Duration::from_millis(1800);
+/// Beat before auto-playing a singleton legal card (follow-suit or last card).
+pub const FORCED_PLAY_DELAY: Duration = Duration::from_millis(750);
+/// Extra wait when the previous events completed a trick, matching Flutter's
+/// 1.6s completed-trick overlay before the next forced lead.
+pub const POST_TRICK_FORCED_DELAY: Duration = Duration::from_millis(1600);
 
 #[derive(Debug)]
 pub enum ActorMessage {
@@ -54,9 +59,19 @@ pub enum ActorMessage {
         player_id: PlayerId,
         envelope: ClientEnvelope,
     },
-    Timeout { deadline_id: u64 },
+    Timeout {
+        deadline_id: u64,
+    },
+    /// Auto-play a singleton legal card after [`FORCED_PLAY_DELAY`].
+    ForcedPlay {
+        seq: u64,
+        player_id: PlayerId,
+        card_id: CardId,
+    },
     /// Fire after [`ROUND_REVEAL_DELAY`] while phase is `RoundScoring`.
-    AdvanceAfterRoundReveal { advance_id: u64 },
+    AdvanceAfterRoundReveal {
+        advance_id: u64,
+    },
     /// Reconnect-grace window expired for a seat.
     GraceExpired {
         player_id: PlayerId,
@@ -146,6 +161,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         conn_gens: HashMap::new(),
         processed: config.processed,
         deadline_seq: 0,
+        forced_play_seq: 0,
         round_advance_seq: 0,
         grace_seq: 0,
         vacancy_seq: 0,
@@ -182,6 +198,8 @@ struct GameActor {
     conn_gens: HashMap<PlayerId, u64>,
     processed: HashMap<ActionId, u64>,
     deadline_seq: u64,
+    /// Cancels stale singleton auto-plays (same pattern as turn deadlines).
+    forced_play_seq: u64,
     /// Cancels stale end-of-round reveal timers (same pattern as turn deadlines).
     round_advance_seq: u64,
     grace_seq: u64,
@@ -217,6 +235,9 @@ impl GameActor {
     async fn run(mut self) {
         self.schedule_deadline();
         self.schedule_round_reveal_advance();
+        if self.try_schedule_forced_play(false) {
+            self.deadline_seq += 1;
+        }
 
         while let Some(message) = self.rx.recv().await {
             match message {
@@ -234,11 +255,21 @@ impl GameActor {
                 } => {
                     self.handle_disconnect(player_id, conn_gen).await;
                 }
-                ActorMessage::Command { player_id, envelope } => {
+                ActorMessage::Command {
+                    player_id,
+                    envelope,
+                } => {
                     self.handle_command(player_id, envelope).await;
                 }
                 ActorMessage::Timeout { deadline_id } => {
                     self.handle_timeout(deadline_id).await;
+                }
+                ActorMessage::ForcedPlay {
+                    seq,
+                    player_id,
+                    card_id,
+                } => {
+                    self.handle_forced_play(seq, player_id, card_id).await;
                 }
                 ActorMessage::AdvanceAfterRoundReveal { advance_id } => {
                     self.handle_advance_after_round_reveal(advance_id).await;
@@ -379,6 +410,9 @@ impl GameActor {
             }
             self.resume_timers();
         }
+        if self.try_schedule_forced_play(false) {
+            self.deadline_seq += 1;
+        }
 
         tracing::info!(
             game_id = %self.game_id,
@@ -448,11 +482,20 @@ impl GameActor {
         self.grace_seq += 1;
         let grace_id = self.grace_seq;
         self.grace_ids.insert(player_id, grace_id);
+        let was_paused = self.paused;
         self.recompute_pause();
 
-        // Cancel turn / round-reveal timers while paused.
-        self.deadline_seq += 1;
-        self.round_advance_seq += 1;
+        if self.paused {
+            // Cancel turn / round-reveal / forced-play timers while paused.
+            self.deadline_seq += 1;
+            self.round_advance_seq += 1;
+            self.forced_play_seq += 1;
+            if !was_paused {
+                self.schedule_grace_pause_banner(player_id, grace_id);
+            }
+        } else if self.try_schedule_forced_play(false) {
+            self.deadline_seq += 1;
+        }
 
         let tx = self.self_tx.clone();
         let grace = self.reconnect_grace;
@@ -465,23 +508,15 @@ impl GameActor {
                 })
                 .await;
         });
-
-        if grace > PAUSE_BANNER_DELAY {
-            let tx = self.self_tx.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(PAUSE_BANNER_DELAY).await;
-                let _ = tx
-                    .send(ActorMessage::PauseBannerDue {
-                        player_id,
-                        grace_id,
-                    })
-                    .await;
-            });
-        }
     }
 
     fn handle_pause_banner_due(&mut self, player_id: PlayerId, grace_id: u64) {
         if self.grace_ids.get(&player_id) != Some(&grace_id) {
+            return;
+        }
+        // Forced singleton play keeps the table unpaused; do not consume the
+        // announcement so a later real decision can still show the banner.
+        if !self.paused {
             return;
         }
         if !self.pause_announced.insert(player_id) {
@@ -547,10 +582,13 @@ impl GameActor {
         self.recompute_pause();
         self.deadline_seq += 1;
         self.round_advance_seq += 1;
+        self.forced_play_seq += 1;
         let name = self.nickname_of(player_id);
         self.pause_banner_visible = true;
         self.broadcast(ServerMessage::GamePaused {
-            reason: format!("{name} left the table — share the room code so someone can take their seat"),
+            reason: format!(
+                "{name} left the table — share the room code so someone can take their seat"
+            ),
             remaining_ms: VACANCY_TTL.as_millis() as u64,
         });
         self.broadcast_snapshots();
@@ -627,6 +665,9 @@ impl GameActor {
             }
             self.resume_timers();
         }
+        if self.try_schedule_forced_play(false) {
+            self.deadline_seq += 1;
+        }
         Ok(player_id)
     }
 
@@ -673,9 +714,12 @@ impl GameActor {
                 return Err("only the host can end the game".into());
             }
             // Host must still be connected (not vacant).
-            let host_ok = self.engine.state().players.iter().any(|p| {
-                p.id == pid && p.connection_status == ConnectionStatus::Connected
-            });
+            let host_ok = self
+                .engine
+                .state()
+                .players
+                .iter()
+                .any(|p| p.id == pid && p.connection_status == ConnectionStatus::Connected);
             if !host_ok {
                 return Err("host must be connected to end the game".into());
             }
@@ -725,14 +769,81 @@ impl GameActor {
     }
 
     fn recompute_pause(&mut self) {
-        // Paused while any seat is in reconnect grace or vacant awaiting claim.
-        self.paused = !self.grace_ids.is_empty()
-            || self
-                .engine
-                .state()
-                .players
-                .iter()
-                .any(|p| p.connection_status == ConnectionStatus::Vacant);
+        self.paused = self.compute_paused();
+    }
+
+    fn compute_paused(&self) -> bool {
+        if self
+            .engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.connection_status == ConnectionStatus::Vacant)
+        {
+            return true;
+        }
+        if self.grace_ids.is_empty() {
+            return false;
+        }
+        // Grace seats freeze real decisions. A singleton legal card is not a
+        // decision — keep the table live so forced play can run (including when
+        // the current seat itself is in grace).
+        !self.is_forced_singleton_turn()
+    }
+
+    fn is_vacant(&self, player_id: PlayerId) -> bool {
+        self.engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.id == player_id && p.connection_status == ConnectionStatus::Vacant)
+    }
+
+    fn connection_of(&self, player_id: PlayerId) -> Option<ConnectionStatus> {
+        self.engine
+            .state()
+            .players
+            .iter()
+            .find(|p| p.id == player_id)
+            .map(|p| p.connection_status)
+    }
+
+    fn current_turn_player(&self) -> Option<PlayerId> {
+        self.engine
+            .state()
+            .current_round
+            .as_ref()
+            .map(|r| r.current_turn)
+    }
+
+    /// Exactly one legal card for the seat that must act, and that seat is not vacant.
+    fn is_forced_singleton_turn(&self) -> bool {
+        if self.engine.phase() != GamePhase::Playing {
+            return false;
+        }
+        let Some(current) = self.current_turn_player() else {
+            return false;
+        };
+        if self.is_vacant(current) {
+            return false;
+        }
+        self.engine.legal_cards(current).len() == 1
+    }
+
+    fn schedule_grace_pause_banner(&mut self, player_id: PlayerId, grace_id: u64) {
+        if self.reconnect_grace <= PAUSE_BANNER_DELAY {
+            return;
+        }
+        let tx = self.self_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(PAUSE_BANNER_DELAY).await;
+            let _ = tx
+                .send(ActorMessage::PauseBannerDue {
+                    player_id,
+                    grace_id,
+                })
+                .await;
+        });
     }
 
     fn nickname_of(&self, player_id: PlayerId) -> String {
@@ -907,9 +1018,13 @@ impl GameActor {
 
         // Reject human commands while the table is paused for grace/vacancy
         // (own reconnect clears pause; vacant seats cannot act).
-        if self.engine.state().players.iter().any(|p| {
-            p.id == player_id && p.connection_status == ConnectionStatus::Vacant
-        }) {
+        if self
+            .engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.id == player_id && p.connection_status == ConnectionStatus::Vacant)
+        {
             self.reject(
                 player_id,
                 Some(action_id),
@@ -929,9 +1044,13 @@ impl GameActor {
             );
             return;
         }
-        if self.engine.state().players.iter().any(|p| {
-            p.id == player_id && p.connection_status == ConnectionStatus::BotControlled
-        }) {
+        if self
+            .engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.id == player_id && p.connection_status == ConnectionStatus::BotControlled)
+        {
             self.reject(
                 player_id,
                 Some(action_id),
@@ -1407,10 +1526,7 @@ impl GameActor {
             return;
         };
         if self.engine.is_finished()
-            || !matches!(
-                self.engine.phase(),
-                GamePhase::Bidding | GamePhase::Playing
-            )
+            || !matches!(self.engine.phase(), GamePhase::Bidding | GamePhase::Playing)
         {
             return;
         }
@@ -1430,17 +1546,14 @@ impl GameActor {
         if deadline_id != self.deadline_seq || self.engine.is_finished() || self.paused {
             return;
         }
-        let Some(current) = self
-            .engine
-            .state()
-            .current_round
-            .as_ref()
-            .map(|r| r.current_turn)
-        else {
+        let Some(current) = self.current_turn_player() else {
             return;
         };
-
         // Turn-timer auto-play for a still-connected slow human only.
+        if self.connection_of(current) != Some(ConnectionStatus::Connected) {
+            return;
+        }
+
         let previous = self.engine.state().clone();
         let result = match self.engine.phase() {
             GamePhase::Bidding => {
@@ -1476,8 +1589,114 @@ impl GameActor {
         }
     }
 
+    /// Arm a singleton auto-play. Always bumps `forced_play_seq` so a late timer
+    /// from a previous turn cannot fire. Returns true when a timer was armed.
+    fn try_schedule_forced_play(&mut self, after_trick: bool) -> bool {
+        self.forced_play_seq += 1;
+        if self.paused || self.engine.is_finished() {
+            return false;
+        }
+        if self.engine.phase() != GamePhase::Playing {
+            return false;
+        }
+        let Some(player_id) = self.current_turn_player() else {
+            return false;
+        };
+        if self.is_vacant(player_id) {
+            return false;
+        }
+        let legal = self.engine.legal_cards(player_id);
+        if legal.len() != 1 {
+            return false;
+        }
+        let card_id = legal[0];
+        let seq = self.forced_play_seq;
+        let delay = if after_trick {
+            POST_TRICK_FORCED_DELAY
+        } else {
+            FORCED_PLAY_DELAY
+        };
+        let tx = self.self_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = tx
+                .send(ActorMessage::ForcedPlay {
+                    seq,
+                    player_id,
+                    card_id,
+                })
+                .await;
+        });
+        true
+    }
+
+    async fn handle_forced_play(&mut self, seq: u64, player_id: PlayerId, card_id: CardId) {
+        if seq != self.forced_play_seq || self.engine.is_finished() || self.paused {
+            return;
+        }
+        if self.engine.phase() != GamePhase::Playing {
+            return;
+        }
+        if self.current_turn_player() != Some(player_id) {
+            return;
+        }
+        if self.is_vacant(player_id) {
+            return;
+        }
+        let legal = self.engine.legal_cards(player_id);
+        if legal.len() != 1 || legal[0] != card_id {
+            return;
+        }
+
+        let previous = self.engine.state().clone();
+        match self.engine.play_card(player_id, card_id) {
+            Ok(events) => {
+                let action_id = ActionId::new();
+                if !self
+                    .persist_with_uncertainty(action_id, &events, previous)
+                    .await
+                {
+                    if self.try_schedule_forced_play(false) {
+                        self.deadline_seq += 1;
+                    }
+                    return;
+                }
+                self.processed.insert(action_id, self.engine.version());
+                self.metrics
+                    .forced_auto_play
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.broadcast_snapshots();
+                self.emit_auto_cheers(&events);
+                self.after_engine_events(&events);
+            }
+            Err(error) => tracing::error!(%error, "forced auto-play rejected"),
+        }
+    }
+
     fn after_engine_events(&mut self, events: &[GameEvent]) {
-        self.schedule_deadline();
+        let was_paused = self.paused;
+        self.recompute_pause();
+        if !was_paused && self.paused {
+            self.deadline_seq += 1;
+            self.round_advance_seq += 1;
+            self.forced_play_seq += 1;
+            if let Some(player_id) = self.current_turn_player() {
+                if let Some(&grace_id) = self.grace_ids.get(&player_id) {
+                    self.schedule_grace_pause_banner(player_id, grace_id);
+                }
+            } else if let Some((&player_id, &grace_id)) = self.grace_ids.iter().next() {
+                self.schedule_grace_pause_banner(player_id, grace_id);
+            }
+        }
+
+        let after_trick = events
+            .iter()
+            .any(|e| matches!(e, GameEvent::TrickCompleted { .. }));
+        if self.try_schedule_forced_play(after_trick) {
+            self.deadline_seq += 1;
+        } else {
+            self.schedule_deadline();
+        }
         if events
             .iter()
             .any(|e| matches!(e, GameEvent::RoundCompleted { .. }))
@@ -1670,7 +1889,10 @@ fn now_ms() -> u64 {
 fn reject_message(reason: &RejectReason) -> String {
     match reason {
         RejectReason::Game { error } => error.to_string(),
-        RejectReason::UnsupportedProtocolVersion { supported, received } => {
+        RejectReason::UnsupportedProtocolVersion {
+            supported,
+            received,
+        } => {
             format!("protocol version {received} is not supported (server speaks {supported})")
         }
         RejectReason::MalformedMessage { detail } => format!("malformed message: {detail}"),

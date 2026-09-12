@@ -382,6 +382,8 @@ mod tests {
         assert!(!is_client_keep_alive(
             r#"{"type":"keep_alive","action_id":"x","protocol_version":1,"game_id":"00000000-0000-0000-0000-000000000001","expected_state_version":0,"action":{"type":"request_state_sync"}}"#
         ));
-        assert!(!is_client_keep_alive(r#"{"type":"ready","protocol_version":1}"#));
+        assert!(!is_client_keep_alive(
+            r#"{"type":"ready","protocol_version":1}"#
+        ));
     }
 }

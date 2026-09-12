@@ -366,13 +366,24 @@ class GameController extends ChangeNotifier {
           :final reasonKind,
           :final errorCode
         ):
-        lastRejectionCode = errorCode;
         final mine = actionId == null || actionId == pendingActionId;
         if (!mine) {
+          if (isBenignPlayCardReject(errorCode)) {
+            return;
+          }
+          lastRejectionCode = errorCode;
           lastRejection = message;
           _notify();
           return;
         }
+        if (_pendingPlayAlreadyApplied() ||
+            (_pendingAction?['type'] == 'play_card' &&
+                isBenignPlayCardReject(errorCode))) {
+          _clearPendingCommand();
+          _notify();
+          return;
+        }
+        lastRejectionCode = errorCode;
         if (retryable &&
             (reasonKind == 'persist_unavailable' || reasonKind == 'queue_full') &&
             _pendingAction != null &&
@@ -700,6 +711,12 @@ class GameController extends ChangeNotifier {
     }
 
     view = next;
+    if (pendingPlayCardLeftHand(
+      pendingAction: _pendingAction,
+      ownHandIds: next.ownHand.map((c) => c.id),
+    )) {
+      _clearPendingCommand();
+    }
     if (next.isFinished) {
       _stopKeepAlive();
       _clearReclaimStore();
@@ -928,6 +945,13 @@ class GameController extends ChangeNotifier {
     _persistRetryTimer = null;
   }
 
+  bool _pendingPlayAlreadyApplied() {
+    return pendingPlayCardLeftHand(
+      pendingAction: _pendingAction,
+      ownHandIds: view?.ownHand.map((c) => c.id) ?? const [],
+    );
+  }
+
   /// User dismissed a stuck save/sync — drop the pending command.
   void cancelPendingSave() {
     _clearPendingCommand();
@@ -1001,6 +1025,17 @@ class GameController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  /// Test hook: inject a pending play_card without a live socket.
+  @visibleForTesting
+  void debugSetPendingPlay({required String actionId, required String cardId}) {
+    pendingActionId = actionId;
+    _pendingAction = {'type': 'play_card', 'card_id': cardId};
+  }
+
+  /// Test hook: drive the WS message handler.
+  @visibleForTesting
+  void debugHandleMessage(ServerMessage message) => _handleMessage(message);
+
   @override
   void dispose() {
     _disposed = true;
@@ -1015,4 +1050,23 @@ class GameController extends ChangeNotifier {
     _closeSocket();
     super.dispose();
   }
+}
+
+/// True when a play_card reject is the forced-auto-play race, not a user error.
+bool isBenignPlayCardReject(String? errorCode) {
+  final code = errorCode?.toLowerCase();
+  return code == 'not_your_turn' || code == 'card_not_in_hand';
+}
+
+/// True when a pending play_card's card is no longer in the viewer's hand.
+bool pendingPlayCardLeftHand({
+  required Map<String, dynamic>? pendingAction,
+  required Iterable<String> ownHandIds,
+}) {
+  if (pendingAction == null || pendingAction['type'] != 'play_card') {
+    return false;
+  }
+  final cardId = pendingAction['card_id'] as String?;
+  if (cardId == null) return false;
+  return !ownHandIds.contains(cardId);
 }

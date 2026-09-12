@@ -127,13 +127,11 @@ fn spawn_restored_actor(
     // the original seed would reshuffle future deals as if from round 1
     // (Phase 5 audit). The current deal is already in the snapshot.
     let _ = game.seed;
-    engine
-        .check_invariants()
-        .map_err(|e| {
-            judgement_persistence::PersistError::Conflict(format!(
-                "restored game {game_id} failed invariants: {e}"
-            ))
-        })?;
+    engine.check_invariants().map_err(|e| {
+        judgement_persistence::PersistError::Conflict(format!(
+            "restored game {game_id} failed invariants: {e}"
+        ))
+    })?;
 
     let turn_timeout = game
         .rules

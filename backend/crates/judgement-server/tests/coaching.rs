@@ -25,7 +25,11 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             .upsert_session(&StoredSession {
                 session_id,
                 nickname: format!("P{i}"),
-                token: if i == 0 { token.clone() } else { format!("tok-{i}") },
+                token: if i == 0 {
+                    token.clone()
+                } else {
+                    format!("tok-{i}")
+                },
                 created_at: Utc::now(),
                 avatar_id: None,
             })
@@ -107,7 +111,12 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
         let bid = engine.legal_bids(turn)[0];
         let events = engine.place_bid(turn, bid).unwrap();
         store
-            .commit_command(&to_commit(game_id, ActionId::new(), &events, engine.state()))
+            .commit_command(&to_commit(
+                game_id,
+                ActionId::new(),
+                &events,
+                engine.state(),
+            ))
             .await
             .unwrap();
     }
@@ -118,14 +127,24 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
                 let card = engine.legal_cards(turn)[0];
                 let events = engine.play_card(turn, card).unwrap();
                 store
-                    .commit_command(&to_commit(game_id, ActionId::new(), &events, engine.state()))
+                    .commit_command(&to_commit(
+                        game_id,
+                        ActionId::new(),
+                        &events,
+                        engine.state(),
+                    ))
                     .await
                     .unwrap();
             }
             GamePhase::RoundScoring => {
                 let events = engine.advance_from_round_scoring().unwrap();
                 store
-                    .commit_command(&to_commit(game_id, ActionId::new(), &events, engine.state()))
+                    .commit_command(&to_commit(
+                        game_id,
+                        ActionId::new(),
+                        &events,
+                        engine.state(),
+                    ))
                     .await
                     .unwrap();
             }
@@ -227,10 +246,7 @@ async fn coach_and_highlights_are_deterministic() {
     assert!(coach["fallback_reason"].is_null());
     assert!(coach["headline"].as_str().unwrap().contains("Bid accuracy"));
     assert!(!coach["improvements"].as_array().unwrap().is_empty());
-    assert_eq!(
-        coach["analysis"]["total_rounds"].as_u64().unwrap(),
-        1
-    );
+    assert_eq!(coach["analysis"]["total_rounds"].as_u64().unwrap(), 1);
     let exact = coach["analysis"]["exact_bid_rounds"].as_u64().unwrap();
     let over = coach["analysis"]["overbid_rounds"].as_u64().unwrap();
     let under = coach["analysis"]["underbid_rounds"].as_u64().unwrap();

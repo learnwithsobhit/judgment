@@ -33,11 +33,7 @@ async fn guest(http: &reqwest::Client, base: &str, nick: &str) -> CreateGuestSes
         .unwrap()
 }
 
-async fn create_event(
-    http: &reqwest::Client,
-    base: &str,
-    token: &str,
-) -> CreateGameEventResponse {
+async fn create_event(http: &reqwest::Client, base: &str, token: &str) -> CreateGameEventResponse {
     let starts = Utc::now() + Duration::hours(2);
     http.post(format!("{base}/api/v1/events"))
         .bearer_auth(token)
@@ -96,7 +92,14 @@ async fn ninth_rsvp_waitlisted_fourteenth_rejected() {
     let slug = created.event.slug;
 
     for i in 0..8 {
-        let resp = rsvp(&http, &base, &slug, &format!("P{i}"), &format!("900000000{i}")).await;
+        let resp = rsvp(
+            &http,
+            &base,
+            &slug,
+            &format!("P{i}"),
+            &format!("900000000{i}"),
+        )
+        .await;
         assert!(resp.status().is_success(), "{i}: {}", resp.status());
         let body: CreateRsvpResponse = resp.json().await.unwrap();
         assert_eq!(body.rsvp_status, "going");
@@ -140,11 +143,17 @@ async fn cancel_going_promotes_oldest_waitlisted() {
 
     let mut going_tokens = Vec::new();
     for i in 0..8 {
-        let body: CreateRsvpResponse = rsvp(&http, &base, &slug, &format!("P{i}"), &format!("900000000{i}"))
-            .await
-            .json()
-            .await
-            .unwrap();
+        let body: CreateRsvpResponse = rsvp(
+            &http,
+            &base,
+            &slug,
+            &format!("P{i}"),
+            &format!("900000000{i}"),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
         going_tokens.push(body.rsvp_token);
     }
     let wait: CreateRsvpResponse = rsvp(&http, &base, &slug, "WaitA", "9111111111")
@@ -180,13 +189,21 @@ async fn open_lobby_requires_three_going_and_sizes_room() {
     let token = &created.manage_token;
 
     for i in 0..2 {
-        rsvp(&http, &base, &slug, &format!("P{i}"), &format!("900000000{i}"))
-            .await
-            .error_for_status()
-            .unwrap();
+        rsvp(
+            &http,
+            &base,
+            &slug,
+            &format!("P{i}"),
+            &format!("900000000{i}"),
+        )
+        .await
+        .error_for_status()
+        .unwrap();
     }
     let too_few = http
-        .post(format!("{base}/api/v1/events/{slug}/open-lobby?token={token}"))
+        .post(format!(
+            "{base}/api/v1/events/{slug}/open-lobby?token={token}"
+        ))
         .bearer_auth(&host.token)
         .json(&serde_json::json!({}))
         .send()
@@ -195,13 +212,21 @@ async fn open_lobby_requires_three_going_and_sizes_room() {
     assert_eq!(too_few.status(), reqwest::StatusCode::CONFLICT);
 
     for i in 2..5 {
-        rsvp(&http, &base, &slug, &format!("P{i}"), &format!("900000000{i}"))
-            .await
-            .error_for_status()
-            .unwrap();
+        rsvp(
+            &http,
+            &base,
+            &slug,
+            &format!("P{i}"),
+            &format!("900000000{i}"),
+        )
+        .await
+        .error_for_status()
+        .unwrap();
     }
     let opened: OpenLobbyResponse = http
-        .post(format!("{base}/api/v1/events/{slug}/open-lobby?token={token}"))
+        .post(format!(
+            "{base}/api/v1/events/{slug}/open-lobby?token={token}"
+        ))
         .bearer_auth(&host.token)
         .json(&serde_json::json!({}))
         .send()

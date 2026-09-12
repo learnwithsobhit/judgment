@@ -67,8 +67,7 @@ fn migrations_dir() -> PathBuf {
         PathBuf::from("crates/judgement-persistence/migrations"),
         PathBuf::from("backend/crates/judgement-persistence/migrations"),
         PathBuf::from("/srv/migrations/persistence"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../judgement-persistence/migrations"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../judgement-persistence/migrations"),
     ];
     candidates
         .into_iter()

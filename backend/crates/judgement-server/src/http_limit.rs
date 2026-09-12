@@ -64,7 +64,9 @@ impl HttpRateLimiter {
         let mut guard = self.buckets.lock().expect("http rate limiter");
         let bucket = guard.entry(key.to_string()).or_default();
         let now = Instant::now();
-        bucket.events.retain(|t| now.duration_since(*t) < self.config.window);
+        bucket
+            .events
+            .retain(|t| now.duration_since(*t) < self.config.window);
         if bucket.events.len() as u32 >= max {
             return false;
         }

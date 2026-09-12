@@ -7,16 +7,15 @@ pub const REACTION_COOLDOWN_MS: u64 = 2000;
 
 /// Illustrated Notionists faces (`face_01`…`face_40`) plus legacy emoji ids.
 const ALLOWED_AVATARS: &[&str] = &[
-    "face_01", "face_02", "face_03", "face_04", "face_05", "face_06", "face_07",
-    "face_08", "face_09", "face_10", "face_11", "face_12", "face_13", "face_14",
-    "face_15", "face_16", "face_17", "face_18", "face_19", "face_20", "face_21",
-    "face_22", "face_23", "face_24", "face_25", "face_26", "face_27", "face_28",
-    "face_29", "face_30", "face_31", "face_32", "face_33", "face_34", "face_35",
-    "face_36", "face_37", "face_38", "face_39", "face_40",
+    "face_01", "face_02", "face_03", "face_04", "face_05", "face_06", "face_07", "face_08",
+    "face_09", "face_10", "face_11", "face_12", "face_13", "face_14", "face_15", "face_16",
+    "face_17", "face_18", "face_19", "face_20", "face_21", "face_22", "face_23", "face_24",
+    "face_25", "face_26", "face_27", "face_28", "face_29", "face_30", "face_31", "face_32",
+    "face_33", "face_34", "face_35", "face_36", "face_37", "face_38", "face_39", "face_40",
     // Legacy emoji pack (still accepted for one release).
-    "fox", "owl", "dragon", "cat", "dog", "panda", "tiger", "lion", "monkey", "frog",
-    "robot", "alien", "ghost", "fire", "star", "crown", "spade", "heart", "diamond", "club",
-    "wizard", "ninja", "pirate", "unicorn",
+    "fox", "owl", "dragon", "cat", "dog", "panda", "tiger", "lion", "monkey", "frog", "robot",
+    "alien", "ghost", "fire", "star", "crown", "spade", "heart", "diamond", "club", "wizard",
+    "ninja", "pirate", "unicorn",
 ];
 
 const ALLOWED_EMOJIS: &[&str] = &[
@@ -291,13 +290,17 @@ mod tests {
         let style = resolve_emote_text("ye mara");
         assert_eq!(style.mood, "roast");
         assert_eq!(style.sticker_id.as_deref(), Some("slam"));
-        assert!(style.emojis.contains(&"💀".to_string()) || style.emojis.contains(&"🔥".to_string()));
+        assert!(
+            style.emojis.contains(&"💀".to_string()) || style.emojis.contains(&"🔥".to_string())
+        );
     }
 
     #[test]
     fn lexicon_maps_nice_trump() {
         let style = resolve_emote_text("nice trump");
-        assert!(style.emojis.contains(&"🔥".to_string()) || style.emojis.contains(&"🎯".to_string()));
+        assert!(
+            style.emojis.contains(&"🔥".to_string()) || style.emojis.contains(&"🎯".to_string())
+        );
         assert!(style.sticker_id.is_some());
     }
 

@@ -43,7 +43,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/rooms/{room_ref}/join", post(routes::join_room))
         .route("/api/v1/rooms/{room_ref}/claim", post(routes::claim_seat))
         .route("/api/v1/rooms/{room_ref}/end", post(routes::end_game))
-        .route("/api/v1/rooms/{room_ref}/restart", post(routes::restart_game))
+        .route(
+            "/api/v1/rooms/{room_ref}/restart",
+            post(routes::restart_game),
+        )
         .route("/api/v1/rooms/{room_ref}/leave", post(routes::leave_room))
         .route(
             "/api/v1/rooms/{room_ref}/remove-player",
@@ -54,10 +57,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/events", post(events::create_event))
         .route("/api/v1/events/{slug}", get(events::get_event))
         .route("/api/v1/events/{slug}/rsvps", post(events::create_rsvp))
-        .route(
-            "/api/v1/events/{slug}/rsvps/me",
-            post(events::cancel_rsvp),
-        )
+        .route("/api/v1/events/{slug}/rsvps/me", post(events::cancel_rsvp))
         .route("/api/v1/events/{slug}/manage", get(events::manage_event))
         .route("/api/v1/events/{slug}/open-lobby", post(events::open_lobby))
         .route("/api/v1/events/{slug}/cancel", post(events::cancel_event))
@@ -65,10 +65,22 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/events/{slug}/calendar.ics",
             get(events::calendar_ics),
         )
-        .route("/api/v1/games/{game_id}/history", get(routes::get_game_history))
-        .route("/api/v1/games/{game_id}/result", get(routes::get_game_result))
-        .route("/api/v1/games/{game_id}/coach/{player_id}", get(routes::get_game_coach))
-        .route("/api/v1/games/{game_id}/highlights", get(routes::get_game_highlights))
+        .route(
+            "/api/v1/games/{game_id}/history",
+            get(routes::get_game_history),
+        )
+        .route(
+            "/api/v1/games/{game_id}/result",
+            get(routes::get_game_result),
+        )
+        .route(
+            "/api/v1/games/{game_id}/coach/{player_id}",
+            get(routes::get_game_coach),
+        )
+        .route(
+            "/api/v1/games/{game_id}/highlights",
+            get(routes::get_game_highlights),
+        )
         .route(
             "/api/v1/games/{game_id}/rounds/{round_index}/summary",
             get(routes::get_round_summary),

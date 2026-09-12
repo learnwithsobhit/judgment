@@ -175,10 +175,11 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
     // Play out the single 1-card round.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     while tokio::time::Instant::now() < deadline {
-        if clients
-            .iter()
-            .all(|c| c.last.as_ref().is_some_and(|v| v.phase == GamePhase::Finished))
-        {
+        if clients.iter().all(|c| {
+            c.last
+                .as_ref()
+                .is_some_and(|v| v.phase == GamePhase::Finished)
+        }) {
             break;
         }
 
@@ -208,6 +209,24 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
         };
 
         let view = clients[index].last.as_ref().unwrap();
+        if view.legal_actions.legal_bids.is_empty() && view.legal_actions.playable_cards.len() == 1
+        {
+            // Server auto-plays the singleton; wait for the snapshot.
+            for client in &mut clients {
+                let ws = client.ws.as_mut().unwrap();
+                if let Ok(Some(Ok(Message::Text(text)))) =
+                    tokio::time::timeout(Duration::from_millis(50), ws.next()).await
+                {
+                    let msg: ServerMessage = serde_json::from_str(&text).unwrap();
+                    if let ServerMessage::StateSnapshot { view } = msg {
+                        client.last = Some(view);
+                    } else if let ServerMessage::TokenRotated { token } = msg {
+                        client.token = token;
+                    }
+                }
+            }
+            continue;
+        }
         let action = if !view.legal_actions.legal_bids.is_empty() {
             ClientCommand::PlaceBid {
                 bid: view.legal_actions.legal_bids[0],
@@ -301,7 +320,11 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
 
     panic!(
         "finish cleanup incomplete; history={:?} room={:?} actor={}",
-        store.load_game_history(game_id).await.unwrap().map(|h| h.status),
+        store
+            .load_game_history(game_id)
+            .await
+            .unwrap()
+            .map(|h| h.status),
         state_ref
             .rooms
             .lock()

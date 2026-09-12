@@ -11,6 +11,7 @@ class PlayingCardWidget extends StatelessWidget {
   final CardModel card;
   final double width;
   final bool highlighted;
+  final bool forced;
   final bool disabled;
   final VoidCallback? onTap;
 
@@ -19,6 +20,7 @@ class PlayingCardWidget extends StatelessWidget {
     required this.card,
     this.width = 64,
     this.highlighted = false,
+    this.forced = false,
     this.disabled = false,
     this.onTap,
   });
@@ -37,10 +39,16 @@ class PlayingCardWidget extends StatelessWidget {
         borderRadius: BorderRadius.circular(width * 0.08),
         border: Border.all(
           color: highlighted ? const Color(0xFFFFC857) : Colors.black26,
-          width: highlighted ? 3 : 1,
+          width: forced
+              ? 4
+              : highlighted
+                  ? 3
+                  : 1,
         ),
         boxShadow: [
-          if (highlighted)
+          if (forced)
+            const BoxShadow(color: Color(0xCCFFC857), blurRadius: 18)
+          else if (highlighted)
             const BoxShadow(color: Color(0x88FFC857), blurRadius: 12)
           else
             const BoxShadow(

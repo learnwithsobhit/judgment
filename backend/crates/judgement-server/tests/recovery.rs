@@ -118,9 +118,11 @@ impl Client {
             action,
         };
         let ws = self.ws.as_mut().unwrap();
-        ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(
+            serde_json::to_string(&envelope).unwrap().into(),
+        ))
+        .await
+        .unwrap();
         // Drain until we see our version advance (or a rejection).
         let before = view.state_version;
         let deadline = tokio::time::Instant::now() + READ_TIMEOUT;
@@ -287,9 +289,11 @@ async fn restart_restores_game_and_dedup_registry() {
             action: ClientCommand::PlaceBid { bid: 0 },
         };
         let ws = client.ws.as_mut().unwrap();
-        ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(
+            serde_json::to_string(&envelope).unwrap().into(),
+        ))
+        .await
+        .unwrap();
 
         let deadline = tokio::time::Instant::now() + READ_TIMEOUT;
         let mut saw_accept = false;
@@ -310,7 +314,10 @@ async fn restart_restores_game_and_dedup_registry() {
                 break;
             }
         }
-        assert!(saw_accept, "duplicate action should be acknowledged with prior version");
+        assert!(
+            saw_accept,
+            "duplicate action should be acknowledged with prior version"
+        );
         // State must not have moved past version_before from the duplicate.
         client.wait_snapshot().await;
         assert_eq!(client.last.as_ref().unwrap().state_version, version_before);

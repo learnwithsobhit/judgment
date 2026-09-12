@@ -7,10 +7,10 @@ use std::sync::Arc;
 use judgement_domain::GameId;
 use judgement_persistence::MemoryStore;
 use judgement_protocol::CreateGuestSessionResponse;
-use judgement_server::capacity::{DEFAULT_HARD_ACTIVE_GAMES, CAPACITY_FULL_MESSAGE};
+use judgement_server::build_router;
+use judgement_server::capacity::{CAPACITY_FULL_MESSAGE, DEFAULT_HARD_ACTIVE_GAMES};
 use judgement_server::restore::bootstrap;
 use judgement_server::state::{AppState, GameInfo};
-use judgement_server::{build_router};
 use tokio::sync::mpsc;
 
 async fn spawn_with(state: Arc<AppState>) -> SocketAddr {

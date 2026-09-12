@@ -4,7 +4,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use judgement_persistence::MemoryStore;
-use judgement_protocol::{CreateGuestSessionResponse, CreateRoomResponse, JoinRoomResponse, RoomView};
+use judgement_protocol::{
+    CreateGuestSessionResponse, CreateRoomResponse, JoinRoomResponse, RoomView,
+};
 use judgement_server::{build_router, state::AppState};
 
 async fn spawn_server() -> SocketAddr {
@@ -75,7 +77,10 @@ async fn host_can_remove_guest_from_lobby() {
 
     assert_eq!(room.seats.len(), 1);
     assert!(!room.seats.iter().any(|s| s.player_id == joined.player_id));
-    assert!(room.seats.iter().any(|s| s.is_host && s.player_id == created.player_id));
+    assert!(room
+        .seats
+        .iter()
+        .any(|s| s.is_host && s.player_id == created.player_id));
 }
 
 #[tokio::test]
@@ -134,17 +139,14 @@ async fn host_cannot_remove_self() {
         .await
         .unwrap();
     let guest_session = guest(&http, &base, "Guest").await;
-    http.post(format!(
-        "{base}/api/v1/rooms/{}/join",
-        created.room.code
-    ))
-    .bearer_auth(&guest_session.token)
-    .json(&serde_json::json!({}))
-    .send()
-    .await
-    .unwrap()
-    .error_for_status()
-    .unwrap();
+    http.post(format!("{base}/api/v1/rooms/{}/join", created.room.code))
+        .bearer_auth(&guest_session.token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
 
     let resp = http
         .post(format!(

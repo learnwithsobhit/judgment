@@ -1244,6 +1244,9 @@ class _HandArea extends StatelessWidget {
                   card: card,
                   width: cardWidth,
                   highlighted: myTurnToPlay && playable.contains(card.id),
+                  forced: myTurnToPlay &&
+                      playable.length == 1 &&
+                      playable.contains(card.id),
                   disabled: myTurnToPlay && !playable.contains(card.id),
                   onTap: pending
                       ? null

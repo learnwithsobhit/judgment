@@ -42,11 +42,7 @@ async fn reap_once(state: &Arc<AppState>) {
                 matches!(room.status, RoomStatus::Lobby)
                     && now
                         .signed_duration_since(
-                            room.seats
-                                .iter()
-                                .map(|s| s.joined_at)
-                                .min()
-                                .unwrap_or(now),
+                            room.seats.iter().map(|s| s.joined_at).min().unwrap_or(now),
                         )
                         .to_std()
                         .unwrap_or_default()
@@ -146,8 +142,7 @@ async fn reap_once(state: &Arc<AppState>) {
         rooms_reaped += 1;
     }
 
-    let session_cutoff =
-        now - ChronoDuration::from_std(ORPHAN_SESSION_TTL).unwrap_or_default();
+    let session_cutoff = now - ChronoDuration::from_std(ORPHAN_SESSION_TTL).unwrap_or_default();
     if let Ok(n) = state.store.delete_orphan_sessions(session_cutoff).await {
         if n > 0 {
             tracing::info!(deleted = n, "orphan guest_sessions purged");
@@ -173,6 +168,11 @@ async fn reap_once(state: &Arc<AppState>) {
             .fetch_add(games_purged, std::sync::atomic::Ordering::Relaxed);
     }
     if rooms_reaped > 0 || games_abandoned > 0 || games_purged > 0 {
-        tracing::info!(rooms_reaped, games_abandoned, games_purged, "reaper pass complete");
+        tracing::info!(
+            rooms_reaped,
+            games_abandoned,
+            games_purged,
+            "reaper pass complete"
+        );
     }
 }

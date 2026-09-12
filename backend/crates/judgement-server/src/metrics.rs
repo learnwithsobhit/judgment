@@ -49,6 +49,7 @@ pub struct Metrics {
     pub soundboard_broadcast: AtomicU64,
     pub voice_notes_broadcast: AtomicU64,
     pub audio_rejected: AtomicU64,
+    pub forced_auto_play: AtomicU64,
 }
 
 impl Metrics {
@@ -104,34 +105,146 @@ impl Metrics {
                 ));
             };
         }
-        counter!("judgement_http_requests_total", "HTTP requests that passed the rate limiter", http_requests);
-        counter!("judgement_http_rate_limited_total", "HTTP requests rejected by rate limit", rate_limited);
-        counter!("judgement_games_started_total", "Games started", games_started);
-        counter!("judgement_games_completed_total", "Games completed", games_completed);
-        counter!("judgement_ws_connected_total", "WebSocket upgrades accepted", ws_connected);
-        counter!("judgement_ws_disconnected_total", "WebSocket disconnects observed", ws_disconnected);
-        counter!("judgement_ws_disconnected_socket_error_total", "WS disconnects from socket/TCP reset", ws_disconnected_socket_error);
-        counter!("judgement_ws_disconnected_client_close_total", "WS disconnects from client Close frames", ws_disconnected_client_close);
-        counter!("judgement_ws_disconnected_liveness_total", "WS disconnects from idle liveness timeout", ws_disconnected_liveness);
-        counter!("judgement_ws_disconnected_stream_ended_total", "WS disconnects from read stream end", ws_disconnected_stream_ended);
-        counter!("judgement_ws_disconnected_actor_closed_total", "WS disconnects because the game actor closed", ws_disconnected_actor_closed);
-        counter!("judgement_ws_disconnected_actor_connect_failed_total", "WS upgrades that failed actor Connect handoff", ws_disconnected_actor_connect_failed);
-        counter!("judgement_ws_stale_disconnects_total", "Disconnects ignored because a newer WS already owns the seat", ws_stale_disconnects);
-        counter!("judgement_reconnects_total", "Player reconnects that restored control", reconnects);
-        counter!("judgement_bot_takeovers_total", "Legacy bot takeovers (unused in live replace-or-end)", bot_takeovers);
-        counter!("judgement_seat_vacancies_total", "Seats marked vacant after grace/leave", seat_vacancies);
-        counter!("judgement_seat_claims_total", "Vacant seats claimed by a new human", seat_claims);
-        counter!("judgement_games_ended_vacancy_total", "Games ended by host or vacancy timeout", games_ended_vacancy);
-        counter!("judgement_games_restarted_total", "Games rematched via host restart", games_restarted);
-        counter!("judgement_games_removed_total", "Game actors removed from the active map after abort/restart", games_removed);
-        counter!("judgement_games_compacted_total", "Finished games compacted (ops/backfill)", games_compacted);
-        counter!("judgement_games_purged_total", "Terminal games hard-deleted on finish/abort or reaper backstop", games_purged);
-        counter!("judgement_games_abandoned_total", "In-memory abandoned game actors dropped", games_abandoned);
-        counter!("judgement_invalid_actions_total", "Rejected game commands", invalid_actions);
-        counter!("judgement_db_write_failures_total", "Persist commit failures", db_write_failures);
-        counter!("judgement_ai_requests_total", "AI / rules query requests", ai_requests);
-        counter!("judgement_ai_fallbacks_total", "AI responses that used deterministic fallback", ai_fallbacks);
-        counter!("judgement_rooms_reaped_total", "Abandoned rooms garbage-collected", rooms_reaped);
+        counter!(
+            "judgement_http_requests_total",
+            "HTTP requests that passed the rate limiter",
+            http_requests
+        );
+        counter!(
+            "judgement_http_rate_limited_total",
+            "HTTP requests rejected by rate limit",
+            rate_limited
+        );
+        counter!(
+            "judgement_games_started_total",
+            "Games started",
+            games_started
+        );
+        counter!(
+            "judgement_games_completed_total",
+            "Games completed",
+            games_completed
+        );
+        counter!(
+            "judgement_ws_connected_total",
+            "WebSocket upgrades accepted",
+            ws_connected
+        );
+        counter!(
+            "judgement_ws_disconnected_total",
+            "WebSocket disconnects observed",
+            ws_disconnected
+        );
+        counter!(
+            "judgement_ws_disconnected_socket_error_total",
+            "WS disconnects from socket/TCP reset",
+            ws_disconnected_socket_error
+        );
+        counter!(
+            "judgement_ws_disconnected_client_close_total",
+            "WS disconnects from client Close frames",
+            ws_disconnected_client_close
+        );
+        counter!(
+            "judgement_ws_disconnected_liveness_total",
+            "WS disconnects from idle liveness timeout",
+            ws_disconnected_liveness
+        );
+        counter!(
+            "judgement_ws_disconnected_stream_ended_total",
+            "WS disconnects from read stream end",
+            ws_disconnected_stream_ended
+        );
+        counter!(
+            "judgement_ws_disconnected_actor_closed_total",
+            "WS disconnects because the game actor closed",
+            ws_disconnected_actor_closed
+        );
+        counter!(
+            "judgement_ws_disconnected_actor_connect_failed_total",
+            "WS upgrades that failed actor Connect handoff",
+            ws_disconnected_actor_connect_failed
+        );
+        counter!(
+            "judgement_ws_stale_disconnects_total",
+            "Disconnects ignored because a newer WS already owns the seat",
+            ws_stale_disconnects
+        );
+        counter!(
+            "judgement_reconnects_total",
+            "Player reconnects that restored control",
+            reconnects
+        );
+        counter!(
+            "judgement_bot_takeovers_total",
+            "Legacy bot takeovers (unused in live replace-or-end)",
+            bot_takeovers
+        );
+        counter!(
+            "judgement_seat_vacancies_total",
+            "Seats marked vacant after grace/leave",
+            seat_vacancies
+        );
+        counter!(
+            "judgement_seat_claims_total",
+            "Vacant seats claimed by a new human",
+            seat_claims
+        );
+        counter!(
+            "judgement_games_ended_vacancy_total",
+            "Games ended by host or vacancy timeout",
+            games_ended_vacancy
+        );
+        counter!(
+            "judgement_games_restarted_total",
+            "Games rematched via host restart",
+            games_restarted
+        );
+        counter!(
+            "judgement_games_removed_total",
+            "Game actors removed from the active map after abort/restart",
+            games_removed
+        );
+        counter!(
+            "judgement_games_compacted_total",
+            "Finished games compacted (ops/backfill)",
+            games_compacted
+        );
+        counter!(
+            "judgement_games_purged_total",
+            "Terminal games hard-deleted on finish/abort or reaper backstop",
+            games_purged
+        );
+        counter!(
+            "judgement_games_abandoned_total",
+            "In-memory abandoned game actors dropped",
+            games_abandoned
+        );
+        counter!(
+            "judgement_invalid_actions_total",
+            "Rejected game commands",
+            invalid_actions
+        );
+        counter!(
+            "judgement_db_write_failures_total",
+            "Persist commit failures",
+            db_write_failures
+        );
+        counter!(
+            "judgement_ai_requests_total",
+            "AI / rules query requests",
+            ai_requests
+        );
+        counter!(
+            "judgement_ai_fallbacks_total",
+            "AI responses that used deterministic fallback",
+            ai_fallbacks
+        );
+        counter!(
+            "judgement_rooms_reaped_total",
+            "Abandoned rooms garbage-collected",
+            rooms_reaped
+        );
         counter!(
             "judgement_games_admission_rejected_total",
             "start_game rejected because emergency MAX_ACTIVE_GAMES cap reached",
@@ -172,8 +285,15 @@ impl Metrics {
             "Soundboard/voice commands rejected (cooldown, size, mime, allow-list)",
             audio_rejected
         );
+        counter!(
+            "judgement_forced_auto_play_total",
+            "Singleton legal cards auto-played without waiting for a tap",
+            forced_auto_play
+        );
 
-        out.push_str("# HELP judgement_persist_commit_duration_milliseconds Persist commit latency\n");
+        out.push_str(
+            "# HELP judgement_persist_commit_duration_milliseconds Persist commit latency\n",
+        );
         out.push_str("# TYPE judgement_persist_commit_duration_milliseconds histogram\n");
         out.push_str(&format!(
             "judgement_persist_commit_duration_milliseconds_bucket{{le=\"10\"}} {}\n",
@@ -206,7 +326,10 @@ impl Metrics {
 
         out.push_str("# HELP judgement_active_websockets Approximate active WS connections\n");
         out.push_str("# TYPE judgement_active_websockets gauge\n");
-        out.push_str(&format!("judgement_active_websockets {}\n", gauges.active_websockets));
+        out.push_str(&format!(
+            "judgement_active_websockets {}\n",
+            gauges.active_websockets
+        ));
         out.push_str("# HELP judgement_active_rooms Lobby + in-game rooms\n");
         out.push_str("# TYPE judgement_active_rooms gauge\n");
         out.push_str(&format!("judgement_active_rooms {}\n", gauges.active_rooms));

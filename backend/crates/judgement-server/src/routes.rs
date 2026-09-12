@@ -4,25 +4,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::emotes::is_allowed_avatar;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
 use chrono::Utc;
-use judgement_domain::{
-    trump_rule_from_config, validate_trump_cycle, ActionId, GameId, GameRules, PlayerId,
-    PlayerState, RoomId, SessionId, Suit, MAX_PLAYERS, MIN_PLAYERS,
-};
-use judgement_engine::GameEngine;
-use judgement_persistence::{NewGamePlayer, StoredRoom};
 use judgement_ai::{
     coach_from_analysis, narrate_highlights, narrate_round_summary,
     ExplanationResponse as AiExplanation, RulesQueryRequest as AiRulesQuery, TrickPlayQuery,
     TrickQuery,
 };
 use judgement_analytics::{
-    analyse_player, compute_highlights, score_table_from_history_scores, summarize_round,
-    scores_from_value,
+    analyse_player, compute_highlights, score_table_from_history_scores, scores_from_value,
+    summarize_round,
 };
+use judgement_domain::{
+    trump_rule_from_config, validate_trump_cycle, ActionId, GameId, GameRules, PlayerId,
+    PlayerState, RoomId, SessionId, Suit, MAX_PLAYERS, MIN_PLAYERS,
+};
+use judgement_engine::GameEngine;
+use judgement_persistence::{NewGamePlayer, StoredRoom};
 use judgement_protocol::{
     ClaimSeatRequest, ClaimSeatResponse, CoachingResponse, CreateGuestSessionRequest,
     CreateGuestSessionResponse, CreateRoomRequest, CreateRoomResponse, EndGameResponse,
@@ -31,7 +32,6 @@ use judgement_protocol::{
     RoomView, RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest,
     SetAvatarResponse, StartGameRequest, StartGameResponse,
 };
-use crate::emotes::is_allowed_avatar;
 use tokio::sync::oneshot;
 
 use crate::actor::{self, ActorMessage, SpawnActor};
@@ -109,7 +109,9 @@ pub async fn create_guest_session(
 ) -> Result<Json<CreateGuestSessionResponse>, ApiError> {
     let nickname = body.nickname.trim().to_string();
     if nickname.is_empty() || nickname.chars().count() > 24 {
-        return Err(ApiError::BadRequest("nickname must be 1-24 characters".into()));
+        return Err(ApiError::BadRequest(
+            "nickname must be 1-24 characters".into(),
+        ));
     }
     let session = state.create_session(nickname);
     state
@@ -211,7 +213,9 @@ pub async fn get_room(
     Path(room_ref): Path<String>,
 ) -> Result<Json<RoomView>, ApiError> {
     state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
     let mut view = {
         let rooms = state.rooms.lock().unwrap();
         let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
@@ -270,7 +274,9 @@ pub async fn join_room(
 ) -> Result<Json<JoinRoomResponse>, ApiError> {
     let preferred = body.and_then(|j| j.0.player_id);
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
 
     let already_seated: Option<(RoomView, PlayerId)> = {
         let rooms = state.rooms.lock().unwrap();
@@ -349,7 +355,10 @@ pub async fn join_room(
         .await
         .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
 
-    Ok(Json(JoinRoomResponse { room: view, player_id }))
+    Ok(Json(JoinRoomResponse {
+        room: view,
+        player_id,
+    }))
 }
 
 pub async fn claim_seat(
@@ -359,7 +368,9 @@ pub async fn claim_seat(
     body: Option<Json<ClaimSeatRequest>>,
 ) -> Result<Json<ClaimSeatResponse>, ApiError> {
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
     let req = body.map(|j| j.0).unwrap_or_default();
     let claimed = claim_seat_inner(&state, &session, room_id, req).await?;
     Ok(Json(claimed))
@@ -416,9 +427,7 @@ async fn claim_seat_inner(
         info.players.insert(session.id, player_id);
 
         let mut rooms = state.rooms.lock().unwrap();
-        let room = rooms
-            .get_mut(&room_id)
-            .ok_or(ApiError::NotFound("room"))?;
+        let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
         if let Some(seat) = room.seats.iter_mut().find(|s| s.player_id == player_id) {
             seat.session_id = session.id;
             seat.nickname = session.nickname.clone();
@@ -461,7 +470,9 @@ pub async fn end_game(
     Path(room_ref): Path<String>,
 ) -> Result<Json<EndGameResponse>, ApiError> {
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
 
     let (game_id, player_id, commands) = {
         let rooms = state.rooms.lock().unwrap();
@@ -469,9 +480,9 @@ pub async fn end_game(
         let RoomStatus::InGame(game_id) = room.status else {
             return Err(ApiError::Conflict("no active game to end".into()));
         };
-        let seat = room
-            .seat_of(session.id)
-            .ok_or(ApiError::Forbidden("you are not seated in this room".into()))?;
+        let seat = room.seat_of(session.id).ok_or(ApiError::Forbidden(
+            "you are not seated in this room".into(),
+        ))?;
         let games = state.games.lock().unwrap();
         let info = games
             .get(&game_id)
@@ -507,7 +518,9 @@ pub async fn restart_game(
     body: Option<Json<StartGameRequest>>,
 ) -> Result<Json<RestartGameResponse>, ApiError> {
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
     let seed = body.and_then(|Json(b)| b.seed);
     if seed.is_some() && !seed_allowed() {
         return Err(ApiError::Forbidden(
@@ -519,14 +532,16 @@ pub async fn restart_game(
         let rooms = state.rooms.lock().unwrap();
         let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
         if room.host_session != session.id {
-            return Err(ApiError::Forbidden("only the host can restart the game".into()));
+            return Err(ApiError::Forbidden(
+                "only the host can restart the game".into(),
+            ));
         }
         let RoomStatus::InGame(game_id) = room.status else {
             return Err(ApiError::Conflict("no active game to restart".into()));
         };
-        let seat = room
-            .seat_of(session.id)
-            .ok_or(ApiError::Forbidden("you are not seated in this room".into()))?;
+        let seat = room.seat_of(session.id).ok_or(ApiError::Forbidden(
+            "you are not seated in this room".into(),
+        ))?;
         let games = state.games.lock().unwrap();
         let info = games
             .get(&game_id)
@@ -536,9 +551,7 @@ pub async fn restart_game(
 
     let (presence_tx, presence_rx) = oneshot::channel();
     commands
-        .send(ActorMessage::QueryPresence {
-            reply: presence_tx,
-        })
+        .send(ActorMessage::QueryPresence { reply: presence_tx })
         .await
         .map_err(|_| ApiError::Conflict("game actor unavailable".into()))?;
     let presence = presence_rx
@@ -573,9 +586,7 @@ pub async fn restart_game(
     // Prepare lobby with remaining seats (ready for immediate start).
     let lobby_snapshot = {
         let mut rooms = state.rooms.lock().unwrap();
-        let room = rooms
-            .get_mut(&room_id)
-            .ok_or(ApiError::NotFound("room"))?;
+        let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
         room.seats
             .retain(|s| !cleanup.vacant_player_ids.contains(&s.player_id));
         room.seats.sort_by_key(|s| s.seat);
@@ -616,9 +627,7 @@ pub async fn restart_game(
     };
 
     let _ = commands
-        .send(ActorMessage::NotifyRestarted {
-            new_game_id,
-        })
+        .send(ActorMessage::NotifyRestarted { new_game_id })
         .await;
     drop(commands);
 
@@ -640,7 +649,9 @@ pub async fn leave_room(
     Path(room_ref): Path<String>,
 ) -> Result<Json<RoomView>, ApiError> {
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
 
     let outcome = {
         let mut rooms = state.rooms.lock().unwrap();
@@ -652,7 +663,9 @@ pub async fn leave_room(
             ));
         }
         if !remove_seat_by_session(room, session.id) {
-            return Err(ApiError::Forbidden("you are not seated in this room".into()));
+            return Err(ApiError::Forbidden(
+                "you are not seated in this room".into(),
+            ));
         }
 
         if room.seats.is_empty() {
@@ -681,7 +694,9 @@ pub async fn remove_player(
     Json(body): Json<RemovePlayerRequest>,
 ) -> Result<Json<RoomView>, ApiError> {
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
 
     let outcome = {
         let mut rooms = state.rooms.lock().unwrap();
@@ -755,7 +770,9 @@ pub async fn set_ready(
     Json(body): Json<ReadyRequest>,
 ) -> Result<Json<RoomView>, ApiError> {
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
 
     let (view, snapshot) = {
         let mut rooms = state.rooms.lock().unwrap();
@@ -788,7 +805,9 @@ pub async fn start_game(
     body: Option<Json<StartGameRequest>>,
 ) -> Result<Json<StartGameResponse>, ApiError> {
     let session = state.authenticate(&headers)?;
-    let room_id = state.resolve_room_id(&room_ref).ok_or(ApiError::NotFound("room"))?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
     let seed = body.and_then(|Json(b)| b.seed);
     if seed.is_some() && !seed_allowed() {
         return Err(ApiError::Forbidden(
@@ -834,7 +853,9 @@ async fn start_game_inner(
         let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
 
         if room.host_session != session.id {
-            return Err(ApiError::Forbidden("only the host can start the game".into()));
+            return Err(ApiError::Forbidden(
+                "only the host can start the game".into(),
+            ));
         }
         if room.status != RoomStatus::Lobby {
             return Err(ApiError::Conflict("the game has already started".into()));
@@ -885,12 +906,9 @@ async fn start_game_inner(
 
     let game_id = GameId::new();
     let seated = players.len() as u8;
-    let trump_rule = trump_rule_from_config(trump_cycle.as_deref(), first_trump)
-        .map_err(ApiError::Conflict)?;
-    let reveal_trump = matches!(
-        trump_rule,
-        judgement_domain::TrumpRule::RevealUndealtCard
-    );
+    let trump_rule =
+        trump_rule_from_config(trump_cycle.as_deref(), first_trump).map_err(ApiError::Conflict)?;
+    let reveal_trump = matches!(trump_rule, judgement_domain::TrumpRule::RevealUndealtCard);
     let round_pattern = round_schedule
         .resolve_pattern(seated, reveal_trump)
         .map_err(|e| {
@@ -906,8 +924,7 @@ async fn start_game_inner(
     };
     rules.bidding_rule.dealer_total_restriction = dealer_total_restriction;
     let reconnect_grace = state.reconnect_grace;
-    rules.reconnect_grace_seconds =
-        u16::try_from(reconnect_grace.as_secs()).unwrap_or(u16::MAX);
+    rules.reconnect_grace_seconds = u16::try_from(reconnect_grace.as_secs()).unwrap_or(u16::MAX);
     let rules_for_store = rules.clone();
     let turn_timeout = turn_timeout_seconds.map(|t| Duration::from_secs(t as u64));
 
@@ -938,9 +955,7 @@ async fn start_game_inner(
     let mut processed = HashMap::new();
     processed.insert(start_action_id, engine.version());
 
-    let host_player_id = *session_to_player
-        .get(&session.id)
-        .expect("host is seated");
+    let host_player_id = *session_to_player.get(&session.id).expect("host is seated");
     let room_code = {
         let rooms = state.rooms.lock().unwrap();
         rooms
@@ -1126,7 +1141,9 @@ pub async fn get_game_coach(
         .ok_or(ApiError::NotFound("game"))?;
 
     if history.status != "finished" {
-        return Err(ApiError::Conflict("coaching is available after the game finishes".into()));
+        return Err(ApiError::Conflict(
+            "coaching is available after the game finishes".into(),
+        ));
     }
 
     let table = score_table_from_history_scores(
@@ -1235,8 +1252,8 @@ pub async fn get_round_summary(
         .iter()
         .find(|r| r.round_index == round_index)
         .ok_or(ApiError::NotFound("round"))?;
-    let scores = scores_from_value(&round.scores)
-        .map_err(|e| ApiError::Conflict(format!("scores: {e}")))?;
+    let scores =
+        scores_from_value(&round.scores).map_err(|e| ApiError::Conflict(format!("scores: {e}")))?;
     let entry = scores
         .get(&player_id)
         .ok_or_else(|| ApiError::BadRequest("player has no score in that round".into()))?;
@@ -1268,7 +1285,9 @@ fn ensure_game_participant(
         if info.players.contains_key(&session_id) {
             return Ok(());
         }
-        return Err(ApiError::Forbidden("you are not a player in this game".into()));
+        return Err(ApiError::Forbidden(
+            "you are not a player in this game".into(),
+        ));
     }
     // Finished games: allow any session that was restored into rooms with this game.
     let rooms = state.rooms.lock().unwrap();

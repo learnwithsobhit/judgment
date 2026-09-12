@@ -13,8 +13,8 @@ use rand::distr::Alphanumeric;
 use rand::Rng;
 use tokio::sync::mpsc;
 
-use judgement_ai::ExplanationService;
 use chrono::{DateTime, Utc};
+use judgement_ai::ExplanationService;
 use judgement_domain::{
     EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit, MIN_PLAYERS,
 };
@@ -228,8 +228,14 @@ impl AppState {
             token: generate_token(),
             avatar_id: None,
         };
-        self.sessions.lock().unwrap().insert(session.id, session.clone());
-        self.tokens.lock().unwrap().insert(session.token.clone(), session.id);
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(session.id, session.clone());
+        self.tokens
+            .lock()
+            .unwrap()
+            .insert(session.token.clone(), session.id);
         session
     }
 
