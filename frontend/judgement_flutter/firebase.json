@@ -266,17 +266,17 @@
       "redirects": [
         {
           "source": "/",
-          "destination": "/index.html?_b=20261010115014-bc35c2f",
+          "destination": "/index.html?_b=20261014084007-7b6e619",
           "type": 302
         },
         {
           "source": "/r/:code",
-          "destination": "/index.html?_b=20261010115014-bc35c2f&room=:code",
+          "destination": "/index.html?_b=20261014084007-7b6e619&room=:code",
           "type": 302
         },
         {
           "source": "/e/:slug",
-          "destination": "/index.html?_b=20261010115014-bc35c2f&event=:slug",
+          "destination": "/index.html?_b=20261014084007-7b6e619&event=:slug",
           "type": 302
         }
       ],
@@ -554,17 +554,17 @@
       "redirects": [
         {
           "source": "/",
-          "destination": "/index.html?_b=20261010115014-bc35c2f",
+          "destination": "/index.html?_b=20261014084007-7b6e619",
           "type": 302
         },
         {
           "source": "/r/:code",
-          "destination": "/index.html?_b=20261010115014-bc35c2f&room=:code",
+          "destination": "/index.html?_b=20261014084007-7b6e619&room=:code",
           "type": 302
         },
         {
           "source": "/e/:slug",
-          "destination": "/index.html?_b=20261010115014-bc35c2f&event=:slug",
+          "destination": "/index.html?_b=20261014084007-7b6e619&event=:slug",
           "type": 302
         }
       ],

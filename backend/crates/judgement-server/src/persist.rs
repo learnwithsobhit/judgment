@@ -19,6 +19,7 @@ pub fn stored_session(session: &Session) -> StoredSession {
         token: session.token.clone(),
         created_at: Utc::now(),
         avatar_id: session.avatar_id.clone(),
+        user_id: session.user_id,
     }
 }
 

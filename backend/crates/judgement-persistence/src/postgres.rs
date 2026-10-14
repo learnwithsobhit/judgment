@@ -77,12 +77,13 @@ impl GameStore for PostgresStore {
     async fn upsert_session(&self, session: &StoredSession) -> Result<(), PersistError> {
         sqlx::query(
             r#"
-            INSERT INTO guest_sessions (session_id, nickname, token, created_at, avatar_id)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO guest_sessions (session_id, nickname, token, created_at, avatar_id, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (session_id) DO UPDATE
               SET nickname = EXCLUDED.nickname,
                   token = EXCLUDED.token,
-                  avatar_id = EXCLUDED.avatar_id
+                  avatar_id = EXCLUDED.avatar_id,
+                  user_id = EXCLUDED.user_id
             "#,
         )
         .bind(session.session_id.0)
@@ -90,6 +91,7 @@ impl GameStore for PostgresStore {
         .bind(&session.token)
         .bind(session.created_at)
         .bind(&session.avatar_id)
+        .bind(session.user_id)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -171,7 +173,7 @@ impl GameStore for PostgresStore {
 
     async fn load_sessions(&self) -> Result<Vec<StoredSession>, PersistError> {
         let rows = sqlx::query(
-            "SELECT session_id, nickname, token, created_at, avatar_id FROM guest_sessions",
+            "SELECT session_id, nickname, token, created_at, avatar_id, user_id FROM guest_sessions",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -184,6 +186,7 @@ impl GameStore for PostgresStore {
                 token: row.get("token"),
                 created_at: row.get("created_at"),
                 avatar_id: row.get("avatar_id"),
+                user_id: row.get("user_id"),
             })
             .collect())
     }
@@ -278,8 +281,8 @@ impl GameStore for PostgresStore {
         for player in &record.players {
             sqlx::query(
                 r#"
-                INSERT INTO game_players (game_id, player_id, session_id, nickname, seat)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO game_players (game_id, player_id, session_id, nickname, seat, user_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 "#,
             )
             .bind(record.game_id.0)
@@ -287,6 +290,7 @@ impl GameStore for PostgresStore {
             .bind(player.session_id.0)
             .bind(&player.nickname)
             .bind(player.seat as i16)
+            .bind(player.user_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -441,6 +445,24 @@ impl GameStore for PostgresStore {
             .await?;
         }
 
+        if crate::stats::stats_enabled() {
+            if let Some(result) = &commit.game_result {
+                sqlx::query("SAVEPOINT user_stats")
+                    .execute(&mut *tx)
+                    .await?;
+                if let Err(error) = record_user_stats(&mut tx, commit, result).await {
+                    tracing::warn!(%error, "user stats skipped so the game commit can finish");
+                    sqlx::query("ROLLBACK TO SAVEPOINT user_stats")
+                        .execute(&mut *tx)
+                        .await?;
+                } else {
+                    let _ = sqlx::query("RELEASE SAVEPOINT user_stats")
+                        .execute(&mut *tx)
+                        .await;
+                }
+            }
+        }
+
         tx.commit().await?;
         Ok(())
     }
@@ -523,7 +545,7 @@ impl GameStore for PostgresStore {
 
         let players = sqlx::query(
             r#"
-            SELECT player_id, session_id, nickname, seat
+            SELECT player_id, session_id, nickname, seat, user_id
             FROM game_players WHERE game_id = $1 ORDER BY seat
             "#,
         )
@@ -536,6 +558,7 @@ impl GameStore for PostgresStore {
             session_id: SessionId(p.get("session_id")),
             nickname: p.get("nickname"),
             seat: p.get::<i16, _>("seat") as u8,
+            user_id: p.get("user_id"),
         })
         .collect();
 
@@ -791,13 +814,13 @@ impl GameStore for PostgresStore {
         player_id: PlayerId,
         new_session_id: SessionId,
         nickname: &str,
+        user_id: Option<Uuid>,
     ) -> Result<(), PersistError> {
         let mut tx = self.pool.begin().await?;
-        // Free UNIQUE(game_id, session_id) if this session was already bound.
         sqlx::query(
             r#"
             UPDATE game_players
-            SET session_id = $3, nickname = $4
+            SET session_id = $3, nickname = $4, user_id = $5
             WHERE game_id = $1 AND player_id = $2
             "#,
         )
@@ -805,6 +828,7 @@ impl GameStore for PostgresStore {
         .bind(player_id.0)
         .bind(new_session_id.0)
         .bind(nickname)
+        .bind(user_id)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -921,4 +945,350 @@ impl GameStore for PostgresStore {
             .map_err(PersistError::from)?;
         Ok(())
     }
+
+    async fn upsert_user(&self, user: &StoredUser) -> Result<(), PersistError> {
+        sqlx::query(
+            r#"
+            INSERT INTO users (
+                user_id, display_name, avatar_id, created_at, updated_at, last_seen_at,
+                legal_accepted_at, legal_version
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (user_id) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                avatar_id = COALESCE(EXCLUDED.avatar_id, users.avatar_id),
+                updated_at = now(),
+                last_seen_at = now(),
+                legal_accepted_at = COALESCE(EXCLUDED.legal_accepted_at, users.legal_accepted_at),
+                legal_version = COALESCE(EXCLUDED.legal_version, users.legal_version)
+            "#,
+        )
+        .bind(user.user_id)
+        .bind(&user.display_name)
+        .bind(&user.avatar_id)
+        .bind(user.created_at)
+        .bind(user.updated_at)
+        .bind(user.last_seen_at)
+        .bind(user.legal_version.as_ref().map(|_| user.last_seen_at))
+        .bind(&user.legal_version)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn upsert_identity(&self, identity: &StoredIdentity) -> Result<(), PersistError> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_identities (user_id, provider, subject, email)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (provider, subject) DO UPDATE SET
+                email = COALESCE(EXCLUDED.email, user_identities.email)
+            "#,
+        )
+        .bind(identity.user_id)
+        .bind(&identity.provider)
+        .bind(&identity.subject)
+        .bind(&identity.email)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn find_user_by_google_subject(
+        &self,
+        subject: &str,
+    ) -> Result<Option<StoredUser>, PersistError> {
+        let row = sqlx::query(
+            r#"
+            SELECT u.user_id, u.display_name, u.avatar_id, u.legal_version,
+                   u.created_at, u.updated_at, u.last_seen_at
+            FROM users u
+            JOIN user_identities i ON i.user_id = u.user_id
+            WHERE i.provider = 'google' AND i.subject = $1
+            "#,
+        )
+        .bind(subject)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(user_from_row))
+    }
+
+    async fn load_user(&self, user_id: Uuid) -> Result<Option<StoredUser>, PersistError> {
+        let row = sqlx::query(
+            r#"
+            SELECT user_id, display_name, avatar_id, legal_version,
+                   created_at, updated_at, last_seen_at
+            FROM users WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(user_from_row))
+    }
+
+    async fn delete_user(&self, user_id: Uuid) -> Result<(), PersistError> {
+        sqlx::query("DELETE FROM users WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn set_user_avatar(&self, user_id: Uuid, avatar_id: &str) -> Result<(), PersistError> {
+        sqlx::query(
+            "UPDATE users SET avatar_id = $2, updated_at = now() WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .bind(avatar_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn load_leaderboard(&self, limit: i64) -> Result<Vec<LeaderboardRow>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT u.user_id, u.display_name, u.avatar_id,
+                   s.ranked_wins, s.ranked_games, s.ranked_points,
+                   s.ranked_rounds, s.ranked_exact
+            FROM user_stats s
+            JOIN users u ON u.user_id = s.user_id
+            WHERE s.ranked_games > 0
+            ORDER BY s.ranked_wins DESC,
+                     COALESCE(s.ranked_exact * 1000000 / NULLIF(s.ranked_rounds, 0), 0) DESC,
+                     COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) DESC,
+                     s.ranked_games DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let games: i32 = row.get("ranked_games");
+                let exact: i32 = row.get("ranked_exact");
+                let rounds: i32 = row.get("ranked_rounds");
+                let points: i64 = row.get("ranked_points");
+                LeaderboardRow {
+                    user_id: row.get("user_id"),
+                    display_name: row.get("display_name"),
+                    avatar_id: row.get("avatar_id"),
+                    wins: row.get("ranked_wins"),
+                    games,
+                    exact_percent: crate::stats::exact_percent(exact, rounds),
+                    average_score: crate::stats::average_score(points, games),
+                }
+            })
+            .collect())
+    }
+
+    async fn load_user_stats(&self, user_id: Uuid) -> Result<Option<UserStatsView>, PersistError> {
+        let user = match self.load_user(user_id).await? {
+            Some(user) => user,
+            None => return Ok(None),
+        };
+        let row = sqlx::query(
+            r#"
+            SELECT games_played, wins, lifetime_points, rounds_played, exact_bid_rounds,
+                   ranked_games, ranked_wins, ranked_points, ranked_rounds, ranked_exact
+            FROM user_stats WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let (games, wins, points, rounds, exact, ranked_games, ranked_wins, ranked_points, ranked_rounds, ranked_exact) =
+            if let Some(row) = row {
+                (
+                    row.get::<i32, _>("games_played"),
+                    row.get::<i32, _>("wins"),
+                    row.get::<i64, _>("lifetime_points"),
+                    row.get::<i32, _>("rounds_played"),
+                    row.get::<i32, _>("exact_bid_rounds"),
+                    row.get::<i32, _>("ranked_games"),
+                    row.get::<i32, _>("ranked_wins"),
+                    row.get::<i64, _>("ranked_points"),
+                    row.get::<i32, _>("ranked_rounds"),
+                    row.get::<i32, _>("ranked_exact"),
+                )
+            } else {
+                (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            };
+        let rank = if ranked_games == 0 {
+            None
+        } else {
+            let strike = if ranked_rounds == 0 {
+                0
+            } else {
+                i64::from(ranked_exact) * 1_000_000 / i64::from(ranked_rounds)
+            };
+            let average = if ranked_games == 0 {
+                0
+            } else {
+                ranked_points / i64::from(ranked_games)
+            };
+            let better: i64 = sqlx::query_scalar(
+                r#"
+                SELECT COUNT(*) FROM user_stats s
+                WHERE s.ranked_games > 0
+                  AND s.user_id <> $1
+                  AND (
+                    s.ranked_wins > $2
+                    OR (
+                      s.ranked_wins = $2
+                      AND COALESCE(s.ranked_exact * 1000000 / NULLIF(s.ranked_rounds, 0), 0) > $3
+                    )
+                    OR (
+                      s.ranked_wins = $2
+                      AND COALESCE(s.ranked_exact * 1000000 / NULLIF(s.ranked_rounds, 0), 0) = $3
+                      AND COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) > $4
+                    )
+                  )
+                "#,
+            )
+            .bind(user_id)
+            .bind(ranked_wins)
+            .bind(strike)
+            .bind(average)
+            .fetch_one(&self.pool)
+            .await?;
+            Some(better as i32 + 1)
+        };
+        Ok(Some(UserStatsView {
+            user_id,
+            display_name: user.display_name,
+            avatar_id: user.avatar_id,
+            games_played: games,
+            wins,
+            lifetime_points: points,
+            rounds_played: rounds,
+            exact_bid_rounds: exact,
+            ranked_games,
+            rank,
+        }))
+    }
+}
+
+fn user_from_row(row: sqlx::postgres::PgRow) -> StoredUser {
+    StoredUser {
+        user_id: row.get("user_id"),
+        display_name: row.get("display_name"),
+        avatar_id: row.get("avatar_id"),
+        legal_version: row.get("legal_version"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        last_seen_at: row.get("last_seen_at"),
+    }
+}
+
+async fn record_user_stats(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    commit: &CommandCommit,
+    result: &GameResultRecord,
+) -> Result<(), PersistError> {
+    use crate::stats::SeatFinish;
+    use std::collections::HashMap;
+
+    let seats = sqlx::query(
+        "SELECT player_id, user_id FROM game_players WHERE game_id = $1 AND user_id IS NOT NULL",
+    )
+    .bind(commit.game_id.0)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut owners: HashMap<Uuid, Uuid> = HashMap::new();
+    for seat in seats {
+        owners.insert(seat.get("player_id"), seat.get("user_id"));
+    }
+
+    let rounds = commit.state.score_table.rounds.len() as i32;
+    let table_size = commit.state.players.len() as i16;
+    let counted = commit.state.players.len() >= 3;
+    let mut by_user: HashMap<Uuid, SeatFinish> = HashMap::new();
+    for ranked in &result.ranking {
+        let Some(user_id) = owners.get(&ranked.player_id.0).copied() else {
+            continue;
+        };
+        let seat = SeatFinish {
+            user_id,
+            finish_rank: ranked.rank as i32,
+            total_score: ranked.total_score,
+            exact_bid_rounds: ranked.exact_bid_rounds as i32,
+            tricks_missed: ranked.total_tricks_missed as i32,
+        };
+        match by_user.get(&user_id) {
+            Some(existing) if existing.finish_rank <= seat.finish_rank => {}
+            _ => {
+                by_user.insert(user_id, seat);
+            }
+        }
+    }
+
+    for seat in by_user.values() {
+        let inserted = sqlx::query(
+            r#"
+            INSERT INTO user_game_results (
+                game_id, user_id, table_size, rounds_played, finish_rank,
+                total_score, exact_bid_rounds, tricks_missed, counted
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (game_id, user_id) DO NOTHING
+            RETURNING user_id
+            "#,
+        )
+        .bind(commit.game_id.0)
+        .bind(seat.user_id)
+        .bind(table_size)
+        .bind(rounds as i16)
+        .bind(seat.finish_rank as i16)
+        .bind(seat.total_score)
+        .bind(seat.exact_bid_rounds as i16)
+        .bind(seat.tricks_missed)
+        .bind(counted)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if inserted.is_none() {
+            continue;
+        }
+        let ranked_wins = if counted && seat.finish_rank == 1 { 1 } else { 0 };
+        let wins = if seat.finish_rank == 1 { 1 } else { 0 };
+        let ranked_games = if counted { 1 } else { 0 };
+        let ranked_points = if counted { i64::from(seat.total_score) } else { 0 };
+        let ranked_rounds = if counted { rounds } else { 0 };
+        let ranked_exact = if counted { seat.exact_bid_rounds } else { 0 };
+        sqlx::query(
+            r#"
+            INSERT INTO user_stats (
+                user_id, games_played, wins, ranked_wins, ranked_games,
+                lifetime_points, ranked_points, rounds_played, exact_bid_rounds,
+                ranked_rounds, ranked_exact, updated_at
+            ) VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+            ON CONFLICT (user_id) DO UPDATE SET
+                games_played = user_stats.games_played + 1,
+                wins = user_stats.wins + EXCLUDED.wins,
+                ranked_wins = user_stats.ranked_wins + EXCLUDED.ranked_wins,
+                ranked_games = user_stats.ranked_games + EXCLUDED.ranked_games,
+                lifetime_points = user_stats.lifetime_points + EXCLUDED.lifetime_points,
+                ranked_points = user_stats.ranked_points + EXCLUDED.ranked_points,
+                rounds_played = user_stats.rounds_played + EXCLUDED.rounds_played,
+                exact_bid_rounds = user_stats.exact_bid_rounds + EXCLUDED.exact_bid_rounds,
+                ranked_rounds = user_stats.ranked_rounds + EXCLUDED.ranked_rounds,
+                ranked_exact = user_stats.ranked_exact + EXCLUDED.ranked_exact,
+                updated_at = now()
+            "#,
+        )
+        .bind(seat.user_id)
+        .bind(wins)
+        .bind(ranked_wins)
+        .bind(ranked_games)
+        .bind(i64::from(seat.total_score))
+        .bind(ranked_points)
+        .bind(rounds)
+        .bind(seat.exact_bid_rounds)
+        .bind(ranked_rounds)
+        .bind(ranked_exact)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }

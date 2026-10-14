@@ -30,6 +30,8 @@ pub fn cors_layer_from_env() -> CorsLayer {
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
+                    axum::http::Method::PATCH,
+                    axum::http::Method::DELETE,
                     axum::http::Method::OPTIONS,
                 ])
                 .allow_headers([

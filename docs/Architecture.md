@@ -216,7 +216,7 @@ See [`docs/runbooks/railway_firebase_test.md`](runbooks/railway_firebase_test.md
 
 | Transport | Use |
 |-----------|-----|
-| **REST** | Guest session, rooms/lobby (incl. host remove-player before start), avatar (`POST /me/avatar` at create/join + lobby), scheduled events, AI rules query, coach/highlights, history |
+| **REST** | Guest session, optional Google account, profile and public Top 10, rooms/lobby (incl. host remove-player before start), avatar (`POST /me/avatar` at create/join + lobby), scheduled events, AI rules query, coach/highlights, history |
 | **WebSocket** | Live bids/plays, snapshots, presence, timers, pause/resume, bot takeover, in-game avatar, table emotes, soundboard, short voice notes |
 
 Lobby freshness uses **HTTP polling** (~2s). Live play uses **full personalized snapshots** after each accepted mutation (no client-side deltas).
@@ -227,6 +227,10 @@ Lobby freshness uses **HTTP polling** (~2s). Live play uses **full personalized 
 flowchart TB
   subgraph identity [Identity]
     guest[POST /api/v1/guest-sessions]
+    firebase[POST /api/v1/auth/firebase]
+    me[GET/PATCH/DELETE /api/v1/me]
+    stats[GET /api/v1/me/stats]
+    board[GET /api/v1/leaderboard]
     avatar[POST /api/v1/me/avatar]
   end
 
@@ -257,6 +261,8 @@ flowchart TB
 ```
 
 Authoritative router: `backend/crates/judgement-server/src/lib.rs`.
+
+Google sign-in is optional. `POST /api/v1/auth/firebase` exchanges a Firebase ID token for a new opaque bearer with `user_id` set. It does not upgrade an existing guest token. Create and Join still work with `POST /api/v1/guest-sessions`. Only a signed-in natural finish writes `user_stats`. The public board is `GET /api/v1/leaderboard` (no auth, in-process snapshot). Bid and play do not query Google or the board.
 
 ### 4.3 WebSocket contract
 

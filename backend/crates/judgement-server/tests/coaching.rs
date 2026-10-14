@@ -28,6 +28,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
                 token: if i == 0 { token.clone() } else { format!("tok-{i}") },
                 created_at: Utc::now(),
                 avatar_id: None,
+                user_id: None,
             })
             .await
             .unwrap();
@@ -46,6 +47,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             session_id,
             nickname: p.nickname.clone(),
             seat: p.seat,
+            user_id: None,
         })
         .collect();
 
@@ -185,6 +187,7 @@ async fn spawn(store: Arc<MemoryStore>) -> (String, Arc<AppState>) {
                 nickname: session.nickname.clone(),
                 token: session.token.clone(),
                 avatar_id: session.avatar_id.clone(),
+                user_id: None,
             },
         );
         state

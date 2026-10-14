@@ -6,7 +6,7 @@ use judgement_domain::{
 use judgement_engine::{GameEngine, GameEvent, GamePhase};
 use judgement_persistence::{
     CommandCommit, GameResultRecord, GameStore, MemoryStore, NewGame, NewGamePlayer,
-    RoundResultRecord, StoredRoom, StoredRoomPlayer, StoredSession,
+    RoundResultRecord, StoredRoom, StoredRoomPlayer, StoredSession, StoredUser,
 };
 
 #[tokio::test]
@@ -22,6 +22,7 @@ async fn memory_store_finishes_game_and_records_history() {
                 token: format!("tok-{i}"),
                 created_at: Utc::now(),
                 avatar_id: None,
+                user_id: None,
             })
             .await
             .unwrap();
@@ -39,6 +40,7 @@ async fn memory_store_finishes_game_and_records_history() {
             session_id,
             nickname: p.nickname.clone(),
             seat: p.seat,
+            user_id: None,
         })
         .collect();
 
@@ -158,6 +160,7 @@ async fn action_committed_detects_durable_action_id() {
             session_id,
             nickname: p.nickname.clone(),
             seat: p.seat,
+            user_id: None,
         })
         .collect();
     let room_id = RoomId::new();
@@ -239,6 +242,106 @@ async fn action_committed_detects_durable_action_id() {
         .unwrap();
     assert!(store.action_committed(game_id, action_id).await.unwrap());
     assert!(store.load_active_game(game_id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn signed_in_finish_is_counted_once_and_survives_delete() {
+    let store = MemoryStore::new();
+    let user_id = uuid::Uuid::new_v4();
+    let now = Utc::now();
+    store
+        .upsert_user(&StoredUser {
+            user_id,
+            display_name: "Ada".into(),
+            avatar_id: Some("face_01".into()),
+            legal_version: Some("2026-08-03".into()),
+            created_at: now,
+            updated_at: now,
+            last_seen_at: now,
+        })
+        .await
+        .unwrap();
+
+    let session_ids: Vec<_> = (0..4).map(|_| SessionId::new()).collect();
+    let players: Vec<PlayerState> = (0..4)
+        .map(|seat| PlayerState::human(PlayerId::new(), format!("P{seat}"), seat))
+        .collect();
+    let game_players: Vec<NewGamePlayer> = players
+        .iter()
+        .zip(session_ids.iter())
+        .map(|(p, &session_id)| NewGamePlayer {
+            player_id: p.id,
+            session_id,
+            nickname: p.nickname.clone(),
+            seat: p.seat,
+            user_id: if p.seat <= 1 { Some(user_id) } else { None },
+        })
+        .collect();
+
+    let game_id = GameId::new();
+    let rules = GameRules {
+        trump_rule: TrumpRule::rotating_from(Suit::Clubs),
+        turn_timeout_seconds: None,
+        round_pattern: RoundPattern::Custom { rounds: vec![1] },
+        ..GameRules::mvp_for_players(4)
+    };
+    let mut engine = GameEngine::new_with_seed(11, game_id, rules.clone(), players).unwrap();
+    let events = engine.start_game().unwrap();
+    store
+        .create_game(&NewGame {
+            game_id,
+            room_id: RoomId::new(),
+            rules,
+            seed: Some(11),
+            players: game_players,
+            initial_state: engine.state().clone(),
+            initial_events: events,
+            start_action_id: ActionId::new(),
+        })
+        .await
+        .unwrap();
+
+    let mut finish_commit = None;
+    while !engine.is_finished() {
+        let action_id = ActionId::new();
+        let events = match engine.phase() {
+            GamePhase::Bidding => {
+                let turn = engine.state().current_round.as_ref().unwrap().current_turn;
+                let bid = engine.legal_bids(turn)[0];
+                engine.place_bid(turn, bid).unwrap()
+            }
+            GamePhase::Playing => {
+                let turn = engine.state().current_round.as_ref().unwrap().current_turn;
+                let card = engine.legal_cards(turn)[0];
+                engine.play_card(turn, card).unwrap()
+            }
+            GamePhase::RoundScoring => engine.advance_from_round_scoring().unwrap(),
+            other => panic!("unexpected phase {other:?}"),
+        };
+        let commit = to_commit(game_id, action_id, &events, engine.state());
+        if commit.game_result.is_some() {
+            finish_commit = Some(commit.clone());
+        }
+        store.commit_command(&commit).await.unwrap();
+    }
+
+    let stats = store.load_user_stats(user_id).await.unwrap().unwrap();
+    assert_eq!(stats.games_played, 1, "two seats of one account count once");
+    assert_eq!(stats.ranked_games, 1);
+    store
+        .commit_command(&finish_commit.expect("finish"))
+        .await
+        .unwrap();
+    let again = store.load_user_stats(user_id).await.unwrap().unwrap();
+    assert_eq!(again.games_played, 1);
+    store.delete_game(game_id).await.unwrap();
+    let kept = store.load_user_stats(user_id).await.unwrap().unwrap();
+    assert_eq!(kept.games_played, 1);
+    assert_eq!(kept.display_name, "Ada");
+    let board = store.load_leaderboard(10).await.unwrap();
+    assert_eq!(board.len(), 1);
+    assert_eq!(board[0].display_name, "Ada");
+    assert!(board[0].avatar_id.is_some());
 }
 
 fn to_commit(

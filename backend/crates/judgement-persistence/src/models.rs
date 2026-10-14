@@ -18,6 +18,9 @@ pub struct StoredSession {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    /// Set when this play session belongs to a Google account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +63,8 @@ pub struct NewGamePlayer {
     pub session_id: SessionId,
     pub nickname: String,
     pub seat: u8,
+    /// Copied at game start so the finish commit does not join guest sessions.
+    pub user_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +147,51 @@ pub struct StoredScheduledEvent {
     pub rsvps: Vec<StoredEventRsvp>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredUser {
+    pub user_id: uuid::Uuid,
+    pub display_name: String,
+    pub avatar_id: Option<String>,
+    pub legal_version: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredIdentity {
+    pub user_id: uuid::Uuid,
+    pub provider: String,
+    pub subject: String,
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LeaderboardRow {
+    pub user_id: uuid::Uuid,
+    pub display_name: String,
+    pub avatar_id: Option<String>,
+    pub wins: i32,
+    pub games: i32,
+    pub exact_percent: i32,
+    pub average_score: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserStatsView {
+    pub user_id: uuid::Uuid,
+    pub display_name: String,
+    pub avatar_id: Option<String>,
+    pub games_played: i32,
+    pub wins: i32,
+    pub lifetime_points: i64,
+    pub rounds_played: i32,
+    pub exact_bid_rounds: i32,
+    pub ranked_games: i32,
+    /// 1-based position among ranked accounts. None until a ranked game exists.
+    pub rank: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

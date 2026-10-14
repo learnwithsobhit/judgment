@@ -21,7 +21,9 @@ pub struct HttpLimitConfig {
     pub max_requests_per_window: u32,
     pub window: Duration,
     /// Stricter limit for unauthenticated guest-session creation.
-    pub guest_max_per_window: u32,
+    pub             guest_max_per_window: u32,
+    /// Public Top 10 reads. Lower than the authenticated API budget.
+    pub board_max_per_window: u32,
 }
 
 impl Default for HttpLimitConfig {
@@ -30,6 +32,7 @@ impl Default for HttpLimitConfig {
             max_requests_per_window: env_u32("HTTP_RATE_LIMIT", 120),
             window: Duration::from_secs(u64::from(env_u32("HTTP_RATE_WINDOW_SECS", 60))),
             guest_max_per_window: env_u32("HTTP_GUEST_RATE_LIMIT", 20),
+            board_max_per_window: env_u32("HTTP_BOARD_RATE_LIMIT", 30),
         }
     }
 }
@@ -91,6 +94,8 @@ pub async fn rate_limit_middleware(
     let key = client_key(req.headers());
     let max = if path == "/api/v1/guest-sessions" {
         state.http_limiter.config().guest_max_per_window
+    } else if path == "/api/v1/leaderboard" {
+        state.http_limiter.config().board_max_per_window
     } else {
         state.http_limiter.config().max_requests_per_window
     };
@@ -148,6 +153,7 @@ mod tests {
             max_requests_per_window: 2,
             window: Duration::from_secs(60),
             guest_max_per_window: 2,
+            board_max_per_window: 2,
         });
         assert!(limiter.check("a", 2));
         assert!(limiter.check("a", 2));

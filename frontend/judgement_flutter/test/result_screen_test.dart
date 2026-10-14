@@ -155,9 +155,48 @@ void main() {
     expect(find.text('You placed #2'), findsOneWidget);
     expect(find.text('Final standings'), findsOneWidget);
     expect(find.text('Your night'), findsOneWidget);
+    expect(
+      find.text('Sign in before the next game to start your record.'),
+      findsOneWidget,
+    );
+    expect(find.text('Saved to your profile.'), findsNothing);
     expect(find.text('TOTAL'), findsOneWidget);
     expect(find.text('Share'), findsOneWidget);
     expect(find.text('Copy results summary'), findsOneWidget);
     expect(find.text('Back to home'), findsOneWidget);
+  });
+
+  testWidgets('signed-in finish says the record was saved', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 2200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = GameController(
+      api: ApiClient(),
+      gameId: '00000000-0000-0000-0000-000000000001',
+      myPlayerId: '00000000-0000-0000-0000-000000000001',
+      myNickname: 'Alex',
+    )
+      ..countsForProfile = true
+      ..view = _finishedView();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: feltGreen,
+            brightness: Brightness.dark,
+          ),
+        ),
+        home: ResultScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saved to your profile.'), findsOneWidget);
+    expect(
+      find.text('Sign in before the next game to start your record.'),
+      findsNothing,
+    );
   });
 }

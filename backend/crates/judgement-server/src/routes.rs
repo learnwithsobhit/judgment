@@ -84,6 +84,13 @@ pub async fn set_avatar(
         .upsert_session(&stored_session(&session))
         .await
         .map_err(|e| ApiError::Conflict(format!("persist session: {e}")))?;
+    if let Some(user_id) = session.user_id {
+        state
+            .store
+            .set_user_avatar(user_id, &avatar_id)
+            .await
+            .map_err(|e| ApiError::Conflict(format!("persist avatar: {e}")))?;
+    }
     // Persist lobby seats that carry the new avatar.
     let room_snapshots: Vec<_> = {
         let rooms = state.rooms.lock().unwrap();
@@ -431,7 +438,13 @@ async fn claim_seat_inner(
 
     state
         .store
-        .remap_game_player_session(game_id, player_id, session.id, &session.nickname)
+        .remap_game_player_session(
+            game_id,
+            player_id,
+            session.id,
+            &session.nickname,
+            session.user_id,
+        )
         .await
         .map_err(|e| ApiError::Conflict(format!("persist claim: {e}")))?;
     state
@@ -820,6 +833,13 @@ async fn start_game_inner(
         }
     }
 
+    let session_users: HashMap<SessionId, Option<uuid::Uuid>> = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions
+            .iter()
+            .map(|(id, session)| (*id, session.user_id))
+            .collect()
+    };
     let (
         players,
         session_to_player,
@@ -869,6 +889,7 @@ async fn start_game_inner(
                 session_id: s.session_id,
                 nickname: s.nickname.clone(),
                 seat: s.seat,
+                user_id: session_users.get(&s.session_id).copied().flatten(),
             })
             .collect();
         (

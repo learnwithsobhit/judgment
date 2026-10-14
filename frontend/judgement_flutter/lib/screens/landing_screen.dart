@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
+import '../auth/account_session.dart';
+import '../auth/google_sign_in_flow.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
@@ -11,7 +13,10 @@ import '../util/room_rejoin.dart';
 import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
+import '../widgets/leaderboard_sheet.dart';
 import '../widgets/legal_consent_checkbox.dart';
+import '../widgets/player_avatar.dart';
+import '../widgets/profile_sheet.dart';
 import '../widgets/trump_cycle_editor.dart';
 import 'lobby_screen.dart';
 import 'schedule_event_screen.dart';
@@ -60,6 +65,35 @@ class _LandingScreenState extends State<LandingScreen> {
         );
       });
     }
+    AccountSession.instance.addListener(_onAccount);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AccountSession.instance.restore();
+    });
+  }
+
+  @override
+  void dispose() {
+    AccountSession.instance.removeListener(_onAccount);
+    _nickname.dispose();
+    _roomCode.dispose();
+    super.dispose();
+  }
+
+  void _onAccount() {
+    if (!mounted) return;
+    final account = AccountSession.instance;
+    setState(() {
+      if (account.isSignedIn && _nickname.text.trim().isEmpty) {
+        final nick = account.tableNickname?.trim() ?? '';
+        if (nick.isNotEmpty) {
+          _nickname.text = nick.length > 24 ? nick.substring(0, 24) : nick;
+        }
+      }
+      final avatar = account.avatarId;
+      if (avatar != null && avatarIds.contains(avatar)) {
+        _selectedAvatarId = avatar;
+      }
+    });
   }
 
   // Room options (create mode, ADR 0003).
@@ -130,6 +164,11 @@ class _LandingScreenState extends State<LandingScreen> {
 
     setState(() => _busy = true);
     final api = ApiClient();
+    final account = AccountSession.instance;
+    final usingAccount = account.isSignedIn;
+    if (usingAccount) {
+      api.token = account.token;
+    }
     try {
       // Sound + mic under this tap, fully settled before network (fixes iOS hang).
       await TableMediaSession.prepareBeforeNetwork();
@@ -145,10 +184,32 @@ class _LandingScreenState extends State<LandingScreen> {
           roomCode: _roomCode.text,
           nickname: nickname,
           avatarId: _selectedAvatarId,
+          accountToken: usingAccount ? account.token : null,
+          accountSessionId: usingAccount ? account.sessionId : null,
         );
         room = joined.room;
         playerId = joined.playerId;
         sessionNickname = joined.nickname;
+      } else if (usingAccount) {
+        await api.patchMe(
+          tableNickname: nickname,
+          avatarId: _selectedAvatarId,
+        );
+        await api.setAvatar(_selectedAvatarId);
+        final schedule = _manualSchedule
+            ? RoundSchedule(mode: 'manual', steps: _manualSteps)
+            : RoundSchedule.automatic();
+        final created = await api.createRoom(
+          maxPlayers: _maxPlayers,
+          turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
+          trumpCycle: _trumpCycle,
+          roundSchedule: schedule,
+          dealerTotalRestriction: _dealerTotalRestriction,
+        );
+        room = created.room;
+        playerId = created.playerId;
+        sessionNickname = nickname;
+        capacityHint = created.capacity;
       } else {
         final session = await api.createGuestSession(nickname);
         await api.setAvatar(_selectedAvatarId);
@@ -189,6 +250,7 @@ class _LandingScreenState extends State<LandingScreen> {
           myNickname: sessionNickname,
         )
           ..roomCode = room.code
+          ..countsForProfile = account.isSignedIn && api.token == account.token
           ..amHost = room.seats.any(
             (s) => s.playerId == playerId && s.isHost,
           );
@@ -239,6 +301,41 @@ class _LandingScreenState extends State<LandingScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _signIn() async {
+    try {
+      await signInWithGoogle(ApiClient());
+    } catch (error) {
+      if (!mounted) return;
+      final detail = error.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            detail.contains('not configured')
+                ? 'Couldn\'t sign in. Google is not set up for this build. You can still play as a guest.'
+                : 'Couldn\'t sign in. You can still play as a guest.',
+          ),
+        ),
+      );
+    }
+  }
+
+  void _openProfile() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => const ProfileSheet(),
+    );
+  }
+
+  void _openLeaderboard() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => const LeaderboardSheet(),
     );
   }
 
@@ -624,6 +721,58 @@ class _LandingScreenState extends State<LandingScreen> {
                           },
                         ),
                         const SizedBox(height: 8),
+                        ListenableBuilder(
+                          listenable: AccountSession.instance,
+                          builder: (context, _) {
+                            final account = AccountSession.instance;
+                            if (account.isSignedIn) {
+                              return Align(
+                                alignment: Alignment.centerLeft,
+                                child: ActionChip(
+                                  avatar: PlayerAvatar(
+                                    avatarId: account.avatarId,
+                                    nickname: account.displayName ?? 'Player',
+                                    radius: 12,
+                                  ),
+                                  label: Text(
+                                    account.displayName ?? 'Player',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  onPressed: _openProfile,
+                                ),
+                              );
+                            }
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 44,
+                                  child: OutlinedButton(
+                                    onPressed: _signIn,
+                                    child: const Text('Sign in with Google'),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Your name and game record are saved when you sign in.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white.withValues(alpha: 0.6),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        Align(
+                          alignment: Alignment.center,
+                          child: TextButton(
+                            onPressed: _openLeaderboard,
+                            child: const Text('Top players'),
+                          ),
+                        ),
                         const AppVersionBar(
                           autoReload: true,
                           blockWhenStale: true,

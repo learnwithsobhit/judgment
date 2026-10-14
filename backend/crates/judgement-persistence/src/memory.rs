@@ -1,15 +1,19 @@
 //! In-memory store for unit tests and DATABASE_URL-less local runs.
 //! Persistence still follows the same commit API as Postgres.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use judgement_domain::{ActionId, EventId, GameId, PlayerId, RoomId, SessionId};
 use judgement_engine::GameEvent;
+use uuid::Uuid;
 
 use crate::error::PersistError;
 use crate::models::*;
+use crate::stats::{
+    apply_finish, average_score, exact_percent, ladder_key, stats_enabled, SeatFinish, UserStatsRow,
+};
 use crate::GameStore;
 
 #[derive(Default)]
@@ -23,6 +27,11 @@ struct MemoryInner {
     rooms: HashMap<RoomId, StoredRoom>,
     games: HashMap<GameId, StoredGame>,
     scheduled_events: HashMap<EventId, StoredScheduledEvent>,
+    users: HashMap<Uuid, StoredUser>,
+    identities: HashMap<String, Uuid>,
+    stats: HashMap<Uuid, UserStatsRow>,
+    /// (game_id, user_id) already applied. Survives delete_game.
+    recorded: HashSet<(Uuid, Uuid)>,
 }
 
 type SessionKey = uuid::Uuid;
@@ -137,34 +146,45 @@ impl GameStore for MemoryStore {
 
     async fn commit_command(&self, commit: &CommandCommit) -> Result<(), PersistError> {
         let mut inner = self.inner.lock().unwrap();
-        let game = inner
-            .games
-            .get_mut(&commit.game_id)
-            .ok_or_else(|| PersistError::NotFound(format!("game {}", commit.game_id)))?;
+        let players = {
+            let game = inner
+                .games
+                .get(&commit.game_id)
+                .ok_or_else(|| PersistError::NotFound(format!("game {}", commit.game_id)))?;
+            if game.events.iter().any(|e| e.action_id == Some(commit.action_id)) {
+                return Ok(());
+            }
+            game.players.clone()
+        };
 
-        if game.events.iter().any(|e| e.action_id == Some(commit.action_id)) {
-            return Ok(()); // idempotent
+        {
+            let game = inner.games.get_mut(&commit.game_id).unwrap();
+            for (index, payload) in commit.events.iter().enumerate() {
+                game.events.push(StoredEvent {
+                    state_version: commit.state.version,
+                    event_index: index as u16,
+                    action_id: Some(commit.action_id),
+                    payload: payload.clone(),
+                });
+            }
+            game.snapshots.clear();
+            game.snapshots
+                .insert(commit.state.version, commit.state.clone());
+
+            if let Some(round) = &commit.round_result {
+                game.round_results.retain(|r| r.round_index != round.round_index);
+                game.round_results.push(round.clone());
+            }
+            if commit.game_result.is_some() {
+                game.game_result = commit.game_result.clone();
+                game.status = "finished".into();
+            }
         }
 
-        for (index, payload) in commit.events.iter().enumerate() {
-            game.events.push(StoredEvent {
-                state_version: commit.state.version,
-                event_index: index as u16,
-                action_id: Some(commit.action_id),
-                payload: payload.clone(),
-            });
-        }
-        game.snapshots.clear();
-        game.snapshots
-            .insert(commit.state.version, commit.state.clone());
-
-        if let Some(round) = &commit.round_result {
-            game.round_results.retain(|r| r.round_index != round.round_index);
-            game.round_results.push(round.clone());
-        }
-        if let Some(result) = &commit.game_result {
-            game.game_result = Some(result.clone());
-            game.status = "finished".into();
+        if stats_enabled() {
+            if let Some(result) = &commit.game_result {
+                record_finishes(&mut inner, commit, &players, result);
+            }
         }
         Ok(())
     }
@@ -292,6 +312,7 @@ impl GameStore for MemoryStore {
         player_id: PlayerId,
         new_session_id: SessionId,
         nickname: &str,
+        user_id: Option<Uuid>,
     ) -> Result<(), PersistError> {
         let mut inner = self.inner.lock().unwrap();
         let game = inner
@@ -305,6 +326,7 @@ impl GameStore for MemoryStore {
             .ok_or_else(|| PersistError::NotFound(format!("player {player_id}")))?;
         player.session_id = new_session_id;
         player.nickname = nickname.to_string();
+        player.user_id = user_id;
         Ok(())
     }
 
@@ -358,6 +380,154 @@ impl GameStore for MemoryStore {
 
     async fn ping(&self) -> Result<(), PersistError> {
         Ok(())
+    }
+
+    async fn upsert_user(&self, user: &StoredUser) -> Result<(), PersistError> {
+        self.inner.lock().unwrap().users.insert(user.user_id, user.clone());
+        Ok(())
+    }
+
+    async fn upsert_identity(&self, identity: &StoredIdentity) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner
+            .identities
+            .insert(identity.subject.clone(), identity.user_id);
+        Ok(())
+    }
+
+    async fn find_user_by_google_subject(
+        &self,
+        subject: &str,
+    ) -> Result<Option<StoredUser>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .identities
+            .get(subject)
+            .and_then(|id| inner.users.get(id).cloned()))
+    }
+
+    async fn load_user(&self, user_id: Uuid) -> Result<Option<StoredUser>, PersistError> {
+        Ok(self.inner.lock().unwrap().users.get(&user_id).cloned())
+    }
+
+    async fn delete_user(&self, user_id: Uuid) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.users.remove(&user_id);
+        inner.identities.retain(|_, id| *id != user_id);
+        inner.stats.remove(&user_id);
+        inner.recorded.retain(|(_, uid)| *uid != user_id);
+        for session in inner.sessions.values_mut() {
+            if session.user_id == Some(user_id) {
+                session.user_id = None;
+            }
+        }
+        Ok(())
+    }
+
+    async fn set_user_avatar(&self, user_id: Uuid, avatar_id: &str) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(user) = inner.users.get_mut(&user_id) {
+            user.avatar_id = Some(avatar_id.to_string());
+        }
+        Ok(())
+    }
+
+    async fn load_leaderboard(&self, limit: i64) -> Result<Vec<LeaderboardRow>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let mut rows: Vec<_> = inner
+            .stats
+            .iter()
+            .filter(|(_, row)| row.ranked_games > 0)
+            .filter_map(|(id, row)| {
+                let user = inner.users.get(id)?;
+                Some((ladder_key(row), user, row))
+            })
+            .collect();
+        rows.sort_by(|a, b| b.0.cmp(&a.0));
+        Ok(rows
+            .into_iter()
+            .take(limit.max(0) as usize)
+            .map(|(_, user, row)| LeaderboardRow {
+                user_id: user.user_id,
+                display_name: user.display_name.clone(),
+                avatar_id: user.avatar_id.clone(),
+                wins: row.ranked_wins,
+                games: row.ranked_games,
+                exact_percent: exact_percent(row.ranked_exact, row.ranked_rounds),
+                average_score: average_score(row.ranked_points, row.ranked_games),
+            })
+            .collect())
+    }
+
+    async fn load_user_stats(&self, user_id: Uuid) -> Result<Option<UserStatsView>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let Some(user) = inner.users.get(&user_id) else {
+            return Ok(None);
+        };
+        let row = inner.stats.get(&user_id).cloned().unwrap_or_default();
+        let rank = if row.ranked_games == 0 {
+            None
+        } else {
+            let mine = ladder_key(&row);
+            let better = inner
+                .stats
+                .values()
+                .filter(|other| other.ranked_games > 0 && ladder_key(other) > mine)
+                .count();
+            Some(better as i32 + 1)
+        };
+        Ok(Some(UserStatsView {
+            user_id,
+            display_name: user.display_name.clone(),
+            avatar_id: user.avatar_id.clone(),
+            games_played: row.games_played,
+            wins: row.wins,
+            lifetime_points: row.lifetime_points,
+            rounds_played: row.rounds_played,
+            exact_bid_rounds: row.exact_bid_rounds,
+            ranked_games: row.ranked_games,
+            rank,
+        }))
+    }
+}
+
+fn record_finishes(
+    inner: &mut MemoryInner,
+    commit: &CommandCommit,
+    players: &[NewGamePlayer],
+    result: &GameResultRecord,
+) {
+    let rounds = commit.state.score_table.rounds.len() as i32;
+    let counted = commit.state.players.len() >= 3;
+    let mut by_user: HashMap<Uuid, SeatFinish> = HashMap::new();
+    for ranked in &result.ranking {
+        let Some(player) = players.iter().find(|p| p.player_id == ranked.player_id) else {
+            continue;
+        };
+        let Some(user_id) = player.user_id else {
+            continue;
+        };
+        let seat = SeatFinish {
+            user_id,
+            finish_rank: ranked.rank as i32,
+            total_score: ranked.total_score,
+            exact_bid_rounds: ranked.exact_bid_rounds as i32,
+            tricks_missed: ranked.total_tricks_missed as i32,
+        };
+        match by_user.get(&user_id) {
+            Some(existing) if existing.finish_rank <= seat.finish_rank => {}
+            _ => {
+                by_user.insert(user_id, seat);
+            }
+        }
+    }
+    let game_id = commit.game_id.0;
+    for seat in by_user.into_values() {
+        if !inner.recorded.insert((game_id, seat.user_id)) {
+            continue;
+        }
+        let row = inner.stats.entry(seat.user_id).or_default();
+        apply_finish(row, &seat, rounds, counted);
     }
 }
 

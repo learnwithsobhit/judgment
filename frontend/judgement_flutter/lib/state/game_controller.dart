@@ -58,6 +58,10 @@ class GameController extends ChangeNotifier {
   final String myPlayerId;
   final String myNickname;
 
+  /// True when this hand started on an account bearer. Guest hands stay false
+  /// so the result screen does not claim a record was saved.
+  bool countsForProfile = false;
+
   GameSocket? _socket;
   StreamSubscription<ServerMessage>? _subscription;
   bool _disposed = false;

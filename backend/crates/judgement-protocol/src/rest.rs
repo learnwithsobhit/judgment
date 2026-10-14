@@ -460,3 +460,83 @@ pub struct OpenLobbyResponse {
     pub capacity: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Optional Google account
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirebaseAuthRequest {
+    pub id_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legal_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicUser {
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthSessionResponse {
+    pub session_id: SessionId,
+    pub nickname: String,
+    pub token: String,
+    pub user: PublicUser,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatchMeRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table_nickname: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeResponse {
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    pub session_id: SessionId,
+    pub nickname: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeStatsResponse {
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    pub games_played: i32,
+    pub wins: i32,
+    pub losses: i32,
+    pub exact_percent: i32,
+    pub average_score: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaderboardEntry {
+    pub rank: i32,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    pub wins: i32,
+    pub games: i32,
+    pub exact_percent: i32,
+    pub average_score: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaderboardResponse {
+    pub players: Vec<LeaderboardEntry>,
+}
+

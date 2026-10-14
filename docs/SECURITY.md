@@ -36,6 +36,19 @@ Last reviewed: 2026-08-03
   `frontend/judgement_flutter/lib/util/legal_consent.dart`; stored in
   browser `localStorage`). RSVP contact opt-in defaults off.
 
+## Accounts and stats
+
+- [x] Google sign-in is optional. Guests still create, join, and play.
+- [x] `user_identities.email` and the Google `subject` stay on the account row.
+  The public board and the table show the profile display name and pack
+  avatar. They do not show email or the Google photo.
+- [x] `DELETE /api/v1/me` deletes the user. Identity and stats rows cascade.
+  `guest_sessions.user_id` and `game_players.user_id` are `ON DELETE SET NULL`.
+- [x] Stats writes use a savepoint. A stats failure does not fail the game commit.
+  `STATS_ENABLED=0` or `false` skips the write.
+- [x] `GET /api/v1/leaderboard` reads an in-process snapshot.
+  `HTTP_BOARD_RATE_LIMIT` defaults to 30 requests per window.
+
 ## AI boundaries (ADR 0002)
 
 - [x] AI never mutates game state
@@ -53,5 +66,5 @@ Before promoting a release (see also `docs/runbooks/deploy.md`):
 4. `/readyz` returns 200 and `/metrics` scrapes cleanly  
 5. GitHub Actions `CI` green; Deploy smoke curls succeed  
 6. Fly Postgres automated / continuous backups confirmed (`fly postgres …` / dashboard)  
-7. Migrations through `0008_game_aborted_status` applied (aborted games + retention GC)  
+7. Migrations through `0011_user_stats` applied (accounts, stats, aborted games + retention GC)  
 8. This checklist re-checked for any new endpoints  

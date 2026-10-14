@@ -111,6 +111,17 @@ class ResultScreen extends StatelessWidget {
                     const SizedBox(height: 10),
                     _YourNightSection(stats: night),
                   ],
+                  const SizedBox(height: 16),
+                  Text(
+                    controller.countsForProfile
+                        ? 'Saved to your profile.'
+                        : 'Sign in before the next game to start your record.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
                   const SizedBox(height: 32),
                   Wrap(
                     alignment: WrapAlignment.center,

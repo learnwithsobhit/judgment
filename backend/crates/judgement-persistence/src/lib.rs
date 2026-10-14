@@ -8,6 +8,7 @@ pub mod error;
 pub mod memory;
 pub mod models;
 pub mod postgres;
+pub mod stats;
 
 pub use error::PersistError;
 pub use memory::MemoryStore;
@@ -72,6 +73,7 @@ pub trait GameStore: Send + Sync {
         player_id: PlayerId,
         new_session_id: SessionId,
         nickname: &str,
+        user_id: Option<uuid::Uuid>,
     ) -> Result<(), PersistError>;
 
     /// Mark an active game aborted (host end / vacancy timeout).
@@ -99,6 +101,34 @@ pub trait GameStore: Send + Sync {
     /// Lightweight readiness probe (Phase 9). Memory store always succeeds;
     /// Postgres runs `SELECT 1`.
     async fn ping(&self) -> Result<(), PersistError>;
+
+    async fn upsert_user(&self, user: &StoredUser) -> Result<(), PersistError>;
+
+    async fn upsert_identity(&self, identity: &StoredIdentity) -> Result<(), PersistError>;
+
+    async fn find_user_by_google_subject(
+        &self,
+        subject: &str,
+    ) -> Result<Option<StoredUser>, PersistError>;
+
+    async fn load_user(&self, user_id: uuid::Uuid) -> Result<Option<StoredUser>, PersistError>;
+
+    async fn delete_user(&self, user_id: uuid::Uuid) -> Result<(), PersistError>;
+
+    async fn set_user_avatar(
+        &self,
+        user_id: uuid::Uuid,
+        avatar_id: &str,
+    ) -> Result<(), PersistError>;
+
+    /// Public Top 10. Only accounts with at least one ranked game.
+    async fn load_leaderboard(&self, limit: i64) -> Result<Vec<LeaderboardRow>, PersistError>;
+
+    /// Profile stats. `None` when the user does not exist.
+    async fn load_user_stats(
+        &self,
+        user_id: uuid::Uuid,
+    ) -> Result<Option<UserStatsView>, PersistError>;
 }
 
 /// Round / game completion events also warrant keeping an explicit historical

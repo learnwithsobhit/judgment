@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use judgement_persistence::{MemoryStore, PostgresStore};
 use judgement_server::rag_boot::build_explanation_service;
+use judgement_server::leaderboard::spawn_leaderboard_refresh;
 use judgement_server::reaper::spawn_reaper;
 use judgement_server::restore::restore_from_store;
 use judgement_server::{build_router, state::AppState};
@@ -49,6 +50,7 @@ async fn main() {
     };
 
     spawn_reaper(state.clone());
+    spawn_leaderboard_refresh(state.clone());
 
     let reconnect_grace_secs = state.reconnect_grace.as_secs();
     let router = build_router(state);

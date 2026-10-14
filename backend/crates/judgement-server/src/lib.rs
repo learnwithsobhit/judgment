@@ -2,6 +2,7 @@
 
 pub mod actor;
 pub mod audio;
+pub mod auth;
 pub mod capacity;
 pub mod cleanup;
 pub mod cors;
@@ -9,6 +10,7 @@ pub mod emotes;
 pub mod error;
 pub mod events;
 pub mod http_limit;
+pub mod leaderboard;
 pub mod metrics;
 pub mod persist;
 pub mod rag_boot;
@@ -37,6 +39,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics_endpoint))
         .route("/api/v1/guest-sessions", post(routes::create_guest_session))
+        .route("/api/v1/auth/firebase", post(auth::auth_firebase))
+        .route("/api/v1/me", get(auth::get_me).patch(auth::patch_me).delete(auth::delete_me))
+        .route("/api/v1/me/logout", post(auth::logout_me))
+        .route("/api/v1/me/stats", get(auth::get_me_stats))
+        .route("/api/v1/leaderboard", get(auth::get_leaderboard))
         .route("/api/v1/me/avatar", post(routes::set_avatar))
         .route("/api/v1/rooms", post(routes::create_room))
         .route("/api/v1/rooms/{room_ref}", get(routes::get_room))

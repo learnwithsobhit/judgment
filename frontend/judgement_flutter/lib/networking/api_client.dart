@@ -280,4 +280,216 @@ class ApiClient {
 
   String calendarIcsUrl(String slug) =>
       '$baseUrl/api/v1/events/$slug/calendar.ics';
+
+  Future<AuthSession> authFirebase({
+    required String idToken,
+    String? displayName,
+    String? legalVersion,
+  }) async {
+    final response = await _http.post(
+      Uri.parse('$baseUrl/api/v1/auth/firebase'),
+      headers: _headers,
+      body: jsonEncode({
+        'id_token': idToken,
+        if (displayName != null) 'display_name': displayName,
+        if (legalVersion != null) 'legal_version': legalVersion,
+      }),
+    );
+    final json = _decode(response);
+    token = json['token'] as String;
+    return AuthSession.fromJson(json);
+  }
+
+  Future<MeProfile> getMe() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/me'),
+      headers: _headers,
+    );
+    return MeProfile.fromJson(_decode(response));
+  }
+
+  Future<PublicUser> patchMe({
+    String? displayName,
+    String? avatarId,
+    String? tableNickname,
+  }) async {
+    final response = await _http.patch(
+      Uri.parse('$baseUrl/api/v1/me'),
+      headers: _headers,
+      body: jsonEncode({
+        if (displayName != null) 'display_name': displayName,
+        if (avatarId != null) 'avatar_id': avatarId,
+        if (tableNickname != null) 'table_nickname': tableNickname,
+      }),
+    );
+    return PublicUser.fromJson(_decode(response));
+  }
+
+  Future<void> logoutMe() async {
+    final response = await _http.post(
+      Uri.parse('$baseUrl/api/v1/me/logout'),
+      headers: _headers,
+      body: '{}',
+    );
+    _decode(response);
+    token = null;
+  }
+
+  Future<void> deleteMe() async {
+    final response = await _http.delete(
+      Uri.parse('$baseUrl/api/v1/me'),
+      headers: _headers,
+    );
+    _decode(response);
+    token = null;
+  }
+
+  Future<MeStats> getMeStats() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/me/stats'),
+      headers: _headers,
+    );
+    return MeStats.fromJson(_decode(response));
+  }
+
+  Future<List<LeaderboardEntry>> getLeaderboard() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/leaderboard'),
+      headers: _headers,
+    );
+    final json = _decode(response);
+    return (json['players'] as List<dynamic>)
+        .map((row) => LeaderboardEntry.fromJson(row as Map<String, dynamic>))
+        .toList();
+  }
+}
+
+class PublicUser {
+  PublicUser({
+    required this.userId,
+    required this.displayName,
+    required this.avatarId,
+  });
+
+  final String userId;
+  final String displayName;
+  final String avatarId;
+
+  factory PublicUser.fromJson(Map<String, dynamic> json) {
+    return PublicUser(
+      userId: json['user_id'] as String,
+      displayName: json['display_name'] as String,
+      avatarId: json['avatar_id'] as String? ?? 'fox',
+    );
+  }
+}
+
+class MeProfile {
+  MeProfile({
+    required this.user,
+    required this.sessionId,
+    required this.nickname,
+  });
+
+  final PublicUser user;
+  final String sessionId;
+  final String nickname;
+
+  factory MeProfile.fromJson(Map<String, dynamic> json) {
+    return MeProfile(
+      user: PublicUser.fromJson(json),
+      sessionId: json['session_id'] as String,
+      nickname: json['nickname'] as String,
+    );
+  }
+}
+
+class AuthSession {
+  AuthSession({
+    required this.token,
+    required this.sessionId,
+    required this.nickname,
+    required this.user,
+  });
+
+  final String token;
+  final String sessionId;
+  final String nickname;
+  final PublicUser user;
+
+  factory AuthSession.fromJson(Map<String, dynamic> json) {
+    return AuthSession(
+      token: json['token'] as String,
+      sessionId: json['session_id'] as String,
+      nickname: json['nickname'] as String,
+      user: PublicUser.fromJson(json['user'] as Map<String, dynamic>),
+    );
+  }
+}
+
+class MeStats {
+  MeStats({
+    required this.displayName,
+    required this.avatarId,
+    required this.gamesPlayed,
+    required this.wins,
+    required this.losses,
+    required this.averageScore,
+    required this.exactPercent,
+    this.rank,
+  });
+
+  final String displayName;
+  final String avatarId;
+  final int gamesPlayed;
+  final int wins;
+  final int losses;
+  final int averageScore;
+  final int exactPercent;
+  final int? rank;
+
+  factory MeStats.fromJson(Map<String, dynamic> json) {
+    return MeStats(
+      displayName: json['display_name'] as String? ?? 'Player',
+      avatarId: json['avatar_id'] as String? ?? 'fox',
+      gamesPlayed: json['games_played'] as int? ?? 0,
+      wins: json['wins'] as int? ?? 0,
+      losses: json['losses'] as int? ?? 0,
+      averageScore: json['average_score'] as int? ?? 0,
+      exactPercent: json['exact_percent'] as int? ?? 0,
+      rank: json['rank'] as int?,
+    );
+  }
+}
+
+class LeaderboardEntry {
+  LeaderboardEntry({
+    required this.rank,
+    required this.displayName,
+    required this.avatarId,
+    required this.wins,
+    required this.games,
+    required this.exactPercent,
+    required this.averageScore,
+  });
+
+  final int rank;
+  final String displayName;
+  final String avatarId;
+  final int wins;
+  final int games;
+  final int exactPercent;
+  final int averageScore;
+
+  factory LeaderboardEntry.fromJson(Map<String, dynamic> json) {
+    return LeaderboardEntry(
+      rank: json['rank'] as int? ?? 0,
+      displayName: json['display_name'] as String? ?? 'Player',
+      avatarId: json['avatar_id'] as String? ?? 'fox',
+      wins: json['wins'] as int? ?? 0,
+      games: json['games'] as int? ?? 0,
+      exactPercent: json['exact_percent'] as int? ?? 0,
+      averageScore: json['average_score'] as int? ?? 0,
+    );
+  }
 }

@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../widgets/vacant_seat_picker.dart';
@@ -65,15 +66,16 @@ bool shouldWriteReclaimBlob({
 
 /// Join a room, preferring reclaim of the caller's own vacant seat when in-game.
 ///
-/// Precedence (in-game only, nick must match store): same-session token →
-/// preferred `player_id` → unique nick (server) → seat picker → first vacant.
-/// Lobby always uses a fresh guest session (invite-link safe).
+/// Precedence: account bearer, then mid-game reclaim, then a new guest.
+/// Lobby joins without an account still mint a fresh guest session.
 Future<RoomJoinResult> joinRoomWithReclaim({
   required BuildContext context,
   required ApiClient api,
   required String roomCode,
   required String nickname,
   required String avatarId,
+  String? accountToken,
+  String? accountSessionId,
 }) async {
   final code = roomCode.trim().toUpperCase();
   final stored = readGameReclaim(code);
@@ -85,6 +87,33 @@ Future<RoomJoinResult> joinRoomWithReclaim({
       (stored != null && nickMatches) ? stored.playerId : null;
   String? storedGameId =
       (stored != null && nickMatches) ? stored.gameId : null;
+
+  // Account bearer first. A dead token falls through to guest play.
+  if (accountToken != null && accountToken.isNotEmpty) {
+    api.token = accountToken;
+    try {
+      await api.patchMe(tableNickname: nickname, avatarId: avatarId);
+      await api.setAvatar(avatarId);
+      return _joinWithEstablishedSession(
+        context: context,
+        api: api,
+        code: code,
+        nickname: nickname,
+        sessionId: accountSessionId,
+        preferredId: null,
+        storedGameId: null,
+        hadStore: true,
+        nickMatches: false,
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode == 401 || e.code == 'UNAUTHORIZED') {
+        api.token = null;
+        await AccountSession.instance.clearLocal();
+      } else {
+        rethrow;
+      }
+    }
+  }
 
   // 1) Same-session reuse — in_game + gameId + nick match only.
   if (stored != null && nickMatches) {
@@ -143,7 +172,30 @@ Future<RoomJoinResult> joinRoomWithReclaim({
   // 2) Fresh guest session (invite-safe / nick-mismatch path).
   final session = await api.createGuestSession(nickname);
   await api.setAvatar(avatarId);
+  return _joinWithEstablishedSession(
+    context: context,
+    api: api,
+    code: code,
+    nickname: session.nickname,
+    sessionId: session.sessionId,
+    preferredId: preferredId,
+    storedGameId: storedGameId,
+    hadStore: hadStore,
+    nickMatches: nickMatches,
+  );
+}
 
+Future<RoomJoinResult> _joinWithEstablishedSession({
+  required BuildContext context,
+  required ApiClient api,
+  required String code,
+  required String nickname,
+  required String? sessionId,
+  required String? preferredId,
+  required String? storedGameId,
+  required bool hadStore,
+  required bool nickMatches,
+}) async {
   final peek = await api.getRoom(code);
 
   if (peek.phase == 'lobby') {
@@ -151,7 +203,7 @@ Future<RoomJoinResult> joinRoomWithReclaim({
     return RoomJoinResult(
       room: joined.room,
       playerId: joined.playerId,
-      nickname: session.nickname,
+      nickname: nickname,
     );
   }
 
@@ -171,15 +223,15 @@ Future<RoomJoinResult> joinRoomWithReclaim({
         api: api,
         room: joined.room,
         playerId: joined.playerId,
-        nickname: session.nickname,
-        sessionId: session.sessionId,
+        nickname: nickname,
+        sessionId: sessionId,
         hadStore: hadStore,
         nickMatches: nickMatches,
       );
       return RoomJoinResult(
         room: joined.room,
         playerId: joined.playerId,
-        nickname: session.nickname,
+        nickname: nickname,
       );
     } on ApiException catch (e) {
       if (e.code == 'SEAT_NOT_VACANT') {
@@ -201,15 +253,15 @@ Future<RoomJoinResult> joinRoomWithReclaim({
         api: api,
         room: claimed.room,
         playerId: claimed.playerId,
-        nickname: session.nickname,
-        sessionId: session.sessionId,
+        nickname: nickname,
+        sessionId: sessionId,
         hadStore: hadStore,
         nickMatches: nickMatches,
       );
       return RoomJoinResult(
         room: claimed.room,
         playerId: claimed.playerId,
-        nickname: session.nickname,
+        nickname: nickname,
       );
     }
   }
@@ -219,15 +271,15 @@ Future<RoomJoinResult> joinRoomWithReclaim({
     api: api,
     room: joined.room,
     playerId: joined.playerId,
-    nickname: session.nickname,
-    sessionId: session.sessionId,
+    nickname: nickname,
+    sessionId: sessionId,
     hadStore: hadStore,
     nickMatches: nickMatches,
   );
   return RoomJoinResult(
     room: joined.room,
     playerId: joined.playerId,
-    nickname: session.nickname,
+    nickname: nickname,
   );
 }
 

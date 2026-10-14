@@ -30,6 +30,7 @@ pub async fn restore_from_store(
                     nickname: session.nickname,
                     token: session.token,
                     avatar_id: session.avatar_id,
+                    user_id: session.user_id,
                 },
             );
         }

@@ -3,6 +3,8 @@
 Drafted: 2026-08-23 · Owner: Chief Architect
 Related: [`Architecture.md`](Architecture.md) · [`SECURITY.md`](SECURITY.md) · [`LOAD.md`](LOAD.md) · [`../CTO_PRODUCTION_REVIEW.md`](../CTO_PRODUCTION_REVIEW.md) · [`../PLAN.md`](../PLAN.md) §28
 
+**Shipped v1 (ADR 0006) is not this draft.** Accounts are optional Google sign-in. The public board is a Top 10 ordered by wins, then exact-bid rate, then average score. It does not use `device_key` or Elo. Guest games are not recorded. The analysis below is kept as the rejected alternative.
+
 ---
 
 ## 1. Executive summary

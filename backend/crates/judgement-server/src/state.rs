@@ -47,6 +47,8 @@ pub struct Session {
     pub token: String,
     /// Built-in avatar pack id (cosmetic).
     pub avatar_id: Option<String>,
+    /// Google account, when this session was created by sign-in.
+    pub user_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +198,10 @@ pub struct AppState {
     pub restart_limits: Mutex<HashMap<RoomId, Instant>>,
     /// Applied at game start and persisted on `GameRules.reconnect_grace_seconds`.
     pub reconnect_grace: Duration,
+    /// Public Top 10. Refreshed in the background; reads never hit the database.
+    pub leaderboard: Mutex<std::sync::Arc<Vec<judgement_persistence::LeaderboardRow>>>,
+    /// Short memo for GET /me/stats so a profile open does not query every time.
+    pub stats_memo: Mutex<HashMap<uuid::Uuid, (Instant, judgement_persistence::UserStatsView)>>,
 }
 
 impl AppState {
@@ -218,6 +224,8 @@ impl AppState {
             active_websockets: std::sync::atomic::AtomicU64::new(0),
             restart_limits: Mutex::default(),
             reconnect_grace: reconnect_grace_from_env(),
+            leaderboard: Mutex::new(std::sync::Arc::new(Vec::new())),
+            stats_memo: Mutex::default(),
         }
     }
 
@@ -227,10 +235,67 @@ impl AppState {
             nickname,
             token: generate_token(),
             avatar_id: None,
+            user_id: None,
         };
         self.sessions.lock().unwrap().insert(session.id, session.clone());
         self.tokens.lock().unwrap().insert(session.token.clone(), session.id);
         session
+    }
+
+    /// Play session bound to a Google account. The bearer is still an opaque token.
+    pub fn create_session_for_user(
+        &self,
+        nickname: String,
+        user_id: uuid::Uuid,
+        avatar_id: Option<String>,
+    ) -> Session {
+        let session = Session {
+            id: SessionId::new(),
+            nickname,
+            token: generate_token(),
+            avatar_id,
+            user_id: Some(user_id),
+        };
+        self.sessions.lock().unwrap().insert(session.id, session.clone());
+        self.tokens.lock().unwrap().insert(session.token.clone(), session.id);
+        session
+    }
+
+    /// Table name for the next seat. Does not change the profile display name.
+    pub fn set_table_nickname(&self, session_id: SessionId, nickname: String) -> bool {
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            let Some(session) = sessions.get_mut(&session_id) else {
+                return false;
+            };
+            session.nickname = nickname.clone();
+        }
+        let mut rooms = self.rooms.lock().unwrap();
+        for room in rooms.values_mut() {
+            if !matches!(room.status, RoomStatus::Lobby) {
+                continue;
+            }
+            if let Some(seat) = room.seats.iter_mut().find(|s| s.session_id == session_id) {
+                seat.nickname = nickname.clone();
+            }
+        }
+        true
+    }
+
+    /// Drop every in-memory session for an account (logout of all devices in this process).
+    pub fn forget_user_sessions(&self, user_id: uuid::Uuid) {
+        let mut sessions = self.sessions.lock().unwrap();
+        let mut tokens = self.tokens.lock().unwrap();
+        let ids: Vec<_> = sessions
+            .iter()
+            .filter(|(_, session)| session.user_id == Some(user_id))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            if let Some(session) = sessions.remove(&id) {
+                tokens.remove(&session.token);
+            }
+        }
     }
 
     /// Persist a built-in avatar choice on the guest session (and any lobby seat).

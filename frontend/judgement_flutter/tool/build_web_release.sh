@@ -17,10 +17,19 @@ if command -v git >/dev/null 2>&1 && git rev-parse --short HEAD >/dev/null 2>&1;
 fi
 
 echo "Building web APP_VERSION=$APP_VERSION APP_BUILD_ID=$BUILD_ID API_BASE=$API_BASE PUBLIC_WEB_ORIGIN=$PUBLIC_WEB_ORIGIN"
-flutter build web --release --pwa-strategy=none \
-  --dart-define=API_BASE="$API_BASE" \
-  --dart-define=APP_VERSION="$APP_VERSION" \
+DEFINES=(
+  --dart-define=API_BASE="$API_BASE"
+  --dart-define=APP_VERSION="$APP_VERSION"
   --dart-define=APP_BUILD_ID="$BUILD_ID"
+)
+# Optional Google sign-in. Empty values are omitted so the client stays guest-only.
+for key in FIREBASE_API_KEY FIREBASE_APP_ID FIREBASE_MESSAGING_SENDER_ID FIREBASE_PROJECT_ID FIREBASE_AUTH_DOMAIN GOOGLE_WEB_CLIENT_ID; do
+  val="${!key:-}"
+  if [[ -n "$val" ]]; then
+    DEFINES+=(--dart-define="${key}=${val}")
+  fi
+done
+flutter build web --release --pwa-strategy=none "${DEFINES[@]}"
 
 chmod +x "$ROOT/tool/stamp_web_build.sh"
 PUBLIC_WEB_ORIGIN="$PUBLIC_WEB_ORIGIN" "$ROOT/tool/stamp_web_build.sh" "$BUILD_ID" "$APP_VERSION"

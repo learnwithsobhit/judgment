@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../screens/legal/legal_screens.dart';
@@ -116,12 +117,15 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
     setState(() => _busy = true);
     try {
       await TableMediaSession.prepareBeforeNetwork();
+      final account = AccountSession.instance;
       final joined = await joinRoomWithReclaim(
         context: context,
         api: _api,
         roomCode: code,
         nickname: nickname,
         avatarId: _selectedAvatarId,
+        accountToken: account.isSignedIn ? account.token : null,
+        accountSessionId: account.isSignedIn ? account.sessionId : null,
       );
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(

@@ -27,7 +27,7 @@ void main() {
     expect(find.text('Automatic'), findsOneWidget);
     expect(find.text('Manual'), findsOneWidget);
     expect(find.text('Turn timer'), findsOneWidget);
-    expect(find.text('First trump'), findsOneWidget);
+    expect(find.text('Trump'), findsOneWidget);
     expect(find.text('Schedule a game for later'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget); // nickname only
 

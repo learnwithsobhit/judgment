@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app.dart';
+import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
@@ -153,6 +154,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
       myNickname: widget.nickname,
     )
       ..roomCode = _room.code
+      ..countsForProfile =
+          AccountSession.instance.isSignedIn &&
+          widget.api.token == AccountSession.instance.token
       ..amHost = _amHost;
     controller.connect();
     Navigator.of(context).pushReplacement(MaterialPageRoute(
