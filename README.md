@@ -184,34 +184,31 @@ rejected with a stable reason code (PLAN.md §29.2).
 Every game is fully reproducible from its seed (`GameEngine::new_with_seed`);
 bug reports should include the seed and state version.
 
-## Production deploy (GitHub + Fly.io + Firebase)
+## Production deploy (Railway + Firebase)
 
 | Piece | Host |
 |-------|------|
 | Flutter Web | Firebase Hosting |
-| API + WebSocket | Fly.io (`fly.toml` + `deployment/docker/Dockerfile`) |
-| Postgres | Fly Postgres (attached `DATABASE_URL`) |
+| API + WebSocket | Railway (`railway.toml` + `deployment/docker/Dockerfile`) |
+| Postgres | Railway Postgres plugin (`DATABASE_URL`) |
 
-Full click-through: [`docs/runbooks/deploy.md`](docs/runbooks/deploy.md).
+Live API base: `https://judgement-server-production-311f.up.railway.app`  
+Web (Railway-stamped): see [`docs/runbooks/railway_firebase_test.md`](docs/runbooks/railway_firebase_test.md). Env template: [`deployment/railway.env.example`](deployment/railway.env.example).
 
 **Quick first launch**
 
-1. Push this repo to GitHub (`git` root is this directory — see the runbook).
-2. Fly.io: `fly auth login`, then create app/Postgres and `fly deploy` (see runbook).
-   Config: [`fly.toml`](fly.toml), secrets template [`deployment/fly.env.example`](deployment/fly.env.example).
-3. Build web against the Fly URL and deploy Hosting:
+1. Push this repo; in Railway, connect the repo, add Postgres, set variables from the env example (`ALLOWED_ORIGINS`, `PUBLIC_WEB_ORIGIN`, `DATABASE_URL` from the plugin).
+2. Deploy the API (`railway up` or auto-deploy). Confirm `GET /healthz` and `GET /readyz`.
+3. Build web against the Railway URL and deploy Hosting:
    ```bash
    cd frontend/judgement_flutter
-   cd frontend/judgement_flutter
    chmod +x tool/build_web_release.sh tool/stamp_web_build.sh
-   API_BASE=https://judgment-api.fly.dev ./tool/build_web_release.sh
-   firebase deploy --only hosting --project judgment-lws-260731
+   API_BASE=https://judgement-server-production-311f.up.railway.app \
+   PUBLIC_WEB_ORIGIN=https://judgment-railway-test.web.app \
+     ./tool/build_web_release.sh
+   firebase deploy --only hosting:railway-test --project judgment-lws-260731
    ```
-4. Set Fly secrets `ALLOWED_ORIGINS` + `PUBLIC_WEB_ORIGIN` to the Firebase URL(s).
-5. GitHub Actions variables/secrets: `API_BASE`, `FIREBASE_PROJECT_ID`,
-   `PUBLIC_WEB_ORIGIN`, `FIREBASE_TOKEN`, `FLY_API_TOKEN`.
-   Workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
-   [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+4. Set Railway `ALLOWED_ORIGINS` + `PUBLIC_WEB_ORIGIN` to the Firebase URL(s).
 
 v1 launch defaults: `RAG_ENABLED=0`, platform URLs (no custom domain required).
 

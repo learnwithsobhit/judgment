@@ -1,6 +1,6 @@
 # Judgement — System Architecture
 
-Last reviewed: 2026-07-31
+Last reviewed: 2026-09-15
 
 This document describes the architecture of the Judgement (Oh Hell) multiplayer product: layered design, runtime flows, interfaces, communication, and data durability. It complements [`PLAN.md`](../PLAN.md), ADRs under [`docs/adr/`](adr/), and [`docs/RULES.md`](RULES.md).
 
@@ -15,23 +15,23 @@ flowchart TB
   players[Players browsers]
   spa[Flutter Web SPA]
   firebase[Firebase Hosting]
-  api[Fly.io Axum API and WSS]
-  pg[(PostgreSQL)]
+  api[Railway Axum API and WSS]
+  pg[(Railway PostgreSQL)]
   optionalRag[Optional RAG and LLM]
 
   players -->|HTTPS| firebase
   firebase -->|serves SPA assets| spa
   spa -->|HTTPS REST| api
-  spa -->|"WSS direct browser to Fly"| api
+  spa -->|"WSS direct browser to Railway"| api
   api --> pg
   api -.->|side path never blocks gameplay| optionalRag
 ```
 
 | Piece | Host | Notes |
 |-------|------|--------|
-| Flutter Web SPA | Firebase Hosting (`judgment-lws-260731`) | SPA rewrites for `/e/{slug}` and `/r/{CODE}` deep links |
-| API + WebSocket | Fly.io (`judgment-api`) | Browser talks to Fly for WSS; Firebase does **not** proxy WS |
-| Postgres | Fly Postgres / Neon / Supabase | Events + snapshots; migrations on boot |
+| Flutter Web SPA | Firebase Hosting (`judgment-railway-test` / project `judgment-lws-260731`) | SPA rewrites for `/e/{slug}` and `/r/{CODE}` deep links |
+| API + WebSocket | Railway (`judgement-server`, `railway.toml`) | Browser talks to Railway for WSS; Firebase does **not** proxy WS |
+| Postgres | Railway Postgres plugin (`DATABASE_URL`) | Events + snapshots; migrations on boot |
 | AI / RAG | Same API process | Optional; never mutates game state |
 
 ---
@@ -184,29 +184,29 @@ State management: `ChangeNotifier` + `ListenableBuilder` (no Riverpod).
 ```mermaid
 flowchart LR
   gh[GitHub Actions]
-  flyBuild[Fly remote Docker build]
+  railwayBuild[Railway Docker from railway.toml]
   fbBuild[Flutter web release build]
-  flyApp[judgment-api]
+  railwayApp[judgement-server]
   fbHost[Firebase Hosting]
-  db[(Fly Postgres DATABASE_URL)]
+  db[(Railway Postgres DATABASE_URL)]
 
-  gh -->|deploy-api FLY_API_TOKEN| flyBuild --> flyApp
-  gh -->|deploy-web API_BASE dart-define| fbBuild --> fbHost
-  flyApp --> db
+  gh -->|optional CI stamp API_BASE| fbBuild --> fbHost
+  railwayBuild --> railwayApp
+  railwayApp --> db
   fbHost -.->|SPA only| browsers[Browsers]
-  browsers -->|REST and WSS| flyApp
+  browsers -->|REST and WSS| railwayApp
 ```
 
 | Variable | Where | Purpose |
 |----------|-------|---------|
 | `API_BASE` | Flutter `--dart-define` / GH variable | REST base; WS scheme derived (`http`→`ws`) |
-| `ALLOWED_ORIGINS` | Fly secret | CORS allow-list (unset = permissive **dev only**) |
-| `PUBLIC_WEB_ORIGIN` | Fly secret + GH variable | Invite / WhatsApp / ICS absolute links |
-| `DATABASE_URL` | Fly secret (attach) | Postgres; unset → in-memory store |
+| `ALLOWED_ORIGINS` | Railway service variables | CORS allow-list (unset = permissive **dev only**) |
+| `PUBLIC_WEB_ORIGIN` | Railway + web stamp | Invite / WhatsApp / ICS absolute links |
+| `DATABASE_URL` | Railway Postgres plugin | Postgres; unset → in-memory store |
 | `JUDGEMENT_ALLOW_SEED` | Env (non-prod) | Allow deterministic `seed` on start |
-| `RAG_ENABLED` | Fly secret | Optional RAG path |
+| `RAG_ENABLED` | Railway variable | Optional RAG path (often off; no pgvector by default) |
 
-See [`docs/runbooks/deploy.md`](runbooks/deploy.md) and [`deployment/fly.env.example`](../deployment/fly.env.example).
+See [`docs/runbooks/railway_firebase_test.md`](runbooks/railway_firebase_test.md) and [`deployment/railway.env.example`](../deployment/railway.env.example).
 
 ---
 
@@ -377,7 +377,7 @@ Every successful WS upgrade **rotates** the bearer token (`TokenRotated`); old t
 
 ```mermaid
 flowchart TB
-  subgraph process [Single Fly machine]
+  subgraph process [Single Railway replica]
     r1[Room and session maps]
     a1[Actor game A sequential]
     a2[Actor game B sequential]
@@ -394,7 +394,7 @@ flowchart TB
 
 ADR: [`0001-actor-per-game.md`](adr/0001-actor-per-game.md). One sequential tokio task per active game avoids locks inside the engine.
 
-**CAP stance:** the realtime path is **CP** — one writer per `game_id`, durable tip before clients see accepts. Availability is improved by pool headroom, product capacity gates (busy notice at 25 tables; `CAPACITY_FULL` at 35 tables or 200 WS), emergency `MAX_ACTIVE_GAMES` (100), client auto-resend on `PersistUnavailable`, actor respawn from tip, and outbound snapshot dirty-resync — not by multi-writer AP. Horizontal scale beyond one Fly machine needs game ownership leases + sticky routing (deferred; see `docs/game_estimation.md` cost ladder). Keep API and Postgres colocated in the same region.
+**CAP stance:** the realtime path is **CP** — one writer per `game_id`, durable tip before clients see accepts. Availability is improved by pool headroom, product capacity gates (busy notice at 25 tables; `CAPACITY_FULL` at 35 tables or 200 WS), emergency `MAX_ACTIVE_GAMES` (100), client auto-resend on `PersistUnavailable`, actor respawn from tip, and outbound snapshot dirty-resync — not by multi-writer AP. Horizontal scale beyond one Railway replica needs game ownership leases + sticky routing (deferred; see `docs/game_estimation.md` cost ladder). Keep API and Postgres colocated in the same region.
 
 ---
 
@@ -462,7 +462,7 @@ flowchart TB
 | `0006` | Avatars |
 | `0007` | Dealer total restriction column |
 
-Path: `backend/crates/judgement-persistence/migrations/`. Boot: `JUDGEMENT_MIGRATIONS_DIR` (Fly sets `/srv/migrations/persistence`).
+Path: `backend/crates/judgement-persistence/migrations/`. Boot: `JUDGEMENT_MIGRATIONS_DIR` (Railway Docker image sets `/srv/migrations/persistence`).
 
 ### 7.3 Restore on boot
 
@@ -595,7 +595,8 @@ judgement/
 ├── docs/                    # Rules, ADRs, runbooks, this file
 ├── rules/                   # Curated rule text for FAQ/RAG
 ├── deployment/              # Docker, compose, env examples, scripts
-├── fly.toml                 # Fly app config
+├── railway.toml             # Railway app config
+├── fly.toml                 # leftover Fly config (not the live host)
 └── .github/workflows/       # CI + Deploy
 ```
 

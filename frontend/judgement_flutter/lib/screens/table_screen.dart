@@ -14,6 +14,7 @@ import '../util/session_exit_analytics.dart';
 import '../util/social_share.dart';
 import '../widgets/assistant_panel.dart';
 import '../widgets/avatar_picker.dart';
+import '../widgets/bid_panel.dart';
 import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
 import '../widgets/emote_bar.dart';
@@ -1111,52 +1112,12 @@ class _ActionArea extends StatelessWidget {
       final isDealer = view.round?.dealer == controller.myPlayerId;
       final dealerRestricted = isDealer &&
           List.generate(cards + 1, (b) => b).any((b) => !legal.contains(b));
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Column(
-          children: [
-            Text(
-              dealerRestricted
-                  ? 'Your bid — as dealer, the total cannot equal $cards'
-                  : 'Your bid — how many tricks will you win?',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: [
-                for (var bid = 0; bid <= cards; bid++)
-                  Semantics(
-                    button: true,
-                    enabled: legal.contains(bid) && !pending,
-                    label: legal.contains(bid)
-                        ? 'Bid $bid tricks'
-                        : 'Bid $bid not allowed',
-                    child: Tooltip(
-                      message: legal.contains(bid)
-                          ? 'Bid $bid'
-                          : 'Not allowed: the dealer cannot make total bids equal $cards',
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor:
-                              legal.contains(bid) ? goldAccent : Colors.white12,
-                          foregroundColor:
-                              legal.contains(bid) ? Colors.black : Colors.white38,
-                          minimumSize: const Size(48, 44),
-                        ),
-                        onPressed: legal.contains(bid) && !pending
-                            ? () => controller.placeBid(bid)
-                            : null,
-                        child: Text('$bid'),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
+      return BidPanel(
+        cards: cards,
+        legalBids: legal,
+        dealerRestricted: dealerRestricted,
+        pending: pending,
+        onConfirm: controller.placeBid,
       );
     }
 
