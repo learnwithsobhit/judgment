@@ -100,13 +100,16 @@ class _LandingScreenState extends State<LandingScreen> {
   int _maxPlayers = 6;
   bool _timerEnabled = false;
   int _timerSeconds = 30;
+
   /// null = revealed-card; otherwise a 4-suit cycle that repeats each round.
   List<String>? _trumpCycle;
   bool _manualSchedule = false;
+
   /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
   bool _dealerTotalRestriction = false;
-  List<ManualRoundStep> _manualSteps =
-      RoundSchedule.defaultManualForPlayers(6).steps!;
+  List<ManualRoundStep> _manualSteps = RoundSchedule.defaultManualForPlayers(
+    6,
+  ).steps!;
 
   String? _scheduleValidationError() {
     if (!_manualSchedule) return null;
@@ -120,8 +123,10 @@ class _LandingScreenState extends State<LandingScreen> {
         return 'Repeat must be between 1 and 8';
       }
     }
-    final expanded = RoundSchedule(mode: 'manual', steps: _manualSteps)
-        .expandPreview();
+    final expanded = RoundSchedule(
+      mode: 'manual',
+      steps: _manualSteps,
+    ).expandPreview();
     if (expanded.isEmpty || expanded.length > 64) {
       return 'Schedule must expand to 1–64 rounds';
     }
@@ -131,9 +136,10 @@ class _LandingScreenState extends State<LandingScreen> {
   void _setMaxPlayers(int n) {
     setState(() {
       _maxPlayers = n;
-      _manualSteps = RoundSchedule(mode: 'manual', steps: _manualSteps)
-          .clampedToPlayers(n)
-          .steps!;
+      _manualSteps = RoundSchedule(
+        mode: 'manual',
+        steps: _manualSteps,
+      ).clampedToPlayers(n).steps!;
     });
   }
 
@@ -163,9 +169,14 @@ class _LandingScreenState extends State<LandingScreen> {
     if (!fresh || !mounted) return;
 
     setState(() => _busy = true);
+    final saveRecord = await promptToSaveRecord(context);
+    if (saveRecord == null || !mounted) {
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
     final api = ApiClient();
     final account = AccountSession.instance;
-    final usingAccount = account.isSignedIn;
+    final usingAccount = saveRecord && account.isSignedIn;
     if (usingAccount) {
       api.token = account.token;
     }
@@ -191,10 +202,7 @@ class _LandingScreenState extends State<LandingScreen> {
         playerId = joined.playerId;
         sessionNickname = joined.nickname;
       } else if (usingAccount) {
-        await api.patchMe(
-          tableNickname: nickname,
-          avatarId: _selectedAvatarId,
-        );
+        await api.patchMe(tableNickname: nickname, avatarId: _selectedAvatarId);
         await api.setAvatar(_selectedAvatarId);
         final schedule = _manualSchedule
             ? RoundSchedule(mode: 'manual', steps: _manualSteps)
@@ -243,30 +251,36 @@ class _LandingScreenState extends State<LandingScreen> {
       }
       final gameId = room.gameId;
       if (room.phase == 'in_game' && gameId != null) {
-        final controller = GameController(
-          api: api,
-          gameId: gameId,
-          myPlayerId: playerId,
-          myNickname: sessionNickname,
-        )
-          ..roomCode = room.code
-          ..countsForProfile = account.isSignedIn && api.token == account.token
-          ..amHost = room.seats.any(
-            (s) => s.playerId == playerId && s.isHost,
-          );
+        final controller =
+            GameController(
+                api: api,
+                gameId: gameId,
+                myPlayerId: playerId,
+                myNickname: sessionNickname,
+              )
+              ..roomCode = room.code
+              ..countsForProfile =
+                  account.isSignedIn && api.token == account.token
+              ..amHost = room.seats.any(
+                (s) => s.playerId == playerId && s.isHost,
+              );
         controller.connect();
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => TableScreen(controller: controller),
-        ));
-      } else {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => LobbyScreen(
-            api: api,
-            nickname: sessionNickname,
-            initialRoom: room,
-            myPlayerId: playerId,
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => TableScreen(controller: controller),
           ),
-        ));
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => LobbyScreen(
+              api: api,
+              nickname: sessionNickname,
+              initialRoom: room,
+              myPlayerId: playerId,
+            ),
+          ),
+        );
       }
     } on ApiException catch (error) {
       if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
@@ -283,8 +297,9 @@ class _LandingScreenState extends State<LandingScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _showCapacityFull(String message) {
@@ -380,8 +395,9 @@ class _LandingScreenState extends State<LandingScreen> {
           onSelectionChanged: (selection) => setState(() {
             _manualSchedule = selection.first;
             if (_manualSchedule) {
-              _manualSteps =
-                  RoundSchedule.defaultManualForPlayers(_maxPlayers).steps!;
+              _manualSteps = RoundSchedule.defaultManualForPlayers(
+                _maxPlayers,
+              ).steps!;
             }
           }),
         ),
@@ -421,8 +437,7 @@ class _LandingScreenState extends State<LandingScreen> {
             style: const TextStyle(fontSize: 12),
           ),
           value: _dealerTotalRestriction,
-          onChanged: (value) =>
-              setState(() => _dealerTotalRestriction = value),
+          onChanged: (value) => setState(() => _dealerTotalRestriction = value),
         ),
         if (_timerEnabled)
           Wrap(
@@ -475,13 +490,15 @@ class _LandingScreenState extends State<LandingScreen> {
   }
 
   Widget _manualStepsEditor() {
-    final preview = RoundSchedule(mode: 'manual', steps: _manualSteps)
-        .expandPreview();
+    final preview = RoundSchedule(
+      mode: 'manual',
+      steps: _manualSteps,
+    ).expandPreview();
     final previewText = preview.isEmpty
         ? '(empty)'
         : preview.length > 24
-            ? '${preview.take(12).join(',')},…,${preview.sublist(preview.length - 4).join(',')}'
-            : preview.join(',');
+        ? '${preview.take(12).join(',')},…,${preview.sublist(preview.length - 4).join(',')}'
+        : preview.join(',');
     final maxCards = RoundSchedule.maxCardsPerPlayer(_maxPlayers);
 
     return Column(
@@ -566,8 +583,9 @@ class _LandingScreenState extends State<LandingScreen> {
             ),
             TextButton(
               onPressed: () => setState(() {
-                _manualSteps =
-                    RoundSchedule.defaultManualForPlayers(_maxPlayers).steps!;
+                _manualSteps = RoundSchedule.defaultManualForPlayers(
+                  _maxPlayers,
+                ).steps!;
               }),
               child: const Text('Reset default'),
             ),
@@ -637,9 +655,13 @@ class _LandingScreenState extends State<LandingScreen> {
                           SegmentedButton<bool>(
                             segments: const [
                               ButtonSegment(
-                                  value: false, label: Text('Create room')),
+                                value: false,
+                                label: Text('Create room'),
+                              ),
                               ButtonSegment(
-                                  value: true, label: Text('Join room')),
+                                value: true,
+                                label: Text('Join room'),
+                              ),
                             ],
                             selected: {_joining},
                             onSelectionChanged: (selection) =>
@@ -696,7 +718,8 @@ class _LandingScreenState extends State<LandingScreen> {
                           listenable: AppUpdateController.instance,
                           builder: (context, _) {
                             final updates = AppUpdateController.instance;
-                            final blocked = _busy ||
+                            final blocked =
+                                _busy ||
                                 !_legalAccepted ||
                                 updates.awaitingInitialCheck ||
                                 updates.updateAvailable;
@@ -786,9 +809,11 @@ class _LandingScreenState extends State<LandingScreen> {
                   const SizedBox(height: 16),
                   TextButton(
                     onPressed: () {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => const ScheduleEventScreen(),
-                      ));
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ScheduleEventScreen(),
+                        ),
+                      );
                     },
                     child: const Text('Schedule a game for later'),
                   ),

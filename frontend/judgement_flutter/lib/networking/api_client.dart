@@ -481,6 +481,8 @@ class LeaderboardEntry {
   final int exactPercent;
   final int averageScore;
 
+  int get losses => games < wins ? 0 : games - wins;
+
   factory LeaderboardEntry.fromJson(Map<String, dynamic> json) {
     return LeaderboardEntry(
       rank: json['rank'] as int? ?? 0,

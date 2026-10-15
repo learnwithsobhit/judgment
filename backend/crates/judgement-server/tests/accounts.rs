@@ -3,10 +3,10 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use jsonwebtoken::{encode, EncodingKey, Header};
 use judgement_persistence::MemoryStore;
 use judgement_server::leaderboard::refresh_leaderboard;
 use judgement_server::{build_router, state::AppState};
-use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -74,7 +74,7 @@ async fn google_sign_in_creates_distinct_accounts_and_logout_invalidates() {
         .unwrap();
     let token = first["token"].as_str().unwrap().to_string();
     assert_eq!(first["user"]["display_name"], "Ada Lovelace");
-    assert_eq!(first["nickname"], "Ada Lovelace");
+    assert_eq!(first["nickname"], "Ada L");
 
     let me: Value = client
         .get(format!("{base}/api/v1/me"))

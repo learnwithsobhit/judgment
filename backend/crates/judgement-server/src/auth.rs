@@ -10,13 +10,13 @@ use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::Json;
 use chrono::Utc;
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use judgement_persistence::{StoredIdentity, StoredUser};
 use judgement_protocol::{
     AuthSessionResponse, FirebaseAuthRequest, LeaderboardEntry, LeaderboardResponse, MeResponse,
     MeStatsResponse, PatchMeRequest, PublicUser,
 };
-use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -63,7 +63,11 @@ pub async fn auth_firebase(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| existing.as_ref().and_then(|user| user.legal_version.clone()));
+        .or_else(|| {
+            existing
+                .as_ref()
+                .and_then(|user| user.legal_version.clone())
+        });
 
     let user = StoredUser {
         user_id,
@@ -90,7 +94,7 @@ pub async fn auth_firebase(
         .await
         .map_err(|e| ApiError::Conflict(format!("save identity: {e}")))?;
 
-    let nickname = clip_chars(&display_name, 24);
+    let nickname = table_nickname_from_display(&display_name);
     let session = state.create_session_for_user(nickname, user_id, avatar_id.clone());
     state
         .store
@@ -164,7 +168,9 @@ pub async fn patch_me(
     if let Some(nickname) = body.table_nickname.as_deref() {
         let nickname = clip_chars(nickname.trim(), 24);
         if nickname.is_empty() {
-            return Err(ApiError::BadRequest("nickname must be 1-24 characters".into()));
+            return Err(ApiError::BadRequest(
+                "nickname must be 1-24 characters".into(),
+            ));
         }
         if !state.set_table_nickname(session.id, nickname) {
             return Err(ApiError::Unauthorized);
@@ -316,16 +322,15 @@ struct FirebaseClaim {
 }
 
 async fn verify_id_token(token: &str) -> Result<VerifiedGoogle, ApiError> {
-    let header = decode_header(token).map_err(|_| ApiError::BadRequest("invalid Google token".into()))?;
+    let header =
+        decode_header(token).map_err(|_| ApiError::BadRequest("invalid Google token".into()))?;
     if header.alg == Algorithm::HS256 {
-        let secret = std::env::var("JUDGEMENT_FIREBASE_DEV_SECRET").map_err(|_| {
-            ApiError::BadRequest("Google sign-in is not configured".into())
-        })?;
+        let secret = std::env::var("JUDGEMENT_FIREBASE_DEV_SECRET")
+            .map_err(|_| ApiError::BadRequest("Google sign-in is not configured".into()))?;
         return verify_dev_token(token, &secret);
     }
-    let project = std::env::var("FIREBASE_PROJECT_ID").map_err(|_| {
-        ApiError::BadRequest("Google sign-in is not configured".into())
-    })?;
+    let project = std::env::var("FIREBASE_PROJECT_ID")
+        .map_err(|_| ApiError::BadRequest("Google sign-in is not configured".into()))?;
     verify_firebase_token(token, &project).await
 }
 
@@ -343,7 +348,8 @@ fn verify_dev_token(token: &str, secret: &str) -> Result<VerifiedGoogle, ApiErro
 }
 
 async fn verify_firebase_token(token: &str, project_id: &str) -> Result<VerifiedGoogle, ApiError> {
-    let header = decode_header(token).map_err(|_| ApiError::BadRequest("invalid Google token".into()))?;
+    let header =
+        decode_header(token).map_err(|_| ApiError::BadRequest("invalid Google token".into()))?;
     let kid = header
         .kid
         .ok_or_else(|| ApiError::BadRequest("invalid Google token".into()))?;
@@ -364,7 +370,9 @@ async fn verify_firebase_token(token: &str, project_id: &str) -> Result<Verified
 fn accept_claims(claims: TokenClaims) -> Result<VerifiedGoogle, ApiError> {
     if let Some(provider) = claims.firebase.sign_in_provider.as_deref() {
         if provider != "google.com" {
-            return Err(ApiError::BadRequest("only Google sign-in is enabled".into()));
+            return Err(ApiError::BadRequest(
+                "only Google sign-in is enabled".into(),
+            ));
         }
     }
     if claims.sub.trim().is_empty() {
@@ -414,4 +422,43 @@ async fn cached_jwks() -> Result<JwkSet, ApiError> {
 
 fn clip_chars(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
+}
+
+/// Seat label from a Google display name: first word, plus the next word's initial.
+/// `Ankit Sunil Chaturvedi` becomes `Ankit S`. The profile keeps the full name.
+fn table_nickname_from_display(name: &str) -> String {
+    let mut parts = name.split_whitespace().filter(|part| !part.is_empty());
+    let Some(first) = parts.next() else {
+        return "Player".into();
+    };
+    let short = match parts.next().and_then(|word| word.chars().next()) {
+        Some(ch) => {
+            let letter: String = ch.to_uppercase().collect();
+            format!("{first} {letter}")
+        }
+        None => first.to_string(),
+    };
+    clip_chars(&short, 16)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::table_nickname_from_display;
+
+    #[test]
+    fn table_nickname_uses_first_name_and_next_initial() {
+        assert_eq!(
+            table_nickname_from_display("Ankit Sunil Chaturvedi"),
+            "Ankit S"
+        );
+        assert_eq!(
+            table_nickname_from_display("shobhit chaturvedi"),
+            "shobhit C"
+        );
+        assert_eq!(table_nickname_from_display("Madonna"), "Madonna");
+        assert_eq!(table_nickname_from_display("   "), "Player");
+        let clipped = table_nickname_from_display("Abcdefghijklmnop Qrst");
+        assert_eq!(clipped, "Abcdefghijklmnop");
+        assert_eq!(clipped.chars().count(), 16);
+    }
 }

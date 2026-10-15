@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/account_session.dart';
+import '../auth/google_sign_in_flow.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../screens/legal/legal_screens.dart';
@@ -34,6 +35,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
   String? _rsvpToken;
   String? _rsvpStatus;
   int? _waitlistPosition;
+
   /// Optional contact about this scheduled game only (default off).
   bool _contactConsent = false;
   bool _legalAccepted = false;
@@ -87,9 +89,11 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
         _rsvpStatus = result.rsvpStatus;
         _waitlistPosition = result.waitlistPosition;
       });
-      _toast(result.rsvpStatus == 'waitlisted'
-          ? 'You’re on the waitlist (#${result.waitlistPosition})'
-          : 'You’re in — add this to your calendar');
+      _toast(
+        result.rsvpStatus == 'waitlisted'
+            ? 'You’re on the waitlist (#${result.waitlistPosition})'
+            : 'You’re in — add this to your calendar',
+      );
     } on ApiException catch (e) {
       _toast(e.message);
     } finally {
@@ -115,27 +119,35 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
     if (!fresh || !mounted) return;
     final nickname = _name.text.trim().isEmpty ? 'Player' : _name.text.trim();
     setState(() => _busy = true);
+    final saveRecord = await promptToSaveRecord(context);
+    if (saveRecord == null || !mounted) {
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
+    final account = AccountSession.instance;
+    final usingAccount = saveRecord && account.isSignedIn;
     try {
       await TableMediaSession.prepareBeforeNetwork();
-      final account = AccountSession.instance;
       final joined = await joinRoomWithReclaim(
         context: context,
         api: _api,
         roomCode: code,
         nickname: nickname,
         avatarId: _selectedAvatarId,
-        accountToken: account.isSignedIn ? account.token : null,
-        accountSessionId: account.isSignedIn ? account.sessionId : null,
+        accountToken: usingAccount ? account.token : null,
+        accountSessionId: usingAccount ? account.sessionId : null,
       );
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => LobbyScreen(
-          api: _api,
-          nickname: joined.nickname,
-          initialRoom: joined.room,
-          myPlayerId: joined.playerId,
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => LobbyScreen(
+            api: _api,
+            nickname: joined.nickname,
+            initialRoom: joined.room,
+            myPlayerId: joined.playerId,
+          ),
         ),
-      ));
+      );
     } on ApiException catch (e) {
       _toast(e.message);
     } finally {
@@ -145,7 +157,9 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -170,8 +184,8 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
             child: _loading
                 ? const CircularProgressIndicator()
                 : _error != null
-                    ? Text(_error!, textAlign: TextAlign.center)
-                    : _buildBody(),
+                ? Text(_error!, textAlign: TextAlign.center)
+                : _buildBody(),
           ),
         ),
       ),
@@ -187,8 +201,10 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(event.title,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+            Text(
+              event.title,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 8),
             Text(
               '${local.year}-${local.month.toString().padLeft(2, '0')}-'
@@ -207,11 +223,15 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
               '(${event.waitlistLeft} left)',
             ),
             if (event.goingNames.isNotEmpty)
-              Text('Going: ${event.goingNames.join(', ')}',
-                  style: const TextStyle(color: Colors.white54)),
+              Text(
+                'Going: ${event.goingNames.join(', ')}',
+                style: const TextStyle(color: Colors.white54),
+              ),
             if (event.waitlistedNames.isNotEmpty)
-              Text('Waitlist: ${event.waitlistedNames.join(', ')}',
-                  style: const TextStyle(color: Colors.white54)),
+              Text(
+                'Waitlist: ${event.waitlistedNames.join(', ')}',
+                style: const TextStyle(color: Colors.white54),
+              ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _addToCalendar,
@@ -220,8 +240,10 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
             ),
             if (event.status == 'lobby_open' && event.roomCode != null) ...[
               const SizedBox(height: 12),
-              Text('Lobby open — code ${event.roomCode}',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                'Lobby open — code ${event.roomCode}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
               if (_rsvpStatus == 'going' || _rsvpStatus == null) ...[
                 const SizedBox(height: 8),
                 Align(
@@ -234,8 +256,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
                 const SizedBox(height: 8),
                 AvatarPicker(
                   selectedId: _selectedAvatarId,
-                  onSelected: (id) =>
-                      setState(() => _selectedAvatarId = id),
+                  onSelected: (id) => setState(() => _selectedAvatarId = id),
                 ),
                 const SizedBox(height: 8),
                 LegalConsentCheckbox(
@@ -247,7 +268,8 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
                   listenable: AppUpdateController.instance,
                   builder: (context, _) {
                     final updates = AppUpdateController.instance;
-                    final blocked = _busy ||
+                    final blocked =
+                        _busy ||
                         !_legalAccepted ||
                         updates.awaitingInitialCheck ||
                         updates.updateAvailable;
@@ -258,10 +280,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
                   },
                 ),
                 const SizedBox(height: 8),
-                const AppVersionBar(
-                  autoReload: true,
-                  blockWhenStale: true,
-                ),
+                const AppVersionBar(autoReload: true, blockWhenStale: true),
               ] else
                 const Text(
                   'Waitlisted guests join only if promoted into a seat.',
@@ -291,8 +310,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 value: _contactConsent,
-                onChanged: (v) =>
-                    setState(() => _contactConsent = v ?? false),
+                onChanged: (v) => setState(() => _contactConsent = v ?? false),
                 title: const Text(
                   'Optional: contact me about this scheduled game only',
                   style: TextStyle(fontSize: 13),
@@ -313,11 +331,13 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
               ),
               FilledButton(
                 onPressed: _busy || !event.canRsvp ? null : _rsvp,
-                child: Text(!event.canRsvp
-                    ? 'Full'
-                    : event.seatsLeft > 0
-                        ? 'I am interested'
-                        : 'Join waitlist'),
+                child: Text(
+                  !event.canRsvp
+                      ? 'Full'
+                      : event.seatsLeft > 0
+                      ? 'I am interested'
+                      : 'Join waitlist',
+                ),
               ),
             ],
             if (_rsvpToken != null)
@@ -326,7 +346,7 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
                 child: Text(
                   _rsvpStatus == 'waitlisted'
                       ? 'You’re on the waitlist (#$_waitlistPosition). '
-                          'Keep the calendar invite handy.'
+                            'Keep the calendar invite handy.'
                       : 'You’re in. Keep the calendar invite handy.',
                 ),
               ),
