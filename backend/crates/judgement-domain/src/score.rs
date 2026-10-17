@@ -39,6 +39,10 @@ pub struct RankedPlayer {
     pub total_score: i32,
     pub exact_bid_rounds: u32,
     pub total_tricks_missed: u32,
+    /// Thinking time in milliseconds. Less time ranks higher when score,
+    /// exact rounds, and tricks missed are level.
+    #[serde(default)]
+    pub thinking_ms: u64,
 }
 
 impl ScoreTable {
@@ -70,9 +74,17 @@ impl ScoreTable {
             .sum()
     }
 
-    /// Final ranking (locked decision 2): highest score, then most exact-bid
-    /// rounds, then fewest total tricks missed; still-equal players share rank.
+    /// Final ranking: highest score, then most exact-bid rounds, then fewest
+    /// tricks missed, then least thinking time. Still-equal players share rank.
     pub fn final_ranking(&self, players: &[PlayerId]) -> Vec<RankedPlayer> {
+        self.final_ranking_with_time(players, &HashMap::new())
+    }
+
+    pub fn final_ranking_with_time(
+        &self,
+        players: &[PlayerId],
+        thinking_ms: &HashMap<PlayerId, u64>,
+    ) -> Vec<RankedPlayer> {
         let mut ranked: Vec<RankedPlayer> = players
             .iter()
             .map(|&player_id| RankedPlayer {
@@ -81,11 +93,19 @@ impl ScoreTable {
                 total_score: self.total_score(player_id),
                 exact_bid_rounds: self.exact_bid_rounds(player_id),
                 total_tricks_missed: self.total_tricks_missed(player_id),
+                thinking_ms: thinking_ms.get(&player_id).copied().unwrap_or(0),
             })
             .collect();
 
-        // Better first: score desc, exact rounds desc, missed tricks asc.
-        let sort_key = |p: &RankedPlayer| (-(p.total_score as i64), -(p.exact_bid_rounds as i64), p.total_tricks_missed);
+        // Better first: score desc, exact rounds desc, missed tricks asc, time asc.
+        let sort_key = |p: &RankedPlayer| {
+            (
+                -(p.total_score as i64),
+                -(p.exact_bid_rounds as i64),
+                p.total_tricks_missed,
+                p.thinking_ms,
+            )
+        };
         ranked.sort_by_key(sort_key);
 
         let mut previous_key = None;
@@ -156,5 +176,29 @@ mod tests {
         assert_eq!(ranking[0].rank, 1);
         assert_eq!(ranking[1].rank, 1);
         assert_eq!(ranking[2].rank, 3, "shared first place skips rank 2");
+    }
+
+    #[test]
+    fn less_thinking_time_ranks_higher_when_the_score_is_tied() {
+        let a = PlayerId::new();
+        let b = PlayerId::new();
+        let c = PlayerId::new();
+
+        let mut table = ScoreTable::default();
+        table.record_round(HashMap::from([
+            (a, entry(1, 1, 11)),
+            (b, entry(1, 1, 11)),
+            (c, entry(1, 1, 11)),
+        ]));
+
+        let ranking = table.final_ranking_with_time(
+            &[a, b, c],
+            &HashMap::from([(a, 20_000), (b, 8_000), (c, 20_000)]),
+        );
+        assert_eq!(ranking[0].player_id, b);
+        assert_eq!(ranking[0].rank, 1);
+        assert_eq!(ranking[0].thinking_ms, 8_000);
+        assert_eq!(ranking[1].rank, 2);
+        assert_eq!(ranking[2].rank, 2);
     }
 }

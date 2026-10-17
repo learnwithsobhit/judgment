@@ -405,13 +405,15 @@ impl GameStore for PostgresStore {
             UPDATE games
             SET state_version = $2,
                 status = CASE WHEN $3 THEN 'finished' ELSE status END,
-                finished_at = CASE WHEN $3 THEN now() ELSE finished_at END
+                finished_at = CASE WHEN $3 THEN now() ELSE finished_at END,
+                player_pace = $4
             WHERE game_id = $1
             "#,
         )
         .bind(commit.game_id.0)
         .bind(commit.state.version as i64)
         .bind(finished)
+        .bind(serde_json::to_value(&commit.pace)?)
         .execute(&mut *tx)
         .await?;
 
@@ -512,7 +514,7 @@ impl GameStore for PostgresStore {
     ) -> Result<Option<RestoredGame>, PersistError> {
         let Some(row) = sqlx::query(
             r#"
-            SELECT game_id, room_id, rules, seed, state_version
+            SELECT game_id, room_id, rules, seed, state_version, created_at, player_pace
             FROM games WHERE game_id = $1 AND status = 'active'
             "#,
         )
@@ -572,6 +574,8 @@ impl GameStore for PostgresStore {
             state,
             players,
             processed_actions,
+            created_at: row.get("created_at"),
+            pace: serde_json::from_value(row.get("player_pace"))?,
         }))
     }
 

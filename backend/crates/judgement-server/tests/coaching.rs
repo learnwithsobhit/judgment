@@ -172,6 +172,7 @@ fn to_commit(
         state: state.clone(),
         round_result,
         game_result,
+        pace: Vec::new(),
     }
 }
 

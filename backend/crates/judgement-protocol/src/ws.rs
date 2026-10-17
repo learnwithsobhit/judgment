@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use judgement_domain::{ActionId, GameError, GameId, PlayerId};
@@ -93,6 +94,21 @@ pub struct TimerEvent {
     pub server_now_ms: u64,
 }
 
+/// Completed thinking time for one seat. Every client ranks the same totals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayerPace {
+    pub player_id: PlayerId,
+    pub elapsed_ms: u64,
+    pub decisions: u32,
+}
+
+/// The seat whose turn clock is running, so every client ticks the same open turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaceOpen {
+    pub player_id: PlayerId,
+    pub opened_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ServerMessage {
@@ -108,7 +124,18 @@ pub enum ServerMessage {
     },
     /// Full personalised snapshot after every accepted command
     /// (locked decision 6 — no deltas in MVP).
-    StateSnapshot { view: PlayerGameView },
+    StateSnapshot {
+        view: PlayerGameView,
+        /// When the game started. Every client shows the same elapsed clock.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        started_at: Option<DateTime<Utc>>,
+        /// Completed thinking time per player.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pace: Vec<PlayerPace>,
+        /// Whose turn clock is running.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pace_open: Option<PaceOpen>,
+    },
     PlayerConnected { player_id: PlayerId },
     PlayerDisconnected { player_id: PlayerId },
     HostChanged { new_host: PlayerId },

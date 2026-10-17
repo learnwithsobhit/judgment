@@ -6,6 +6,7 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/social_share.dart';
+import 'pace_line.dart';
 import 'player_avatar.dart';
 import 'share_sheet.dart';
 
@@ -151,6 +152,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
                       color: Colors.white.withValues(alpha: 0.75),
                     ),
                   ),
+                  PaceLine(controller: widget.controller),
                   const SizedBox(height: 36),
                   AnimatedBuilder(
                     animation: _dance,

@@ -129,6 +129,7 @@ async fn postgres_persists_and_restores_a_game() {
             state: engine.state().clone(),
             round_result: None,
             game_result: None,
+            pace: Vec::new(),
         })
         .await
         .unwrap();

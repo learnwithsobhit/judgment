@@ -87,7 +87,7 @@ impl Client {
             };
             let server: ServerMessage = serde_json::from_str(&text).unwrap();
             match server {
-                ServerMessage::StateSnapshot { view } => {
+                ServerMessage::StateSnapshot { view, .. } => {
                     self.last = Some(view);
                     return;
                 }
@@ -197,7 +197,7 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
                     tokio::time::timeout(Duration::from_millis(50), ws.next()).await
                 {
                     let msg: ServerMessage = serde_json::from_str(&text).unwrap();
-                    if let ServerMessage::StateSnapshot { view } = msg {
+                    if let ServerMessage::StateSnapshot { view, .. } = msg {
                         client.last = Some(view);
                     } else if let ServerMessage::TokenRotated { token } = msg {
                         client.token = token;
@@ -242,7 +242,7 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
                 {
                     let msg: ServerMessage = serde_json::from_str(&text).unwrap();
                     match msg {
-                        ServerMessage::StateSnapshot { view } => client.last = Some(view),
+                        ServerMessage::StateSnapshot { view, .. } => client.last = Some(view),
                         ServerMessage::TokenRotated { token } => client.token = token,
                         _ => {}
                     }

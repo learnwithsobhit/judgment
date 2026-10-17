@@ -84,6 +84,9 @@ pub struct InternalGameState {
     pub trump_card: Option<Card>,
     pub current_round: Option<RoundState>,
     pub score_table: ScoreTable,
+    /// Thinking time charged to each seat, in milliseconds.
+    #[serde(default)]
+    pub thinking_ms: HashMap<PlayerId, u64>,
 }
 
 impl InternalGameState {

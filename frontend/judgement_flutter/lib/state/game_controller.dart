@@ -81,6 +81,18 @@ class GameController extends ChangeNotifier {
   static const _keepAliveInterval = Duration(seconds: 10);
 
   PlayerGameView? view;
+
+  /// Server start time so every seat shows the same game clock.
+  DateTime? gameStartedAt;
+
+  /// Frozen when the game finishes so the clock stops at the final duration.
+  DateTime? gameFinishedAt;
+
+  /// Completed thinking time from the server. Same list on every seat.
+  List<PlayerPace> playerPace = const [];
+
+  /// Seat whose turn clock is still running.
+  PaceOpen? paceOpen;
   GameConnectionState connection = GameConnectionState.connecting;
 
   static const reconnectChromeDelay = Duration(milliseconds: 1500);
@@ -198,6 +210,66 @@ class GameController extends ChangeNotifier {
 
   bool get isPaused =>
       pauseUntil != null && DateTime.now().isBefore(pauseUntil!);
+
+  /// Fastest seat by thinking time. Null until two players have a time.
+  ({String playerId, Duration time})? get fastestPlayer {
+    final ranked = _rankedPace();
+    if (ranked.length < 2) return null;
+    return ranked.first;
+  }
+
+  /// Slowest seat by thinking time. Null until two players have a time.
+  ({String playerId, Duration time})? get slowestPlayer {
+    final ranked = _rankedPace();
+    if (ranked.length < 2) return null;
+    return ranked.last;
+  }
+
+  List<({String playerId, Duration time})> _rankedPace() {
+    final open = paceOpen;
+    final rows = <({String playerId, Duration time})>[];
+    final seen = <String>{};
+    for (final entry in playerPace) {
+      seen.add(entry.playerId);
+      final ms = entry.elapsedMs + _openExtraMs(entry.playerId);
+      if (entry.decisions == 0 && (open == null || open.playerId != entry.playerId)) {
+        continue;
+      }
+      if (ms <= 0 && entry.decisions == 0) continue;
+      rows.add((
+        playerId: entry.playerId,
+        time: Duration(milliseconds: ms < 0 ? 0 : ms),
+      ));
+    }
+    if (open != null && !seen.contains(open.playerId)) {
+      final ms = _openExtraMs(open.playerId);
+      if (ms > 0) {
+        rows.add((playerId: open.playerId, time: Duration(milliseconds: ms)));
+      }
+    }
+    rows.sort((a, b) {
+      final byTime = a.time.compareTo(b.time);
+      if (byTime != 0) return byTime;
+      return a.playerId.compareTo(b.playerId);
+    });
+    return rows;
+  }
+
+  int _openExtraMs(String playerId) {
+    final open = paceOpen;
+    if (open == null || open.playerId != playerId) return 0;
+    final extra = DateTime.now().difference(open.openedAt).inMilliseconds;
+    return extra < 0 ? 0 : extra;
+  }
+
+  /// Elapsed time since the game started. Null until the first snapshot.
+  Duration? get gameElapsed {
+    final start = gameStartedAt;
+    if (start == null) return null;
+    final end = gameFinishedAt ?? DateTime.now();
+    final elapsed = end.difference(start);
+    return elapsed.isNegative ? Duration.zero : elapsed;
+  }
 
   bool get isMyTurn =>
       view != null &&
@@ -356,7 +428,13 @@ class GameController extends ChangeNotifier {
 
   void _handleMessage(ServerMessage message) {
     switch (message) {
-      case StateSnapshot(:final view):
+      case StateSnapshot(:final view, :final startedAt, :final pace, :final paceOpen):
+        gameStartedAt = startedAt ?? gameStartedAt ?? DateTime.now();
+        if (view.isFinished && gameFinishedAt == null) {
+          gameFinishedAt = DateTime.now();
+        }
+        playerPace = pace;
+        this.paceOpen = view.isFinished ? null : paceOpen;
         _applySnapshot(view);
       case CommandAccepted(:final actionId):
         if (pendingActionId == actionId) {

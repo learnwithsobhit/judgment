@@ -7,11 +7,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use chrono::{DateTime, Utc};
+
 use judgement_domain::{ActionId, ConnectionStatus, GameError, GameId, PlayerId};
 use judgement_engine::{GameEngine, GameEvent, GamePhase};
-use judgement_persistence::{GameStore, PersistError};
+use judgement_persistence::{GameStore, PersistError, StoredPlayerPace};
 use judgement_protocol::{
-    ClientCommand, ClientEnvelope, RejectReason, ServerMessage, TimerEvent, PROTOCOL_VERSION,
+    ClientCommand, ClientEnvelope, PaceOpen, PlayerPace, RejectReason, ServerMessage, TimerEvent,
+    PROTOCOL_VERSION,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -126,6 +129,10 @@ pub struct SpawnActor {
     pub host_player_id: PlayerId,
     pub metrics: Arc<Metrics>,
     pub room_code: String,
+    /// Wall-clock start, shared so every client shows the same game clock.
+    pub started_at: DateTime<Utc>,
+    /// Thinking time already charged, restored after a restart.
+    pub pace: Vec<StoredPlayerPace>,
     /// Sync `Room.host_session` when in-game host migrates.
     pub on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     /// Remove actor + return room to Lobby after terminal abort.
@@ -154,6 +161,18 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         store: config.store,
         host_player_id: config.host_player_id,
         room_code: config.room_code,
+        started_at: config.started_at,
+        pace_ms: config
+            .pace
+            .iter()
+            .map(|entry| (entry.player_id, entry.elapsed_ms))
+            .collect(),
+        pace_decisions: config
+            .pace
+            .iter()
+            .map(|entry| (entry.player_id, entry.decisions))
+            .collect(),
+        pace_open: None,
         grace_ids: HashMap::new(),
         vacancy_ids: HashMap::new(),
         pause_announced: HashSet::new(),
@@ -170,6 +189,12 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
     };
     tokio::spawn(actor.run());
     tx
+}
+
+struct PaceCheckpoint {
+    pace_ms: HashMap<PlayerId, u64>,
+    pace_decisions: HashMap<PlayerId, u32>,
+    pace_open: Option<(PlayerId, DateTime<Utc>)>,
 }
 
 struct GameActor {
@@ -192,6 +217,12 @@ struct GameActor {
     store: Option<Arc<dyn GameStore>>,
     host_player_id: PlayerId,
     room_code: String,
+    started_at: DateTime<Utc>,
+    /// Completed thinking time, milliseconds, per player.
+    pace_ms: HashMap<PlayerId, u64>,
+    pace_decisions: HashMap<PlayerId, u32>,
+    /// Seat whose turn clock is running, and when it opened.
+    pace_open: Option<(PlayerId, DateTime<Utc>)>,
     /// player → active grace id (stale-id guard, same pattern as turn deadlines).
     grace_ids: HashMap<PlayerId, u64>,
     /// player → active vacancy id.
@@ -215,6 +246,7 @@ struct GameActor {
 
 impl GameActor {
     async fn run(mut self) {
+        self.sync_pace_clock();
         self.schedule_deadline();
         self.schedule_round_reveal_advance();
 
@@ -448,7 +480,11 @@ impl GameActor {
         self.grace_seq += 1;
         let grace_id = self.grace_seq;
         self.grace_ids.insert(player_id, grace_id);
+        let was_paused = self.paused;
         self.recompute_pause();
+        if !was_paused && self.paused {
+            self.settle_open_pace(false);
+        }
 
         // Cancel turn / round-reveal timers while paused.
         self.deadline_seq += 1;
@@ -544,7 +580,11 @@ impl GameActor {
         self.vacancy_seq += 1;
         let vacancy_id = self.vacancy_seq;
         self.vacancy_ids.insert(player_id, vacancy_id);
+        let was_paused = self.paused;
         self.recompute_pause();
+        if !was_paused && self.paused {
+            self.settle_open_pace(false);
+        }
         self.deadline_seq += 1;
         self.round_advance_seq += 1;
         let name = self.nickname_of(player_id);
@@ -688,6 +728,7 @@ impl GameActor {
         };
         self.ended = true;
         self.paused = true;
+        self.settle_open_pace(false);
         self.grace_ids.clear();
         self.vacancy_ids.clear();
         self.conn_gens.clear();
@@ -720,6 +761,7 @@ impl GameActor {
     }
 
     fn resume_timers(&mut self) {
+        self.sync_pace_clock();
         self.schedule_deadline();
         self.schedule_round_reveal_advance();
     }
@@ -979,10 +1021,13 @@ impl GameActor {
 
         match result {
             Ok(events) => {
+                let pace_checkpoint = self.pace_checkpoint();
+                self.settle_open_pace(true);
                 if !self
                     .persist_with_uncertainty(action_id, &events, previous)
                     .await
                 {
+                    self.restore_pace(pace_checkpoint);
                     self.reject(player_id, Some(action_id), RejectReason::PersistUnavailable);
                     return;
                 }
@@ -1295,6 +1340,7 @@ impl GameActor {
             events,
             self.engine.state(),
             &self.metrics,
+            &self.stored_pace(),
         )
         .await
         {
@@ -1332,6 +1378,7 @@ impl GameActor {
         events: &[GameEvent],
         state: &judgement_engine::InternalGameState,
         metrics: &Metrics,
+        pace: &[StoredPlayerPace],
     ) -> bool {
         let Some(store) = store.clone() else {
             if events
@@ -1344,7 +1391,7 @@ impl GameActor {
             }
             return true;
         };
-        let commit = command_commit_from(game_id, action_id, events, state);
+        let commit = command_commit_from(game_id, action_id, events, state, pace);
         let started = std::time::Instant::now();
         for attempt in 0..2u8 {
             let result = tokio::time::timeout(PERSIST_TIMEOUT, store.commit_command(&commit)).await;
@@ -1396,6 +1443,109 @@ impl GameActor {
             }
         }
         false
+    }
+
+    fn pace_checkpoint(&self) -> PaceCheckpoint {
+        PaceCheckpoint {
+            pace_ms: self.pace_ms.clone(),
+            pace_decisions: self.pace_decisions.clone(),
+            pace_open: self.pace_open,
+        }
+    }
+
+    fn restore_pace(&mut self, checkpoint: PaceCheckpoint) {
+        self.pace_ms = checkpoint.pace_ms;
+        self.pace_decisions = checkpoint.pace_decisions;
+        self.pace_open = checkpoint.pace_open;
+    }
+
+    /// Add the open turn's wall time to that player. A completed bid or card
+    /// counts as one decision. A pause keeps the time and waits to count it.
+    fn settle_open_pace(&mut self, count_decision: bool) {
+        let Some((player, opened)) = self.pace_open.take() else {
+            return;
+        };
+        let elapsed = Utc::now()
+            .signed_duration_since(opened)
+            .num_milliseconds()
+            .max(0) as u64;
+        *self.pace_ms.entry(player).or_insert(0) += elapsed;
+        if count_decision {
+            *self.pace_decisions.entry(player).or_insert(0) += 1;
+        }
+    }
+
+    /// Open a clock for the seat that must bid or play. Pause time stays out.
+    fn sync_pace_clock(&mut self) {
+        if self.paused || self.ended || self.engine.is_finished() {
+            if self.pace_open.is_some() {
+                self.settle_open_pace(false);
+            }
+            return;
+        }
+        let phase = self.engine.phase();
+        if !matches!(phase, GamePhase::Bidding | GamePhase::Playing) {
+            if self.pace_open.is_some() {
+                self.settle_open_pace(false);
+            }
+            return;
+        }
+        let Some(turn) = self
+            .engine
+            .state()
+            .current_round
+            .as_ref()
+            .map(|round| round.current_turn)
+        else {
+            if self.pace_open.is_some() {
+                self.settle_open_pace(false);
+            }
+            return;
+        };
+        match self.pace_open {
+            Some((player, _)) if player == turn => {}
+            Some(_) => {
+                self.settle_open_pace(false);
+                self.pace_open = Some((turn, Utc::now()));
+            }
+            None => self.pace_open = Some((turn, Utc::now())),
+        }
+    }
+
+    fn stored_pace(&self) -> Vec<StoredPlayerPace> {
+        let mut ids: Vec<PlayerId> = self
+            .pace_ms
+            .keys()
+            .chain(self.pace_decisions.keys())
+            .copied()
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids.into_iter()
+            .filter_map(|player_id| {
+                let elapsed_ms = self.pace_ms.get(&player_id).copied().unwrap_or(0);
+                let decisions = self.pace_decisions.get(&player_id).copied().unwrap_or(0);
+                if elapsed_ms == 0 && decisions == 0 {
+                    return None;
+                }
+                Some(StoredPlayerPace {
+                    player_id,
+                    elapsed_ms,
+                    decisions,
+                })
+            })
+            .collect()
+    }
+
+    fn wire_pace(&self) -> Vec<PlayerPace> {
+        self.stored_pace()
+            .into_iter()
+            .map(|entry| PlayerPace {
+                player_id: entry.player_id,
+                elapsed_ms: entry.elapsed_ms,
+                decisions: entry.decisions,
+            })
+            .collect()
     }
 
     fn schedule_deadline(&mut self) {
@@ -1461,10 +1611,13 @@ impl GameActor {
         match result {
             Ok(events) => {
                 let action_id = ActionId::new();
+                let pace_checkpoint = self.pace_checkpoint();
+                self.settle_open_pace(true);
                 if !self
                     .persist_with_uncertainty(action_id, &events, previous)
                     .await
                 {
+                    self.restore_pace(pace_checkpoint);
                     return;
                 }
                 self.processed.insert(action_id, self.engine.version());
@@ -1477,6 +1630,7 @@ impl GameActor {
     }
 
     fn after_engine_events(&mut self, events: &[GameEvent]) {
+        self.sync_pace_clock();
         self.schedule_deadline();
         if events
             .iter()
@@ -1536,6 +1690,8 @@ impl GameActor {
             return;
         }
 
+        self.settle_open_pace(false);
+        self.engine.set_thinking_times(self.pace_ms.clone());
         let previous = self.engine.state().clone();
         let events = match self.engine.advance_from_round_scoring() {
             Ok(events) => events,
@@ -1592,8 +1748,20 @@ impl GameActor {
     }
 
     fn send_snapshot(&mut self, player_id: PlayerId) {
+        self.sync_pace_clock();
         if let Ok(view) = self.engine.view_for(player_id) {
-            self.send_to(player_id, ServerMessage::StateSnapshot { view });
+            self.send_to(
+                player_id,
+                ServerMessage::StateSnapshot {
+                    view,
+                    started_at: Some(self.started_at),
+                    pace: self.wire_pace(),
+                    pace_open: self.pace_open.map(|(player_id, opened_at)| PaceOpen {
+                        player_id,
+                        opened_at,
+                    }),
+                },
+            );
         }
     }
 

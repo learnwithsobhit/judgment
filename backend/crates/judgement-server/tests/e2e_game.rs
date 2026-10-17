@@ -173,7 +173,7 @@ impl Harness {
                 match tokio::time::timeout(Duration::from_millis(30), ws.next()).await {
                     Ok(Some(Ok(Message::Text(text)))) => {
                         let message: ServerMessage = serde_json::from_str(text.as_str()).unwrap();
-                        if let ServerMessage::StateSnapshot { view } = message {
+                        if let ServerMessage::StateSnapshot { view, .. } = message {
                             client.view = Some(view);
                         } else if let ServerMessage::TokenRotated { token } = message {
                             client.token = token;
@@ -216,7 +216,7 @@ impl Harness {
                     tokio::time::timeout(Duration::from_millis(20), ws.next()).await
                 {
                     let message: ServerMessage = serde_json::from_str(text.as_str()).unwrap();
-                    if let ServerMessage::StateSnapshot { view } = message {
+                    if let ServerMessage::StateSnapshot { view, .. } = message {
                         client.view = Some(view);
                     } else if let ServerMessage::TokenRotated { token } = message {
                         client.token = token;
@@ -249,7 +249,7 @@ impl Harness {
             let Message::Text(text) = frame else { continue };
             let message: ServerMessage = serde_json::from_str(text.as_str()).unwrap();
             let is_snapshot = matches!(message, ServerMessage::StateSnapshot { .. });
-            if let ServerMessage::StateSnapshot { view } = &message {
+            if let ServerMessage::StateSnapshot { view, .. } = &message {
                 client.view = Some(view.clone());
             }
             seen.push(message);
@@ -480,7 +480,7 @@ async fn stale_clients_are_rejected_and_resynchronised() {
                 assert!(!retryable);
                 rejected = true;
             }
-            ServerMessage::StateSnapshot { view } if rejected => {
+            ServerMessage::StateSnapshot { view, .. } if rejected => {
                 assert_eq!(view.state_version, real_version, "resync snapshot is current");
                 return;
             }

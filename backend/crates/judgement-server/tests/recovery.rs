@@ -95,7 +95,7 @@ impl Client {
             if let Message::Text(text) = msg {
                 let server: ServerMessage = serde_json::from_str(&text).unwrap();
                 match server {
-                    ServerMessage::StateSnapshot { view } => {
+                    ServerMessage::StateSnapshot { view, .. } => {
                         self.last = Some(view.clone());
                         return view;
                     }
@@ -131,7 +131,7 @@ impl Client {
             };
             let server: ServerMessage = serde_json::from_str(&text).unwrap();
             match server {
-                ServerMessage::StateSnapshot { view } => {
+                ServerMessage::StateSnapshot { view, .. } => {
                     self.last = Some(view.clone());
                     if view.state_version > before {
                         return;

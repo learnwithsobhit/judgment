@@ -7,7 +7,7 @@ use judgement_domain::{ActionId, GameId, GameRules, RoomId};
 use judgement_engine::{GameEvent, GameEngine, InternalGameState};
 use judgement_persistence::{
     CommandCommit, GameResultRecord, GameStore, NewGame, NewGamePlayer, RoundResultRecord,
-    StoredRoom, StoredRoomPlayer, StoredSession,
+    StoredPlayerPace, StoredRoom, StoredRoomPlayer, StoredSession,
 };
 
 use crate::state::{Room, RoomStatus, Session};
@@ -87,6 +87,7 @@ pub fn command_commit_from(
     action_id: ActionId,
     events: &[GameEvent],
     state: &InternalGameState,
+    pace: &[StoredPlayerPace],
 ) -> CommandCommit {
     let round_result = events.iter().find_map(|event| match event {
         GameEvent::RoundCompleted { round_index } => {
@@ -118,5 +119,6 @@ pub fn command_commit_from(
         state: state.clone(),
         round_result,
         game_result,
+        pace: pace.to_vec(),
     }
 }

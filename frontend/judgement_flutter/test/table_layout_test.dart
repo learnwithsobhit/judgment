@@ -91,6 +91,17 @@ Future<GameController> _pump(
     names: names,
     trickCount: trickCount,
   );
+  controller.gameStartedAt = DateTime.now().subtract(
+    const Duration(minutes: 4, seconds: 12),
+  );
+  controller.playerPace = [
+    PlayerPace(playerId: _me, elapsedMs: 8000, decisions: 2),
+    PlayerPace(
+      playerId: '00000000-0000-0000-0000-000000000002',
+      elapsedMs: 21000,
+      decisions: 2,
+    ),
+  ];
   await tester.pumpWidget(
     MaterialApp(
       theme: ThemeData(
@@ -172,6 +183,11 @@ void main() {
         }
       }
       expect(find.text('dealer · bid 2 · won 1'), findsOneWidget);
+    expect(find.text('04:12'), findsOneWidget);
+    expect(
+      find.text('Fastest Ankit S 00:08 · Slowest Left 00:21'),
+      findsOneWidget,
+    );
       expect(find.text('Ankit S'), findsWidgets);
       expect(find.text('Ankit Sunil Chaturvedi'), findsNothing);
       expect(_seatName('Left'), findsOneWidget);

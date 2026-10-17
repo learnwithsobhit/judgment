@@ -224,13 +224,15 @@ class RankedPlayer {
   final int totalScore;
   final int exactBidRounds;
   final int totalTricksMissed;
+  final int thinkingMs;
 
   RankedPlayer.fromJson(Map<String, dynamic> json)
       : playerId = json['player_id'] as String,
         rank = json['rank'] as int,
         totalScore = json['total_score'] as int,
         exactBidRounds = json['exact_bid_rounds'] as int,
-        totalTricksMissed = json['total_tricks_missed'] as int;
+        totalTricksMissed = json['total_tricks_missed'] as int,
+        thinkingMs = json['thinking_ms'] as int? ?? 0;
 }
 
 class PlayerGameView {
@@ -346,6 +348,15 @@ sealed class ServerMessage {
       case 'state_snapshot':
         return StateSnapshot(
           view: PlayerGameView.fromJson(json['view'] as Map<String, dynamic>),
+          startedAt: json['started_at'] == null
+              ? null
+              : DateTime.parse(json['started_at'] as String).toLocal(),
+          pace: (json['pace'] as List<dynamic>? ?? const [])
+              .map((entry) => PlayerPace.fromJson(entry as Map<String, dynamic>))
+              .toList(),
+          paceOpen: json['pace_open'] == null
+              ? null
+              : PaceOpen.fromJson(json['pace_open'] as Map<String, dynamic>),
         );
       case 'player_connected':
         return PlayerConnected(playerId: json['player_id'] as String);
@@ -436,9 +447,49 @@ class CommandRejected extends ServerMessage {
   });
 }
 
+class PlayerPace {
+  final String playerId;
+  final int elapsedMs;
+  final int decisions;
+  PlayerPace({
+    required this.playerId,
+    required this.elapsedMs,
+    required this.decisions,
+  });
+
+  factory PlayerPace.fromJson(Map<String, dynamic> json) {
+    return PlayerPace(
+      playerId: json['player_id'] as String,
+      elapsedMs: json['elapsed_ms'] as int,
+      decisions: json['decisions'] as int,
+    );
+  }
+}
+
+class PaceOpen {
+  final String playerId;
+  final DateTime openedAt;
+  PaceOpen({required this.playerId, required this.openedAt});
+
+  factory PaceOpen.fromJson(Map<String, dynamic> json) {
+    return PaceOpen(
+      playerId: json['player_id'] as String,
+      openedAt: DateTime.parse(json['opened_at'] as String).toLocal(),
+    );
+  }
+}
+
 class StateSnapshot extends ServerMessage {
   final PlayerGameView view;
-  StateSnapshot({required this.view});
+  final DateTime? startedAt;
+  final List<PlayerPace> pace;
+  final PaceOpen? paceOpen;
+  StateSnapshot({
+    required this.view,
+    this.startedAt,
+    this.pace = const [],
+    this.paceOpen,
+  });
 }
 
 class PlayerConnected extends ServerMessage {

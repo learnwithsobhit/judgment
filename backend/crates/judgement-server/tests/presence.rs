@@ -87,7 +87,7 @@ impl Client {
             };
             let server: ServerMessage = serde_json::from_str(&text).unwrap();
             match server {
-                ServerMessage::StateSnapshot { view } => {
+                ServerMessage::StateSnapshot { view, .. } => {
                     self.last = Some(view);
                     return;
                 }
@@ -198,7 +198,7 @@ async fn leave_marks_seat_vacant_then_claim_restores() {
                     assert_eq!(room_code, code);
                     saw_vacant = true;
                 }
-                ServerMessage::StateSnapshot { view } => {
+                ServerMessage::StateSnapshot { view, .. } => {
                     clients[1].last = Some(view.clone());
                     if view.opponents.iter().any(|o| {
                         o.player_id == vacant_player
@@ -246,7 +246,7 @@ async fn leave_marks_seat_vacant_then_claim_restores() {
         {
             let msg: ServerMessage = serde_json::from_str(&text).unwrap();
             match msg {
-                ServerMessage::StateSnapshot { view } => {
+                ServerMessage::StateSnapshot { view, .. } => {
                     let ok = view.opponents.iter().any(|o| {
                         o.player_id == vacant_player && o.nickname == "E"
                     });
@@ -401,7 +401,7 @@ async fn same_session_reclaim_via_ws_after_vacant() {
             tokio::time::timeout(Duration::from_millis(100), ws.next()).await
         {
             let msg: ServerMessage = serde_json::from_str(&text).unwrap();
-            if let ServerMessage::StateSnapshot { view } = msg {
+            if let ServerMessage::StateSnapshot { view, .. } = msg {
                 let vacant = view.opponents.iter().any(|o| {
                     o.player_id == vacant_player
                         && o.connection_status == ConnectionStatus::Vacant
@@ -756,7 +756,7 @@ async fn silent_ws_blip_reconnects_without_vacant_or_host_change() {
                 ServerMessage::SeatVacant { .. } => saw_vacant = true,
                 ServerMessage::HostChanged { .. } => saw_host_change = true,
                 ServerMessage::GamePaused { .. } => saw_pause = true,
-                ServerMessage::StateSnapshot { view } => {
+                ServerMessage::StateSnapshot { view, .. } => {
                     let host_opp = view.opponents.iter().find(|o| o.player_id == host_id);
                     if host_opp.is_none() {
                         // Viewer is not host; host is in opponents when we are client 1.
@@ -808,7 +808,7 @@ async fn replacing_ws_then_closing_old_socket_does_not_vacant_or_pause() {
             tokio::time::timeout(Duration::from_millis(80), ws.next()).await
         {
             let msg: ServerMessage = serde_json::from_str(&text).unwrap();
-            if let ServerMessage::StateSnapshot { view } = msg {
+            if let ServerMessage::StateSnapshot { view, .. } = msg {
                 if let Some(opp) = view.opponents.iter().find(|o| o.player_id == host_id) {
                     host_connected = opp.connection_status == ConnectionStatus::Connected;
                 }
@@ -839,7 +839,7 @@ async fn replacing_ws_then_closing_old_socket_does_not_vacant_or_pause() {
                 ServerMessage::PlayerDisconnected { player_id } if player_id == host_id => {
                     saw_host_disconnected = true;
                 }
-                ServerMessage::StateSnapshot { view } => {
+                ServerMessage::StateSnapshot { view, .. } => {
                     if let Some(opp) = view.opponents.iter().find(|o| o.player_id == host_id) {
                         host_connected = opp.connection_status == ConnectionStatus::Connected;
                     }

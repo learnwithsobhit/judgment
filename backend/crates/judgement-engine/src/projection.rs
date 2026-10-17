@@ -198,8 +198,11 @@ pub(crate) fn project_for(
         })
     });
 
-    let final_ranking = (state.phase == GamePhase::Finished)
-        .then(|| state.score_table.final_ranking(&state.player_ids()));
+    let final_ranking = (state.phase == GamePhase::Finished).then(|| {
+        state
+            .score_table
+            .final_ranking_with_time(&state.player_ids(), &state.thinking_ms)
+    });
 
     PlayerGameView {
         game_id: state.game_id,

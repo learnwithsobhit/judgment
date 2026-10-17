@@ -70,6 +70,7 @@ impl GameEngine {
             trump_card: None,
             current_round: None,
             score_table: ScoreTable::default(),
+            thinking_ms: HashMap::new(),
         };
         Ok(Self { state, shuffler })
     }
@@ -82,6 +83,12 @@ impl GameEngine {
     /// persistence commit — PLAN.md §9.2).
     pub fn replace_state(&mut self, state: InternalGameState) {
         self.state = state;
+    }
+
+    /// Record thinking time before the game is ranked. Less time breaks a
+    /// tie that score, exact rounds, and tricks missed could not.
+    pub fn set_thinking_times(&mut self, times: HashMap<PlayerId, u64>) {
+        self.state.thinking_ms = times;
     }
 
     /// Rebuild an engine from a persisted snapshot (PLAN.md §14.2 recovery).
@@ -541,7 +548,10 @@ impl GameEngine {
             events.extend(self.begin_round(round_index + 1));
         } else {
             self.state.phase = GamePhase::GameScoring;
-            let ranking = self.state.score_table.final_ranking(&self.state.player_ids());
+            let ranking = self.state.score_table.final_ranking_with_time(
+                &self.state.player_ids(),
+                &self.state.thinking_ms,
+            );
             self.state.phase = GamePhase::Finished;
             events.push(GameEvent::GameCompleted { ranking });
         }

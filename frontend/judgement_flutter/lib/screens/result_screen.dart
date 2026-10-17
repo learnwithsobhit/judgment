@@ -5,6 +5,7 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/social_share.dart';
+import '../widgets/pace_line.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/round_score_matrix.dart';
 import '../widgets/share_sheet.dart';
@@ -71,6 +72,7 @@ class ResultScreen extends StatelessWidget {
                       controller: controller,
                       ranking: ranking,
                     ),
+                    PaceLine(controller: controller),
                   ],
                   if (history.isNotEmpty) ...[
                     const SizedBox(height: 28),
@@ -387,6 +389,15 @@ class _PodiumSeat extends StatelessWidget {
               color: _medal,
             ),
           ),
+          const SizedBox(height: 2),
+          Text(
+            formatPace(Duration(milliseconds: ranked.thinkingMs)),
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.white.withValues(alpha: 0.7),
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
         ],
       ),
     );
@@ -428,9 +439,16 @@ class _StandingsTable extends StatelessWidget {
             ),
             DataColumn(
               label: Tooltip(
-                message:
-                    'Total tricks off from the bid (second tie-break)',
+                message: 'Total tricks off from the bid (second tie-break)',
                 child: Text('Tricks missed'),
+              ),
+              numeric: true,
+            ),
+            DataColumn(
+              label: Tooltip(
+                message:
+                    'Time spent on bids and cards. Less time ranks higher when the score is tied',
+                child: Text('Time'),
               ),
               numeric: true,
             ),
@@ -476,6 +494,12 @@ class _StandingsTable extends StatelessWidget {
                   )),
                   DataCell(Text('${ranked.exactBidRounds}')),
                   DataCell(Text('${ranked.totalTricksMissed}')),
+                  DataCell(Text(
+                    formatPace(Duration(milliseconds: ranked.thinkingMs)),
+                    style: const TextStyle(
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  )),
                 ],
               ),
           ],

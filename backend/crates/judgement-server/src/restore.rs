@@ -160,6 +160,8 @@ fn spawn_restored_actor(
         host_player_id,
         metrics: state.metrics.clone(),
         room_code,
+        started_at: game.created_at,
+        pace: game.pace,
         on_host_changed: Some(make_host_changed_hook(state.clone(), game.room_id)),
         on_aborted: Some(make_aborted_hook(state.clone(), game.room_id)),
         on_finished: Some(make_finished_hook(state.clone())),

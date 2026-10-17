@@ -89,6 +89,16 @@ pub struct CommandCommit {
     pub state: InternalGameState,
     pub round_result: Option<RoundResultRecord>,
     pub game_result: Option<GameResultRecord>,
+    /// Thinking time charged so far. Written with the command so a restart
+    /// keeps the same fastest and slowest players.
+    pub pace: Vec<StoredPlayerPace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredPlayerPace {
+    pub player_id: PlayerId,
+    pub elapsed_ms: u64,
+    pub decisions: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +121,8 @@ pub struct RestoredGame {
     pub state: InternalGameState,
     pub players: Vec<NewGamePlayer>,
     pub processed_actions: Vec<(ActionId, u64)>,
+    pub created_at: DateTime<Utc>,
+    pub pace: Vec<StoredPlayerPace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

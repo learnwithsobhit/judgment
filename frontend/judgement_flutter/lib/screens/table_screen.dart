@@ -19,6 +19,7 @@ import '../widgets/bid_panel.dart';
 import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
 import '../widgets/emote_bar.dart';
+import '../widgets/pace_line.dart';
 import '../widgets/exit_confirm_dialogs.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/playing_card.dart';
@@ -56,7 +57,10 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     _syncExitGuard();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
-      if (controller.turnDeadline != null ||
+      final clockDue = controller.gameStartedAt != null &&
+          controller.gameFinishedAt == null;
+      if (clockDue ||
+          controller.turnDeadline != null ||
           controller.pauseUntil != null ||
           controller.connection != controller.displayedConnection) {
         setState(() {});
@@ -618,8 +622,16 @@ class _PauseBanner extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Top bar: round, trump, timer, connection
+// Top bar: round, game clock, trump, turn timer, connection
 // ---------------------------------------------------------------------------
+
+String _formatGameElapsed(Duration elapsed) {
+  final hours = elapsed.inHours;
+  final minutes = elapsed.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final seconds = elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
+  if (hours > 0) return '$hours:$minutes:$seconds';
+  return '$minutes:$seconds';
+}
 
 class _TopBar extends StatelessWidget {
   final GameController controller;
@@ -657,7 +669,20 @@ class _TopBar extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-              const SizedBox(width: 12),
+              if (controller.gameElapsed != null) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.schedule, size: 16, color: Colors.white70),
+                const SizedBox(width: 4),
+                Text(
+                  _formatGameElapsed(controller.gameElapsed!),
+                  style: const TextStyle(
+                    fontFeatures: [FontFeature.tabularFigures()],
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const SizedBox(width: 8),
               if (view.trump != null) _trumpChip(view),
               const Spacer(),
               if (remainingSeconds != null && !view.isFinished) ...[
@@ -708,6 +733,7 @@ class _TopBar extends StatelessWidget {
                 ),
             ],
           ),
+          PaceLine(controller: controller),
           if (remaining != null && !view.isFinished)
             Padding(
               padding: const EdgeInsets.only(top: 4),

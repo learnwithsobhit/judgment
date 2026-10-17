@@ -4,6 +4,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
+use chrono::Utc;
+
 use async_trait::async_trait;
 use judgement_domain::{ActionId, EventId, GameId, PlayerId, RoomId, SessionId};
 use judgement_engine::GameEvent;
@@ -45,12 +47,14 @@ struct StoredGame {
     round_results: Vec<RoundResultRecord>,
     game_result: Option<GameResultRecord>,
     status: String,
+    pace: Vec<StoredPlayerPace>,
 }
 
 struct NewGameMeta {
     room_id: RoomId,
     rules: judgement_domain::GameRules,
     seed: Option<u64>,
+    created_at: chrono::DateTime<Utc>,
 }
 
 #[allow(dead_code)]
@@ -127,6 +131,7 @@ impl GameStore for MemoryStore {
                     room_id: record.room_id,
                     rules: record.rules.clone(),
                     seed: record.seed,
+                    created_at: Utc::now(),
                 },
                 players: record.players.clone(),
                 events,
@@ -134,6 +139,7 @@ impl GameStore for MemoryStore {
                 round_results: Vec::new(),
                 game_result: None,
                 status: "active".into(),
+                pace: Vec::new(),
             },
         );
 
@@ -179,6 +185,7 @@ impl GameStore for MemoryStore {
                 game.game_result = commit.game_result.clone();
                 game.status = "finished".into();
             }
+            game.pace = commit.pace.clone();
         }
 
         if stats_enabled() {
@@ -226,6 +233,8 @@ impl GameStore for MemoryStore {
                 state,
                 players: game.players.clone(),
                 processed_actions,
+                created_at: game.record.created_at,
+                pace: game.pace.clone(),
             });
         }
         Ok(out)
@@ -256,6 +265,8 @@ impl GameStore for MemoryStore {
             state,
             players: game.players.clone(),
             processed_actions: dedup_from_events(&game.events),
+            created_at: game.record.created_at,
+            pace: game.pace.clone(),
         }))
     }
 
