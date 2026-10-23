@@ -19,6 +19,7 @@ import '../widgets/player_avatar.dart';
 import '../widgets/profile_sheet.dart';
 import '../widgets/trump_cycle_editor.dart';
 import 'lobby_screen.dart';
+import 'setup_room_screen.dart';
 import 'schedule_event_screen.dart';
 import 'table_screen.dart';
 
@@ -102,11 +103,12 @@ class _LandingScreenState extends State<LandingScreen> {
   int _timerSeconds = 30;
 
   /// null = revealed-card; otherwise a 4-suit cycle that repeats each round.
-  List<String>? _trumpCycle;
+  List<String>? _trumpCycle = List<String>.from(defaultTrumpCycle);
   bool _manualSchedule = false;
 
   /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
   bool _dealerTotalRestriction = false;
+  bool _setupOnly = false;
   List<ManualRoundStep> _manualSteps = RoundSchedule.defaultManualForPlayers(
     6,
   ).steps!;
@@ -185,7 +187,7 @@ class _LandingScreenState extends State<LandingScreen> {
       await TableMediaSession.prepareBeforeNetwork();
 
       late final RoomView room;
-      late final String playerId;
+      late final String? playerId;
       late final String sessionNickname;
       String? capacityHint;
       if (_joining) {
@@ -213,6 +215,7 @@ class _LandingScreenState extends State<LandingScreen> {
           trumpCycle: _trumpCycle,
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
+          openStart: _setupOnly,
         );
         room = created.room;
         playerId = created.playerId;
@@ -230,6 +233,7 @@ class _LandingScreenState extends State<LandingScreen> {
           trumpCycle: _trumpCycle,
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
+          openStart: _setupOnly,
         );
         room = created.room;
         playerId = created.playerId;
@@ -249,20 +253,32 @@ class _LandingScreenState extends State<LandingScreen> {
           ),
         );
       }
+      final seatedId = playerId;
+      if (seatedId == null) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SetupRoomScreen(
+              code: room.code,
+              seats: room.maxPlayers,
+            ),
+          ),
+        );
+        return;
+      }
       final gameId = room.gameId;
       if (room.phase == 'in_game' && gameId != null) {
         final controller =
             GameController(
                 api: api,
                 gameId: gameId,
-                myPlayerId: playerId,
+                myPlayerId: seatedId,
                 myNickname: sessionNickname,
               )
               ..roomCode = room.code
               ..countsForProfile =
                   account.isSignedIn && api.token == account.token
               ..amHost = room.seats.any(
-                (s) => s.playerId == playerId && s.isHost,
+                (s) => s.playerId == seatedId && s.isHost,
               );
         controller.connect();
         Navigator.of(context).push(
@@ -277,7 +293,7 @@ class _LandingScreenState extends State<LandingScreen> {
               api: api,
               nickname: sessionNickname,
               initialRoom: room,
-              myPlayerId: playerId,
+              myPlayerId: seatedId,
             ),
           ),
         );
@@ -379,6 +395,16 @@ class _LandingScreenState extends State<LandingScreen> {
           selected: {_maxPlayers},
           onSelectionChanged: (selection) => _setMaxPlayers(selection.first),
         ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text("I'm not playing"),
+          subtitle: Text(
+            'Create the room for $_maxPlayers other people. '
+            'The first person who joins becomes host and can start once at least 3 players are ready.',
+          ),
+          value: _setupOnly,
+          onChanged: (value) => setState(() => _setupOnly = value),
+        ),
         const SizedBox(height: 12),
         Text('Round schedule', style: labelStyle),
         const SizedBox(height: 6),
@@ -405,7 +431,7 @@ class _LandingScreenState extends State<LandingScreen> {
         Text(
           _manualSchedule
               ? 'Set cards per round and how many times each count repeats'
-              : 'Descending from max cards for table size → 1',
+              : RoundSchedule.automaticRoundsForPlayers(_maxPlayers).join(','),
           style: const TextStyle(fontSize: 12, color: Colors.white54),
         ),
         if (_manualSchedule) ...[
@@ -473,7 +499,7 @@ class _LandingScreenState extends State<LandingScreen> {
               label: const Text('Suit cycle'),
               selected: _trumpCycle != null,
               onSelected: (_) => setState(() {
-                _trumpCycle ??= List<String>.from(classicTrumpCycle);
+                _trumpCycle ??= List<String>.from(defaultTrumpCycle);
               }),
             ),
           ],

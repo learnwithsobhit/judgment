@@ -135,6 +135,10 @@ void main() {
       myNickname: 'Alex',
     );
     controller.view = _finishedView();
+    controller.gameStartedAt = DateTime.now().subtract(
+      const Duration(minutes: 42, seconds: 7),
+    );
+    controller.gameFinishedAt = DateTime.now();
 
     await tester.pumpWidget(
       MaterialApp(
@@ -152,6 +156,7 @@ void main() {
 
     expect(find.text('Your coach'), findsNothing);
     expect(find.textContaining('Beth wins'), findsOneWidget);
+    expect(find.text('Game time 42:07'), findsOneWidget);
     expect(find.text('You placed #2'), findsOneWidget);
     expect(find.text('Final standings'), findsOneWidget);
     expect(find.text('Your night'), findsOneWidget);

@@ -175,7 +175,7 @@ async fn restart_restores_game_and_dedup_registry() {
         .json()
         .await
         .unwrap();
-    clients[0].player_id = created.player_id;
+    clients[0].player_id = created.player_id.expect("creator is seated");
     let room_code = created.room.code.clone();
     let room_id = created.room.room_id;
 

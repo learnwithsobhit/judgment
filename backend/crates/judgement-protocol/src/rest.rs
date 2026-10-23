@@ -54,13 +54,18 @@ pub struct CreateRoomRequest {
     /// Default `false` — matching totals are allowed.
     #[serde(default)]
     pub dealer_total_restriction: bool,
+    /// Organizer is not seated. The first joiner becomes host. Start still
+    /// needs at least 3 ready players; the table does not have to be full.
+    #[serde(default)]
+    pub open_start: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateRoomResponse {
     pub room: RoomView,
-    /// The creator's seat assignment.
-    pub player_id: PlayerId,
+    /// The creator's seat. Absent when they only set the table up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_id: Option<PlayerId>,
     /// `comfort` | `busy` | `full` — soft signal when tables are congested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capacity: Option<String>,
@@ -163,11 +168,14 @@ pub struct RoomView {
     /// Host-chosen round schedule (default Automatic when omitted on older clients).
     #[serde(default)]
     pub round_schedule: RoundSchedule,
-    /// Human-readable summary for the lobby, e.g. `Automatic (12→1)`.
+    /// Human-readable summary for the lobby, e.g. `Automatic (12,11,…,1)`.
     pub round_schedule_summary: String,
     /// Classic dealer bid restriction (default off).
     #[serde(default)]
     pub dealer_total_restriction: bool,
+    /// True when the creator is not playing. The first joiner is host.
+    #[serde(default)]
+    pub open_start: bool,
     pub seats: Vec<SeatView>,
 }
 

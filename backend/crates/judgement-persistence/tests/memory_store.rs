@@ -55,6 +55,7 @@ async fn memory_store_finishes_game_and_records_history() {
             trump_cycle: None,
             round_schedule: Default::default(),
             dealer_total_restriction: false,
+            open_start: false,
             phase: "lobby".into(),
             game_id: None,
             players: game_players
@@ -175,6 +176,7 @@ async fn action_committed_detects_durable_action_id() {
             trump_cycle: None,
             round_schedule: Default::default(),
             dealer_total_restriction: false,
+            open_start: false,
             phase: "lobby".into(),
             game_id: None,
             players: game_players

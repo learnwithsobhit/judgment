@@ -19,8 +19,11 @@ const suitSymbols = {
   'spades': '\u2660',
 };
 
-/// Classic ADR 0003 trump cycle (default when host picks Suit cycle).
+/// Classic ADR 0003 trump cycle: Spades → Diamonds → Clubs → Hearts.
 const classicTrumpCycle = ['spades', 'diamonds', 'clubs', 'hearts'];
+
+/// House default when a new room uses a suit cycle.
+const defaultTrumpCycle = ['spades', 'clubs', 'hearts', 'diamonds'];
 
 const rankLabels = {
   'two': '2',
@@ -704,6 +707,26 @@ class RoundSchedule {
   /// `max_cards = floor(51 / playerCount)` — mirrors server derivation.
   static int maxCardsPerPlayer(int playerCount) => 51 ~/ playerCount;
 
+  /// House automatic deal. Mirrors `RoundPattern::automatic_for_players`.
+  static List<int> automaticRoundsForPlayers(int playerCount) {
+    switch (playerCount) {
+      case 3:
+      case 4:
+        return [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+      case 5:
+        return [10, 10, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+      case 6:
+        return [8, 8, 7, 7, 6, 6, 5, 5, 4, 3, 2, 1];
+      case 7:
+        return [7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 1];
+      case 8:
+        return [6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1];
+      default:
+        final max = maxCardsPerPlayer(playerCount);
+        return [for (var cards = max; cards >= 1; cards--) cards];
+    }
+  }
+
   /// Default manual pattern: double each count from max down through 5, then 4…1.
   factory RoundSchedule.defaultManualForPlayers(int playerCount) {
     final max = maxCardsPerPlayer(playerCount);
@@ -766,6 +789,9 @@ class RoomView {
   final RoundSchedule roundSchedule;
   final String roundScheduleSummary;
   final bool dealerTotalRestriction;
+
+  /// Creator is not seated. The first joiner is host. Start still needs Ready.
+  final bool openStart;
   final List<SeatView> seats;
 
   RoomView.fromJson(Map<String, dynamic> json)
@@ -787,6 +813,7 @@ class RoomView {
             (json['round_schedule_summary'] as String?) ?? 'Automatic',
         dealerTotalRestriction =
             json['dealer_total_restriction'] as bool? ?? false,
+        openStart = json['open_start'] as bool? ?? false,
         seats = (json['seats'] as List)
             .map((s) => SeatView.fromJson(s as Map<String, dynamic>))
             .toList();

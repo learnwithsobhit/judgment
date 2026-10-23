@@ -89,6 +89,8 @@ pub struct Room {
     pub round_schedule: RoundSchedule,
     /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
     pub dealer_total_restriction: bool,
+    /// Creator is not seated. First joiner becomes host.
+    pub open_start: bool,
 }
 
 impl Room {
@@ -128,6 +130,7 @@ impl Room {
             round_schedule: self.round_schedule.clone(),
             round_schedule_summary: self.round_schedule.summary(self.max_players),
             dealer_total_restriction: self.dealer_total_restriction,
+            open_start: self.open_start,
             seats,
         }
     }

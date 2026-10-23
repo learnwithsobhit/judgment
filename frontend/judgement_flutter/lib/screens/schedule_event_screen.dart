@@ -21,7 +21,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
   int _durationMinutes = 90;
   bool _timerEnabled = false;
   final int _timerSeconds = 30;
-  List<String>? _trumpCycle;
+  List<String>? _trumpCycle = List<String>.from(defaultTrumpCycle);
   bool _busy = false;
 
   Future<void> _pickDateTime() async {
@@ -220,7 +220,7 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
                           label: const Text('Suit cycle'),
                           selected: _trumpCycle != null,
                           onSelected: (_) => setState(() {
-                            _trumpCycle ??= List<String>.from(classicTrumpCycle);
+                            _trumpCycle ??= List<String>.from(defaultTrumpCycle);
                           }),
                         ),
                       ],

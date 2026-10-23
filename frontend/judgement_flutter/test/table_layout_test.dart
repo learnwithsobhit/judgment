@@ -169,6 +169,13 @@ void main() {
         myNickname: 'Ankit Sunil Chaturvedi',
       );
 
+      expect(find.textContaining('So far'), findsNothing);
+      expect(find.text('Round 1/12'), findsOneWidget);
+      final roundLabel = tester.renderObject<RenderParagraph>(
+        find.text('Round 1/12'),
+      );
+      expect(roundLabel.didExceedMaxLines, isFalse);
+      expect(roundLabel.size.width, greaterThan(70));
       expect(find.text('bid 10'), findsNWidgets(3));
       expect(find.text('won 10'), findsNWidgets(3));
       for (final line in ['bid 10', 'won 10']) {
@@ -183,11 +190,11 @@ void main() {
         }
       }
       expect(find.text('dealer · bid 2 · won 1'), findsOneWidget);
-    expect(find.text('04:12'), findsOneWidget);
-    expect(
-      find.text('Fastest Ankit S 00:08 · Slowest Left 00:21'),
-      findsOneWidget,
-    );
+      expect(find.text('04:12'), findsOneWidget);
+      expect(
+        find.text('Fastest Ankit S 00:08 · Slowest Left 00:21'),
+        findsOneWidget,
+      );
       expect(find.text('Ankit S'), findsWidgets);
       expect(find.text('Ankit Sunil Chaturvedi'), findsNothing);
       expect(_seatName('Left'), findsOneWidget);
@@ -278,5 +285,133 @@ void main() {
         );
       }
     }
+  });
+
+  testWidgets('phone bidding keeps every placed bid next to the picker', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    const ranks = [
+      'ace',
+      'king',
+      'queen',
+      'jack',
+      '10',
+      '9',
+      '8',
+      '7',
+      '6',
+      '5',
+    ];
+    const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+    final controller = GameController(
+      api: ApiClient(),
+      gameId: '00000000-0000-0000-0000-0000000000aa',
+      myPlayerId: _me,
+      myNickname: 'shobhit chaturvedi',
+    );
+    controller.view = PlayerGameView.fromJson({
+      'game_id': '00000000-0000-0000-0000-0000000000aa',
+      'state_version': 4,
+      'phase': 'bidding',
+      'own_hand': [
+        for (var i = 0; i < 10; i++)
+          {'suit': suits[i % suits.length], 'rank': ranks[i]},
+      ],
+      'own_seat': 0,
+      'own_bid': null,
+      'own_tricks_won': 0,
+      'own_avatar_id': 'face_01',
+      'opponents': [
+        {
+          'player_id': '00000000-0000-0000-0000-000000000002',
+          'nickname': 'Left',
+          'seat': 1,
+          'card_count': 10,
+          'bid': 1,
+          'tricks_won': 0,
+          'connection_status': 'connected',
+          'avatar_id': 'face_02',
+        },
+        {
+          'player_id': '00000000-0000-0000-0000-000000000003',
+          'nickname': 'Across',
+          'seat': 2,
+          'card_count': 10,
+          'bid': 3,
+          'tricks_won': 0,
+          'connection_status': 'connected',
+          'avatar_id': 'face_03',
+        },
+        {
+          'player_id': '00000000-0000-0000-0000-000000000004',
+          'nickname': 'Right',
+          'seat': 3,
+          'card_count': 10,
+          'bid': null,
+          'tricks_won': 0,
+          'connection_status': 'connected',
+          'avatar_id': 'face_04',
+        },
+      ],
+      'current_trick': <dynamic>[],
+      'trump': 'clubs',
+      'current_turn': _me,
+      'bids': [
+        {'player_id': '00000000-0000-0000-0000-000000000002', 'bid': 1},
+        {'player_id': '00000000-0000-0000-0000-000000000003', 'bid': 3},
+      ],
+      'scores': <dynamic>[],
+      'round': {
+        'round_index': 0,
+        'total_rounds': 12,
+        'cards_per_player': 10,
+        'dealer': _me,
+        'tricks_completed': 0,
+      },
+      'legal_actions': {
+        'legal_bids': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        'playable_cards': <dynamic>[],
+      },
+      'round_history': <dynamic>[],
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          fontFamily: 'Roboto',
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF1B5E20),
+            brightness: Brightness.dark,
+          ),
+        ),
+        home: TableScreen(controller: controller),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('So far 4 / 10'), findsOneWidget);
+    expect(find.text('Left 1'), findsOneWidget);
+    expect(find.text('Across 3'), findsOneWidget);
+    expect(find.text('Right —'), findsOneWidget);
+    expect(find.text('you —'), findsOneWidget);
+
+    final recap = tester.getRect(find.text('So far 4 / 10'));
+    final bidZero = tester.getRect(find.widgetWithText(FilledButton, '0'));
+    final bidSix = tester.getRect(find.widgetWithText(FilledButton, '6'));
+    final bidTen = tester.getRect(find.widgetWithText(FilledButton, '10'));
+    for (final rect in [recap, bidZero, bidSix, bidTen]) {
+      expect(rect.left, greaterThanOrEqualTo(0));
+      expect(rect.top, greaterThanOrEqualTo(0));
+      expect(rect.right, lessThanOrEqualTo(390));
+      expect(rect.bottom, lessThanOrEqualTo(700));
+    }
+    expect(recap.bottom, lessThan(bidZero.top));
+    expect((bidZero.top - bidSix.top).abs(), lessThan(1));
+    expect(bidTen.top, greaterThan(bidZero.top + 20));
+    expect(tester.takeException(), isNull);
   });
 }

@@ -51,6 +51,9 @@ pub struct StoredRoom {
     pub round_schedule: RoundSchedule,
     #[serde(default)]
     pub dealer_total_restriction: bool,
+    /// Creator is not seated; first joiner becomes host.
+    #[serde(default)]
+    pub open_start: bool,
     pub phase: String,
     pub game_id: Option<GameId>,
     pub players: Vec<StoredRoomPlayer>,

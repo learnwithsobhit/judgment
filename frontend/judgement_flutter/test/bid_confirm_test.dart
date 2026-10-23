@@ -3,14 +3,41 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:judgement_flutter/widgets/bid_panel.dart';
 
 void main() {
+  testWidgets('a phone-width picker still selects then confirms', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final confirmed = <int>[];
+
+    await tester.pumpWidget(
+      _host(
+        cards: 10,
+        legalBids: {for (var bid = 0; bid <= 10; bid++) bid},
+        onConfirm: confirmed.add,
+      ),
+    );
+
+    final firstRow = tester.getRect(find.widgetWithText(FilledButton, '0')).top;
+    final sameRow = tester.getRect(find.widgetWithText(FilledButton, '6')).top;
+    final nextRow = tester.getRect(find.widgetWithText(FilledButton, '10')).top;
+    expect((firstRow - sameRow).abs(), lessThan(1));
+    expect(nextRow, greaterThan(firstRow + 20));
+
+    await tester.tap(find.widgetWithText(FilledButton, '4'));
+    await tester.pump();
+    await tester.tap(find.text('Confirm bid'));
+    await tester.pump();
+
+    expect(confirmed, [4]);
+  });
+
   testWidgets('selecting a number does not confirm the bid', (tester) async {
     final confirmed = <int>[];
 
-    await tester.pumpWidget(_host(
-      cards: 3,
-      legalBids: {0, 1, 2, 3},
-      onConfirm: confirmed.add,
-    ));
+    await tester.pumpWidget(
+      _host(cards: 3, legalBids: {0, 1, 2, 3}, onConfirm: confirmed.add),
+    );
 
     expect(find.text('Confirm bid'), findsNothing);
 
@@ -22,15 +49,14 @@ void main() {
     expect(find.text('Confirm bid'), findsOneWidget);
   });
 
-  testWidgets('changing the number then confirming sends only the last bid',
-      (tester) async {
+  testWidgets('changing the number then confirming sends only the last bid', (
+    tester,
+  ) async {
     final confirmed = <int>[];
 
-    await tester.pumpWidget(_host(
-      cards: 3,
-      legalBids: {0, 1, 2, 3},
-      onConfirm: confirmed.add,
-    ));
+    await tester.pumpWidget(
+      _host(cards: 3, legalBids: {0, 1, 2, 3}, onConfirm: confirmed.add),
+    );
 
     await tester.tap(find.text('1'));
     await tester.pump();
@@ -49,15 +75,19 @@ void main() {
   testWidgets('an illegal number cannot be selected', (tester) async {
     final confirmed = <int>[];
 
-    await tester.pumpWidget(_host(
-      cards: 3,
-      legalBids: {0, 1, 3},
-      dealerRestricted: true,
-      onConfirm: confirmed.add,
-    ));
+    await tester.pumpWidget(
+      _host(
+        cards: 3,
+        legalBids: {0, 1, 3},
+        dealerRestricted: true,
+        onConfirm: confirmed.add,
+      ),
+    );
 
-    expect(find.text('Your bid — as dealer, the total cannot equal 3'),
-        findsOneWidget);
+    expect(
+      find.text('Your bid — as dealer, the total cannot equal 3'),
+      findsOneWidget,
+    );
 
     final illegal = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, '2'),
@@ -76,22 +106,24 @@ void main() {
     final confirmed = <int>[];
     var pending = false;
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: StatefulBuilder(
-          builder: (context, setState) => BidPanel(
-            cards: 3,
-            legalBids: const {0, 1, 2, 3},
-            dealerRestricted: false,
-            pending: pending,
-            onConfirm: (bid) {
-              confirmed.add(bid);
-              setState(() => pending = true);
-            },
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => BidPanel(
+              cards: 3,
+              legalBids: const {0, 1, 2, 3},
+              dealerRestricted: false,
+              pending: pending,
+              onConfirm: (bid) {
+                confirmed.add(bid);
+                setState(() => pending = true);
+              },
+            ),
           ),
         ),
       ),
-    ));
+    );
 
     await tester.tap(find.text('1'));
     await tester.pump();
@@ -110,32 +142,35 @@ void main() {
     expect(find.text('Bid 0 tricks?'), findsNothing);
   });
 
-  testWidgets('selection clears when the bid is no longer legal',
-      (tester) async {
+  testWidgets('selection clears when the bid is no longer legal', (
+    tester,
+  ) async {
     final confirmed = <int>[];
     var legalBids = {0, 1, 2};
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: StatefulBuilder(
-          builder: (context, setState) => Column(
-            children: [
-              BidPanel(
-                cards: 2,
-                legalBids: legalBids,
-                dealerRestricted: false,
-                pending: false,
-                onConfirm: confirmed.add,
-              ),
-              TextButton(
-                onPressed: () => setState(() => legalBids = {0, 1}),
-                child: const Text('Drop'),
-              ),
-            ],
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => Column(
+              children: [
+                BidPanel(
+                  cards: 2,
+                  legalBids: legalBids,
+                  dealerRestricted: false,
+                  pending: false,
+                  onConfirm: confirmed.add,
+                ),
+                TextButton(
+                  onPressed: () => setState(() => legalBids = {0, 1}),
+                  child: const Text('Drop'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ));
+    );
 
     await tester.tap(find.text('2'));
     await tester.pump();

@@ -57,8 +57,8 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     _syncExitGuard();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
-      final clockDue = controller.gameStartedAt != null &&
-          controller.gameFinishedAt == null;
+      final clockDue =
+          controller.gameStartedAt != null && controller.gameFinishedAt == null;
       if (clockDue ||
           controller.turnDeadline != null ||
           controller.pauseUntil != null ||
@@ -654,85 +654,98 @@ class _TopBar extends StatelessWidget {
         ? null
         : (remaining.inMilliseconds / 1000).ceil().clamp(0, 999);
 
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final status = <Widget>[
+      if (round != null)
+        Text(
+          'Round ${round.roundIndex + 1}/${round.totalRounds}',
+          maxLines: 1,
+          softWrap: false,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      if (controller.gameElapsed != null) ...[
+        const SizedBox(width: 8),
+        const Icon(Icons.schedule, size: 16, color: Colors.white70),
+        const SizedBox(width: 4),
+        Text(
+          _formatGameElapsed(controller.gameElapsed!),
+          style: const TextStyle(
+            fontFeatures: [FontFeature.tabularFigures()],
+            color: Colors.white70,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+      if (view.trump != null) ...[
+        const SizedBox(width: 8),
+        _trumpChip(view),
+      ],
+    ];
+    final tools = <Widget>[
+      if (remainingSeconds != null && !view.isFinished) ...[
+        Icon(
+          Icons.timer_outlined,
+          size: 18,
+          color: remainingSeconds <= 10
+              ? Colors.orangeAccent
+              : Colors.white70,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '${remainingSeconds}s',
+          style: TextStyle(
+            fontFeatures: const [FontFeature.tabularFigures()],
+            color: remainingSeconds <= 10
+                ? Colors.orangeAccent
+                : Colors.white70,
+          ),
+        ),
+        const SizedBox(width: 8),
+      ],
+      _connectionDot(controller.displayedConnection),
+      if (controller.canManualReconnect)
+        TextButton(
+          onPressed: controller.manualReconnect,
+          child: const Text('Reconnect'),
+        ),
+      _barButton(
+        icon: Icons.menu_book_outlined,
+        tooltip: 'Rules assistant',
+        onPressed: () => AssistantPanel.open(context, api: controller.api),
+      ),
+      if (showScoreboardButton)
+        Builder(
+          builder: (context) => _barButton(
+            icon: Icons.leaderboard_outlined,
+            tooltip: 'Scoreboard',
+            onPressed: () => Scaffold.of(context).openEndDrawer(),
+          ),
+        ),
+      if (onLeave != null)
+        _barButton(
+          icon: Icons.logout,
+          tooltip: 'Leave table',
+          onPressed: onLeave,
+        ),
+    ];
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Column(
         children: [
-          Row(
-            children: [
-              if (round != null)
-                Flexible(
-                  child: Text(
-                    'Round ${round.roundIndex + 1}/${round.totalRounds}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              if (controller.gameElapsed != null) ...[
-                const SizedBox(width: 8),
-                Icon(Icons.schedule, size: 16, color: Colors.white70),
-                const SizedBox(width: 4),
-                Text(
-                  _formatGameElapsed(controller.gameElapsed!),
-                  style: const TextStyle(
-                    fontFeatures: [FontFeature.tabularFigures()],
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w600,
-                  ),
+          if (narrow)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [...status, const Spacer()]),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: tools,
                 ),
               ],
-              const SizedBox(width: 8),
-              if (view.trump != null) _trumpChip(view),
-              const Spacer(),
-              if (remainingSeconds != null && !view.isFinished) ...[
-                Icon(
-                  Icons.timer_outlined,
-                  size: 18,
-                  color: remainingSeconds <= 10
-                      ? Colors.orangeAccent
-                      : Colors.white70,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '${remainingSeconds}s',
-                  style: TextStyle(
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                    color: remainingSeconds <= 10
-                        ? Colors.orangeAccent
-                        : Colors.white70,
-                  ),
-                ),
-                const SizedBox(width: 12),
-              ],
-              _connectionDot(controller.displayedConnection),
-              if (controller.canManualReconnect)
-                TextButton(
-                  onPressed: controller.manualReconnect,
-                  child: const Text('Reconnect'),
-                ),
-              _barButton(
-                icon: Icons.menu_book_outlined,
-                tooltip: 'Rules assistant',
-                onPressed: () =>
-                    AssistantPanel.open(context, api: controller.api),
-              ),
-              if (showScoreboardButton)
-                Builder(
-                  builder: (context) => _barButton(
-                    icon: Icons.leaderboard_outlined,
-                    tooltip: 'Scoreboard',
-                    onPressed: () => Scaffold.of(context).openEndDrawer(),
-                  ),
-                ),
-              if (onLeave != null)
-                _barButton(
-                  icon: Icons.logout,
-                  tooltip: 'Leave table',
-                  onPressed: onLeave,
-                ),
-            ],
-          ),
+            )
+          else
+            Row(children: [...status, const Spacer(), ...tools]),
           PaceLine(controller: controller),
           if (remaining != null && !view.isFinished)
             Padding(
@@ -1377,6 +1390,7 @@ class _ActionArea extends StatelessWidget {
   Widget build(BuildContext context) {
     final view = controller.view!;
     final pending = controller.pendingActionId != null;
+    final Widget body;
 
     if (view.phase == 'bidding' && controller.isMyTurn) {
       final cards = view.round?.cardsPerPlayer ?? 0;
@@ -1385,40 +1399,52 @@ class _ActionArea extends StatelessWidget {
       final dealerRestricted =
           isDealer &&
           List.generate(cards + 1, (b) => b).any((b) => !legal.contains(b));
-      return BidPanel(
+      body = BidPanel(
         cards: cards,
         legalBids: legal,
         dealerRestricted: dealerRestricted,
         pending: pending,
         onConfirm: controller.placeBid,
       );
+    } else {
+      final status = _statusText(view);
+      body = status == null
+          ? const SizedBox(height: 4)
+          : Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Semantics(
+                liveRegion: true,
+                label: status,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (pending) ...[
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Text(
+                      status,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.75),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
     }
 
-    final status = _statusText(view);
-    if (status == null) return const SizedBox(height: 4);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Semantics(
-        liveRegion: true,
-        label: status,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (pending) ...[
-              const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 8),
-            ],
-            Text(
-              status,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.75)),
-            ),
-          ],
-        ),
-      ),
+    if (view.phase != 'bidding') return body;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _BidsSoFarBar(controller: controller),
+        body,
+      ],
     );
   }
 
@@ -1436,6 +1462,111 @@ class _ActionArea extends StatelessWidget {
       'dealing' || 'round_setup' => 'Dealing…',
       _ => null,
     };
+  }
+}
+
+/// Placed bids for this round, kept next to the bid buttons so a short phone
+/// table cannot hide them. Hidden once bidding ends.
+class _BidsSoFarBar extends StatelessWidget {
+  final GameController controller;
+
+  const _BidsSoFarBar({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final view = controller.view!;
+    final placed = <String, int>{
+      for (final bid in view.bids) bid.playerId: bid.bid,
+    };
+    final ownBid = view.ownBid;
+    if (ownBid != null) placed[controller.myPlayerId] = ownBid;
+    for (final opponent in view.opponents) {
+      final bid = opponent.bid;
+      if (bid != null) placed[opponent.playerId] = bid;
+    }
+    final total = placed.values.fold<int>(0, (sum, bid) => sum + bid);
+    final cards = view.round?.cardsPerPlayer;
+    final opponents = [...view.opponents]
+      ..sort((a, b) => a.seat.compareTo(b.seat));
+    final clockwise = [
+      ...opponents.where((opponent) => opponent.seat > view.ownSeat),
+      ...opponents.where((opponent) => opponent.seat < view.ownSeat),
+    ];
+    final chips = <({String id, String label, int? bid})>[
+      for (final opponent in clockwise)
+        (
+          id: opponent.playerId,
+          label: seatLabel(opponent.nickname),
+          bid: placed[opponent.playerId],
+        ),
+      (
+        id: controller.myPlayerId,
+        label: 'you',
+        bid: placed[controller.myPlayerId],
+      ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+      child: Column(
+        children: [
+          Text(
+            cards == null ? 'So far $total' : 'So far $total / $cards',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              for (final chip in chips)
+                _BidChip(
+                  label: chip.bid == null
+                      ? '${chip.label} —'
+                      : '${chip.label} ${chip.bid}',
+                  current: view.currentTurn == chip.id,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BidChip extends StatelessWidget {
+  final String label;
+  final bool current;
+
+  const _BidChip({required this.label, required this.current});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: current
+            ? goldAccent.withValues(alpha: 0.22)
+            : Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: current ? FontWeight.w800 : FontWeight.w500,
+            color: current ? goldAccent : Colors.white70,
+          ),
+        ),
+      ),
+    );
   }
 }
 

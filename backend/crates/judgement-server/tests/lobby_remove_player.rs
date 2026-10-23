@@ -75,7 +75,9 @@ async fn host_can_remove_guest_from_lobby() {
 
     assert_eq!(room.seats.len(), 1);
     assert!(!room.seats.iter().any(|s| s.player_id == joined.player_id));
-    assert!(room.seats.iter().any(|s| s.is_host && s.player_id == created.player_id));
+    assert!(room.seats.iter().any(|s| {
+        s.is_host && s.player_id == created.player_id.expect("creator is seated")
+    }));
 }
 
 #[tokio::test]
@@ -109,7 +111,9 @@ async fn non_host_forbidden() {
     let resp = http
         .post(format!("{base}/api/v1/rooms/{code}/remove-player"))
         .bearer_auth(&guest_session.token)
-        .json(&serde_json::json!({ "player_id": created.player_id }))
+        .json(&serde_json::json!({
+            "player_id": created.player_id.expect("creator is seated")
+        }))
         .send()
         .await
         .unwrap();
@@ -152,7 +156,9 @@ async fn host_cannot_remove_self() {
             created.room.code
         ))
         .bearer_auth(&host.token)
-        .json(&serde_json::json!({ "player_id": created.player_id }))
+        .json(&serde_json::json!({
+            "player_id": created.player_id.expect("creator is seated")
+        }))
         .send()
         .await
         .unwrap();

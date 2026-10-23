@@ -258,6 +258,24 @@ class _HeroBanner extends StatelessWidget {
             height: 1.2,
           ),
         ),
+        if (controller.gameElapsed != null) ...[
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.schedule, size: 18, color: Colors.white70),
+              const SizedBox(width: 6),
+              Text(
+                'Game time ${formatPace(controller.gameElapsed!)}',
+                style: const TextStyle(
+                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ],
         if (myRank != null) ...[
           const SizedBox(height: 12),
           Container(

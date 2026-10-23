@@ -170,8 +170,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
   bool get _amReady =>
       _room.seats.any((s) => s.playerId == widget.myPlayerId && s.ready);
 
-  /// The game can start once at least `min_players` are seated and everyone
-  /// seated is ready (ADR 0003) — the room does not have to be full.
+  /// Host only, at least `min_players`, and everyone seated is ready.
+  /// The room does not have to be full. Setup rooms use the same rule.
   bool get _canStart =>
       _amHost &&
       _room.seats.length >= _room.minPlayers &&

@@ -250,6 +250,18 @@ void main() {
   });
 
   group('RoundSchedule', () {
+    test('automatic card lists match the house defaults', () {
+      expect(
+        RoundSchedule.automaticRoundsForPlayers(4),
+        [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+      );
+      expect(
+        RoundSchedule.automaticRoundsForPlayers(6),
+        [8, 8, 7, 7, 6, 6, 5, 5, 4, 3, 2, 1],
+      );
+      expect(defaultTrumpCycle, ['spades', 'clubs', 'hearts', 'diamonds']);
+    });
+
     test('default manual for 4 players matches double-descent example', () {
       final schedule = RoundSchedule.defaultManualForPlayers(4);
       expect(

@@ -162,7 +162,11 @@ pub async fn create_room(
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
     let room_id = RoomId::new();
-    let player_id = PlayerId::new();
+    let player_id = if body.open_start {
+        None
+    } else {
+        Some(PlayerId::new())
+    };
 
     let mut code = generate_room_code();
     {
@@ -177,15 +181,18 @@ pub async fn create_room(
         id: room_id,
         code,
         host_session: session.id,
-        seats: vec![RoomSeat {
-            session_id: session.id,
-            player_id,
-            nickname: session.nickname.clone(),
-            seat: 0,
-            ready: false,
-            joined_at: Utc::now(),
-            avatar_id: session.avatar_id.clone(),
-        }],
+        seats: match player_id {
+            Some(player_id) => vec![RoomSeat {
+                session_id: session.id,
+                player_id,
+                nickname: session.nickname.clone(),
+                seat: 0,
+                ready: false,
+                joined_at: Utc::now(),
+                avatar_id: session.avatar_id.clone(),
+            }],
+            None => Vec::new(),
+        },
         status: RoomStatus::Lobby,
         max_players,
         turn_timeout_seconds,
@@ -193,6 +200,7 @@ pub async fn create_room(
         trump_cycle,
         round_schedule,
         dealer_total_restriction: body.dealer_total_restriction,
+        open_start: body.open_start,
     };
     let view = room.view();
     state
@@ -347,6 +355,11 @@ pub async fn join_room(
             joined_at: Utc::now(),
             avatar_id: session.avatar_id.clone(),
         });
+        // Setup rooms keep the organizer as host_session until someone sits.
+        // The first seated player becomes host; later joins do not take it.
+        if room.open_start && room.seats.len() == 1 {
+            room.host_session = session.id;
+        }
         (room.view(), player_id, stored_room(room))
     };
 

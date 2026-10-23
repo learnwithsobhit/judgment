@@ -15,8 +15,8 @@ class TrumpCycleEditor extends StatelessWidget {
   });
 
   static const presets = <String, List<String>>{
+    'Default ♠♣♥♦': defaultTrumpCycle,
     'Classic ♠♦♣♥': classicTrumpCycle,
-    '♠♣♥♦': ['spades', 'clubs', 'hearts', 'diamonds'],
     '♥♦♠♣': ['hearts', 'diamonds', 'spades', 'clubs'],
     '♦♣♥♠': ['diamonds', 'clubs', 'hearts', 'spades'],
   };

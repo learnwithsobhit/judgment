@@ -115,7 +115,7 @@ async fn start_four_player_game(base: &str, clients: &mut [Client]) -> (GameId, 
         .json()
         .await
         .unwrap();
-    clients[0].player_id = created.player_id;
+    clients[0].player_id = created.player_id.expect("creator is seated");
     let code = created.room.code.clone();
     let room_id = created.room.room_id;
 

@@ -91,7 +91,7 @@ impl Harness {
         self.clients.push(TestClient {
             nickname: "Host".into(),
             token: host.token,
-            player_id: create.player_id,
+            player_id: create.player_id.expect("creator is seated"),
             ws: None,
             view: None,
         });

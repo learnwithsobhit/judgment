@@ -131,7 +131,7 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
         .json()
         .await
         .unwrap();
-    clients[0].player_id = created.player_id;
+    clients[0].player_id = created.player_id.expect("creator is seated");
     let code = created.room.code.clone();
     let room_id = created.room.room_id;
 

@@ -40,6 +40,20 @@ impl RoundPattern {
         RoundPattern::Descending { max_cards: max_cards_per_player(player_count) }
     }
 
+    /// House automatic schedule. At most 12 rounds, always ending at 1.
+    /// Keyed by the seated player count at game start.
+    pub fn automatic_for_players(player_count: u8) -> Self {
+        let rounds = match player_count {
+            3 | 4 => vec![12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+            5 => vec![10, 10, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+            6 => vec![8, 8, 7, 7, 6, 6, 5, 5, 4, 3, 2, 1],
+            7 => vec![7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 1],
+            8 => vec![6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1],
+            _ => return Self::descending_for_players(player_count),
+        };
+        RoundPattern::Custom { rounds }
+    }
+
     /// The number of cards dealt per player in each round, in order.
     pub fn rounds(&self) -> Vec<u8> {
         match self {
@@ -108,12 +122,17 @@ pub enum RoundScheduleError {
 }
 
 impl RoundSchedule {
-    /// Short lobby summary, e.g. `Automatic (12→1)` or `Manual: 20 rounds`.
+    /// Short lobby summary, e.g. `Automatic (12,11,…,1)` or `Manual: 20 rounds`.
     pub fn summary(&self, player_count: u8) -> String {
         match self.mode {
             RoundScheduleMode::Automatic => {
-                let max = max_cards_per_player(player_count);
-                format!("Automatic ({max}→1)")
+                let rounds = RoundPattern::automatic_for_players(player_count).rounds();
+                let list = rounds
+                    .iter()
+                    .map(|cards| cards.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("Automatic ({list})")
             }
             RoundScheduleMode::Manual => match self.steps.as_deref().map(Self::expand_steps) {
                 Some(Ok(rounds)) if !rounds.is_empty() => {
@@ -162,7 +181,7 @@ impl RoundSchedule {
         match self.mode {
             // Automatic ignores any leftover steps from the client.
             RoundScheduleMode::Automatic => {
-                Ok(RoundPattern::descending_for_players(player_count))
+                Ok(RoundPattern::automatic_for_players(player_count))
             }
             RoundScheduleMode::Manual => {
                 let rounds = self.expand_and_validate(player_count, reveal_undealt_trump)?;
@@ -538,12 +557,36 @@ mod tests {
     }
 
     #[test]
-    fn automatic_resolves_to_descending() {
+    fn automatic_uses_the_house_card_lists() {
+        let expected = [
+            (3u8, vec![12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]),
+            (4, vec![12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]),
+            (5, vec![10, 10, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1]),
+            (6, vec![8, 8, 7, 7, 6, 6, 5, 5, 4, 3, 2, 1]),
+            (7, vec![7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 1]),
+            (8, vec![6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1]),
+        ];
         let schedule = RoundSchedule::default();
+        for (players, rounds) in expected {
+            let pattern = schedule.resolve_pattern(players, true).unwrap();
+            assert_eq!(pattern.rounds(), rounds, "{players} players");
+            assert!(rounds.len() <= 12);
+            assert_eq!(*rounds.last().unwrap(), 1);
+            for cards in &rounds {
+                assert!(*cards <= 12);
+                assert!(
+                    u16::from(*cards) * u16::from(players) <= 51,
+                    "{cards}×{players} must fit a revealed-trump deal"
+                );
+            }
+        }
         assert_eq!(
-            schedule.resolve_pattern(6, true).unwrap(),
-            RoundPattern::descending_for_players(6)
+            schedule.summary(4),
+            "Automatic (12,11,10,9,8,7,6,5,4,3,2,1)"
         );
-        assert_eq!(schedule.summary(6), "Automatic (8→1)");
+        assert_eq!(
+            schedule.summary(6),
+            "Automatic (8,8,7,7,6,6,5,5,4,3,2,1)"
+        );
     }
 }

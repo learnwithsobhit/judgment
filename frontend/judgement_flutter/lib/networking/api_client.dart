@@ -76,14 +76,15 @@ class ApiClient {
   /// [turnTimeoutSeconds] null ⇒ no turn timer.
   /// Trump: omit both for revealed-card; [trumpCycle] (4 suits) for custom
   /// rotation; or legacy [firstTrump] alone for classic ♠♦♣♥ from that suit.
-  /// [roundSchedule] null ⇒ automatic descending max→1.
-  Future<({RoomView room, String playerId, String? capacity})> createRoom({
+  /// [roundSchedule] null ⇒ automatic per-player card list.
+  Future<({RoomView room, String? playerId, String? capacity})> createRoom({
     int? maxPlayers,
     int? turnTimeoutSeconds,
     String? firstTrump,
     List<String>? trumpCycle,
     RoundSchedule? roundSchedule,
     bool dealerTotalRestriction = false,
+    bool openStart = false,
   }) async {
     final json = await _post('/api/v1/rooms', {
       'max_players': ?maxPlayers,
@@ -92,10 +93,11 @@ class ApiClient {
       if (trumpCycle == null) 'first_trump': ?firstTrump,
       'round_schedule': ?roundSchedule?.toJson(),
       'dealer_total_restriction': dealerTotalRestriction,
+      if (openStart) 'open_start': true,
     });
     return (
       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
-      playerId: json['player_id'] as String,
+      playerId: json['player_id'] as String?,
       capacity: json['capacity'] as String?,
     );
   }

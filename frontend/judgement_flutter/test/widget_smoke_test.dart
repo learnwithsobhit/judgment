@@ -28,6 +28,8 @@ void main() {
     expect(find.text('Manual'), findsOneWidget);
     expect(find.text('Turn timer'), findsOneWidget);
     expect(find.text('Trump'), findsOneWidget);
+    expect(find.text('8,8,7,7,6,6,5,5,4,3,2,1'), findsOneWidget);
+    expect(find.text('Default ♠♣♥♦'), findsOneWidget);
     expect(find.text('Schedule a game for later'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget); // nickname only
 
@@ -46,6 +48,7 @@ void main() {
     expect(find.text('Add step'), findsOneWidget);
 
     // Switch to join mode: room-code field appears; host options hide.
+    await tester.ensureVisible(find.text('Join room').first);
     await tester.tap(find.text('Join room').first);
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNWidgets(2));

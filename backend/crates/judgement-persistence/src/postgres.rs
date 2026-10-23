@@ -105,8 +105,8 @@ impl GameStore for PostgresStore {
             INSERT INTO rooms (
                 room_id, code, host_session_id, max_players, turn_timeout_seconds,
                 first_trump, trump_cycle, round_schedule, dealer_total_restriction,
-                phase, game_id, created_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                open_start, phase, game_id, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             ON CONFLICT (room_id) DO UPDATE SET
                 host_session_id = EXCLUDED.host_session_id,
                 max_players = EXCLUDED.max_players,
@@ -115,6 +115,7 @@ impl GameStore for PostgresStore {
                 trump_cycle = EXCLUDED.trump_cycle,
                 round_schedule = EXCLUDED.round_schedule,
                 dealer_total_restriction = EXCLUDED.dealer_total_restriction,
+                open_start = EXCLUDED.open_start,
                 phase = EXCLUDED.phase,
                 game_id = EXCLUDED.game_id
             "#,
@@ -128,6 +129,7 @@ impl GameStore for PostgresStore {
         .bind(serde_json::to_value(&room.trump_cycle)?)
         .bind(serde_json::to_value(&room.round_schedule)?)
         .bind(room.dealer_total_restriction)
+        .bind(room.open_start)
         .bind(&room.phase)
         .bind(room.game_id.map(|g| g.0))
         .bind(room.created_at)
@@ -196,7 +198,7 @@ impl GameStore for PostgresStore {
             r#"
             SELECT room_id, code, host_session_id, max_players, turn_timeout_seconds,
                    first_trump, trump_cycle, round_schedule, dealer_total_restriction,
-                   phase, game_id, created_at
+                   open_start, phase, game_id, created_at
             FROM rooms
             "#,
         )
@@ -250,6 +252,7 @@ impl GameStore for PostgresStore {
                 trump_cycle,
                 round_schedule,
                 dealer_total_restriction: row.get("dealer_total_restriction"),
+                open_start: row.get("open_start"),
                 phase: row.get("phase"),
                 game_id: row.get::<Option<Uuid>, _>("game_id").map(GameId),
                 players,

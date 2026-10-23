@@ -52,60 +52,67 @@ class _BidPanelState extends State<BidPanel> {
     final cards = widget.cards;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
-        children: [
-          Text(
-            widget.dealerRestricted
-                ? 'Your bid — as dealer, the total cannot equal $cards'
-                : 'Your bid — how many tricks will you win?',
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 600;
+          final gap = compact ? 4.0 : 8.0;
+          return Column(
             children: [
-              for (var bid = 0; bid <= cards; bid++)
-                _BidNumberButton(
-                  bid: bid,
-                  legal: widget.legalBids.contains(bid),
-                  selected: selected == bid,
-                  pending: widget.pending,
-                  cards: cards,
-                  onSelect: () => _select(bid),
-                ),
-            ],
-          ),
-          if (selected != null) ...[
-            const SizedBox(height: 10),
-            Semantics(
-              liveRegion: true,
-              label: 'Bid $selected tricks?',
-              child: Text(
-                'Bid $selected tricks?',
+              Text(
+                widget.dealerRestricted
+                    ? 'Your bid — as dealer, the total cannot equal $cards'
+                    : 'Your bid — how many tricks will you win?',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-            ),
-            const SizedBox(height: 8),
-            Semantics(
-              button: true,
-              enabled: !widget.pending,
-              label: 'Confirm bid $selected tricks',
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: goldAccent,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size(48, 44),
-                ),
-                onPressed: widget.pending
-                    ? null
-                    : () => widget.onConfirm(selected),
-                child: const Text('Confirm bid'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                alignment: WrapAlignment.center,
+                children: [
+                  for (var bid = 0; bid <= cards; bid++)
+                    _BidNumberButton(
+                      bid: bid,
+                      legal: widget.legalBids.contains(bid),
+                      selected: selected == bid,
+                      pending: widget.pending,
+                      cards: cards,
+                      compact: compact,
+                      onSelect: () => _select(bid),
+                    ),
+                ],
               ),
-            ),
-          ],
-        ],
+              if (selected != null) ...[
+                const SizedBox(height: 10),
+                Semantics(
+                  liveRegion: true,
+                  label: 'Bid $selected tricks?',
+                  child: Text(
+                    'Bid $selected tricks?',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Semantics(
+                  button: true,
+                  enabled: !widget.pending,
+                  label: 'Confirm bid $selected tricks',
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: goldAccent,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(48, 44),
+                    ),
+                    onPressed: widget.pending
+                        ? null
+                        : () => widget.onConfirm(selected),
+                    child: const Text('Confirm bid'),
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -117,6 +124,7 @@ class _BidNumberButton extends StatelessWidget {
   final bool selected;
   final bool pending;
   final int cards;
+  final bool compact;
   final VoidCallback onSelect;
 
   const _BidNumberButton({
@@ -125,6 +133,7 @@ class _BidNumberButton extends StatelessWidget {
     required this.selected,
     required this.pending,
     required this.cards,
+    required this.compact,
     required this.onSelect,
   });
 
@@ -138,8 +147,8 @@ class _BidNumberButton extends StatelessWidget {
       label: !legal
           ? 'Bid $bid not allowed'
           : selected
-              ? 'Selected bid $bid'
-              : 'Select bid $bid',
+          ? 'Selected bid $bid'
+          : 'Select bid $bid',
       child: Tooltip(
         message: legal
             ? 'Bid $bid'
@@ -149,13 +158,20 @@ class _BidNumberButton extends StatelessWidget {
             backgroundColor: !legal
                 ? Colors.white12
                 : selected
-                    ? Colors.white
-                    : goldAccent,
+                ? Colors.white
+                : goldAccent,
             foregroundColor: legal ? Colors.black : Colors.white38,
             side: selected
                 ? const BorderSide(color: goldAccent, width: 3)
                 : null,
-            minimumSize: const Size(48, 44),
+            minimumSize: compact ? const Size(40, 40) : const Size(48, 44),
+            padding: compact ? EdgeInsets.zero : null,
+            tapTargetSize: compact
+                ? MaterialTapTargetSize.shrinkWrap
+                : MaterialTapTargetSize.padded,
+            visualDensity: compact
+                ? VisualDensity.compact
+                : VisualDensity.standard,
           ),
           onPressed: enabled ? onSelect : null,
           child: Text('$bid'),

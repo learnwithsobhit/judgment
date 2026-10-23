@@ -200,6 +200,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                     steps: Some(vec![ManualRoundStep { cards: 12, repeat: 1 }]),
                 },
                 dealer_total_restriction: false,
+                open_start: false,
             },
         );
         codes.insert(code.clone(), room_id);
@@ -238,5 +239,8 @@ async fn default_omitted_schedule_is_automatic() {
         .await
         .unwrap();
     assert_eq!(create.room.round_schedule.mode, RoundScheduleMode::Automatic);
-    assert_eq!(create.room.round_schedule_summary, "Automatic (12→1)");
+    assert_eq!(
+        create.room.round_schedule_summary,
+        "Automatic (12,11,10,9,8,7,6,5,4,3,2,1)"
+    );
 }

@@ -38,7 +38,7 @@ Future<void> playFullGame({
   expect(created.room.turnTimeoutSeconds, turnTimeoutSeconds);
   expect(created.room.firstTrump, firstTrump);
 
-  final playerIds = <String>[created.playerId];
+  final playerIds = <String>[created.playerId!];
   for (final api in apis.skip(1)) {
     final joined = await api.joinRoom(created.room.code);
     playerIds.add(joined.playerId);

@@ -703,6 +703,7 @@ pub async fn open_lobby(
         trump_cycle,
         round_schedule: round_schedule.clone(),
         dealer_total_restriction: false,
+        open_start: false,
     };
     let room_view = room.view();
     state

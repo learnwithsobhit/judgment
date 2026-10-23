@@ -76,6 +76,7 @@ pub async fn restore_from_store(
                     }),
                     round_schedule: stored.round_schedule,
                     dealer_total_restriction: stored.dealer_total_restriction,
+                    open_start: stored.open_start,
                 },
             );
         }
