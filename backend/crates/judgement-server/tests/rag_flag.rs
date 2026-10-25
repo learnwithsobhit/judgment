@@ -64,10 +64,7 @@ async fn flag_off_unknown_question_stays_low_confidence() {
         .await
         .unwrap();
     assert!(resp["confidence"].as_f64().unwrap() <= 0.25);
-    assert!(resp["answer"]
-        .as_str()
-        .unwrap()
-        .contains("could not find"));
+    assert!(resp["answer"].as_str().unwrap().contains("could not find"));
 }
 
 #[tokio::test]

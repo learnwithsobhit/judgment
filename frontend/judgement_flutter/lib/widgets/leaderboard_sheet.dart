@@ -32,7 +32,7 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
             Text('Top players', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 4),
             Text(
-              'Wins, then exact bids, then average score',
+              'Most wins, then win rate, then bid rate',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -60,7 +60,15 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
                     child: Text('No ranked games yet.'),
                   );
                 }
-                return Flexible(child: _BoardTable(rows: rows));
+                return Flexible(
+                  child: Column(
+                    children: [
+                      Expanded(child: _BoardTable(rows: rows)),
+                      const SizedBox(height: 12),
+                      const _BoardKey(),
+                    ],
+                  ),
+                );
               },
             ),
           ],
@@ -75,11 +83,10 @@ class _BoardTable extends StatelessWidget {
 
   const _BoardTable({required this.rows});
 
-  static const _played = 48.0;
+  static const _played = 52.0;
   static const _won = 36.0;
-  static const _loss = 40.0;
-  static const _exact = 44.0;
-  static const _average = 58.0;
+  static const _win = 48.0;
+  static const _bids = 48.0;
 
   @override
   Widget build(BuildContext context) {
@@ -88,26 +95,23 @@ class _BoardTable extends StatelessWidget {
       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
     );
     return Column(
-      mainAxisSize: MainAxisSize.min,
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
           child: Row(
             children: [
-              const SizedBox(width: 36),
+              const SizedBox(width: 56),
               Expanded(child: Text('Name', style: headerStyle)),
               _header('Played', _played, headerStyle),
               _header('Won', _won, headerStyle),
-              _header('Loss', _loss, headerStyle),
-              _header('Exact', _exact, headerStyle),
-              _header('Average', _average, headerStyle),
+              _header('Win%', _win, headerStyle),
+              _header('Bids', _bids, headerStyle),
             ],
           ),
         ),
         const Divider(height: 1),
-        Flexible(
+        Expanded(
           child: ListView.separated(
-            shrinkWrap: true,
             itemCount: rows.length,
             separatorBuilder: (context, index) => const Divider(height: 1),
             itemBuilder: (context, index) => _BoardRow(row: rows[index]),
@@ -142,13 +146,14 @@ class _BoardRow extends StatelessWidget {
       fontFeatures: const [FontFeature.tabularFigures()],
     );
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 6),
       child: Row(
         children: [
           PlayerAvatar(
             avatarId: row.avatarId,
             nickname: row.displayName,
-            radius: 14,
+            radius: 18,
+            boardRank: row.rank,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -160,9 +165,8 @@ class _BoardRow extends StatelessWidget {
           ),
           _cell('${row.games}', _BoardTable._played, number),
           _cell('${row.wins}', _BoardTable._won, number),
-          _cell('${row.losses}', _BoardTable._loss, number),
-          _cell('${row.exactPercent}%', _BoardTable._exact, number),
-          _cell('${row.averageScore}', _BoardTable._average, number),
+          _cell('${row.winPercent}%', _BoardTable._win, number),
+          _cell('${row.exactPercent}%', _BoardTable._bids, number),
         ],
       ),
     );
@@ -172,6 +176,30 @@ class _BoardRow extends StatelessWidget {
     return SizedBox(
       width: width,
       child: Text(value, style: style, textAlign: TextAlign.end, maxLines: 1),
+    );
+  }
+}
+
+class _BoardKey extends StatelessWidget {
+  const _BoardKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75),
+      height: 1.35,
+    );
+    return Text(
+      'Caps — gold is 1st, silver is 2nd, and bronze is 3rd. '
+      'The same cap shows on that player\'s seat.\n'
+      'Played — games that count, on a table with at least 3 players.\n'
+      'Won — games finished in first place. A shared first counts for each player.\n'
+      'Win% — wins divided by played, times 100.\n'
+      'Bids — rounds where the bid matched the tricks taken. '
+      '73% means 73 of every 100 rounds were exact.\n'
+      'Order — most wins, then higher Win%, then higher Bids. '
+      'Points per game break a remaining tie.',
+      style: style,
     );
   }
 }

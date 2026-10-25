@@ -146,9 +146,7 @@ async fn create_rejects_manual_cards_above_table_max() {
 #[tokio::test]
 async fn start_rejects_schedule_invalid_for_seated_count() {
     use chrono::Utc;
-    use judgement_domain::{
-        ManualRoundStep, PlayerId, RoomId, RoundSchedule, RoundScheduleMode,
-    };
+    use judgement_domain::{ManualRoundStep, PlayerId, RoomId, RoundSchedule, RoundScheduleMode};
     use judgement_server::state::{Room, RoomSeat, RoomStatus};
 
     let state = Arc::new(AppState::new(Arc::new(MemoryStore::new())));
@@ -197,7 +195,10 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                 trump_cycle: None,
                 round_schedule: RoundSchedule {
                     mode: RoundScheduleMode::Manual,
-                    steps: Some(vec![ManualRoundStep { cards: 12, repeat: 1 }]),
+                    steps: Some(vec![ManualRoundStep {
+                        cards: 12,
+                        repeat: 1,
+                    }]),
                 },
                 dealer_total_restriction: false,
                 open_start: false,
@@ -238,7 +239,10 @@ async fn default_omitted_schedule_is_automatic() {
         .json()
         .await
         .unwrap();
-    assert_eq!(create.room.round_schedule.mode, RoundScheduleMode::Automatic);
+    assert_eq!(
+        create.room.round_schedule.mode,
+        RoundScheduleMode::Automatic
+    );
     assert_eq!(
         create.room.round_schedule_summary,
         "Automatic (12,11,10,9,8,7,6,5,4,3,2,1)"

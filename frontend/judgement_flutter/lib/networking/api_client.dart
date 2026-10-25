@@ -8,8 +8,10 @@ import 'package:http/http.dart' as http;
 import '../models/protocol.dart';
 
 /// Configure at build time: `flutter run --dart-define=API_BASE=...`
-const String apiBase =
-    String.fromEnvironment('API_BASE', defaultValue: 'http://localhost:8080');
+const String apiBase = String.fromEnvironment(
+  'API_BASE',
+  defaultValue: 'http://localhost:8080',
+);
 
 String get wsBase => apiBase.replaceFirst(RegExp('^http'), 'ws');
 
@@ -32,9 +34,9 @@ class ApiClient {
   ApiClient({this.baseUrl = apiBase});
 
   Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
+    'Content-Type': 'application/json',
+    if (token != null) 'Authorization': 'Bearer $token',
+  };
 
   Future<Map<String, dynamic>> _post(String path, Object body) async {
     final response = await _http.post(
@@ -46,8 +48,10 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _get(String path) async {
-    final response =
-        await _http.get(Uri.parse('$baseUrl$path'), headers: _headers);
+    final response = await _http.get(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+    );
     return _decode(response);
   }
 
@@ -135,7 +139,9 @@ class ApiClient {
   }
 
   /// Host rematch after a vacant seat: new `game_id`, same room.
-  Future<({String oldGameId, String gameId})> restartGame(String roomRef) async {
+  Future<({String oldGameId, String gameId})> restartGame(
+    String roomRef,
+  ) async {
     final json = await _post('/api/v1/rooms/$roomRef/restart', {});
     return (
       oldGameId: json['old_game_id'] as String,
@@ -147,7 +153,9 @@ class ApiClient {
       RoomView.fromJson(await _get('/api/v1/rooms/$roomRef'));
 
   Future<RoomView> setReady(String roomRef, bool ready) async =>
-      RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/ready', {'ready': ready}));
+      RoomView.fromJson(
+        await _post('/api/v1/rooms/$roomRef/ready', {'ready': ready}),
+      );
 
   Future<String> setAvatar(String avatarId) async {
     final json = await _post('/api/v1/me/avatar', {'avatar_id': avatarId});
@@ -159,14 +167,14 @@ class ApiClient {
 
   /// Host-only: remove a seated player from the lobby before start.
   Future<RoomView> removePlayer(String roomRef, String playerId) async =>
-      RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/remove-player', {
-        'player_id': playerId,
-      }));
+      RoomView.fromJson(
+        await _post('/api/v1/rooms/$roomRef/remove-player', {
+          'player_id': playerId,
+        }),
+      );
 
   Future<String> startGame(String roomRef, {int? seed}) async {
-    final json = await _post('/api/v1/rooms/$roomRef/start', {
-      'seed': ?seed,
-    });
+    final json = await _post('/api/v1/rooms/$roomRef/start', {'seed': ?seed});
     return json['game_id'] as String;
   }
 
@@ -194,10 +202,13 @@ class ApiClient {
 
   Future<CoachingResponse> getCoach(String gameId, String playerId) async =>
       CoachingResponse.fromJson(
-          await _get('/api/v1/games/$gameId/coach/$playerId'));
+        await _get('/api/v1/games/$gameId/coach/$playerId'),
+      );
 
   Future<HighlightsResponse> getHighlights(String gameId) async =>
-      HighlightsResponse.fromJson(await _get('/api/v1/games/$gameId/highlights'));
+      HighlightsResponse.fromJson(
+        await _get('/api/v1/games/$gameId/highlights'),
+      );
 
   // --- Scheduled events (ADR 0005) ---
 
@@ -249,12 +260,17 @@ class ApiClient {
       'rsvp_token': rsvpToken,
     });
     return (
-      event: GameEventPublicView.fromJson(json['event'] as Map<String, dynamic>),
+      event: GameEventPublicView.fromJson(
+        json['event'] as Map<String, dynamic>,
+      ),
       promotedName: json['promoted_name'] as String?,
     );
   }
 
-  Future<GameEventManageView> manageEvent(String slug, String manageToken) async {
+  Future<GameEventManageView> manageEvent(
+    String slug,
+    String manageToken,
+  ) async {
     final response = await _http.get(
       Uri.parse('$baseUrl/api/v1/events/$slug/manage?token=$manageToken'),
       headers: _headers,
@@ -262,7 +278,10 @@ class ApiClient {
     return GameEventManageView.fromJson(_decode(response));
   }
 
-  Future<OpenLobbyResult> openEventLobby(String slug, String manageToken) async {
+  Future<OpenLobbyResult> openEventLobby(
+    String slug,
+    String manageToken,
+  ) async {
     final response = await _http.post(
       Uri.parse('$baseUrl/api/v1/events/$slug/open-lobby?token=$manageToken'),
       headers: _headers,
@@ -271,7 +290,10 @@ class ApiClient {
     return OpenLobbyResult.fromJson(_decode(response));
   }
 
-  Future<GameEventPublicView> cancelEvent(String slug, String manageToken) async {
+  Future<GameEventPublicView> cancelEvent(
+    String slug,
+    String manageToken,
+  ) async {
     final response = await _http.post(
       Uri.parse('$baseUrl/api/v1/events/$slug/cancel?token=$manageToken'),
       headers: _headers,
@@ -290,6 +312,25 @@ class ApiClient {
   }) async {
     final response = await _http.post(
       Uri.parse('$baseUrl/api/v1/auth/firebase'),
+      headers: _headers,
+      body: jsonEncode({
+        'id_token': idToken,
+        if (displayName != null) 'display_name': displayName,
+        if (legalVersion != null) 'legal_version': legalVersion,
+      }),
+    );
+    final json = _decode(response);
+    token = json['token'] as String;
+    return AuthSession.fromJson(json);
+  }
+
+  Future<AuthSession> authTelegram({
+    required String idToken,
+    String? displayName,
+    String? legalVersion,
+  }) async {
+    final response = await _http.post(
+      Uri.parse('$baseUrl/api/v1/auth/telegram'),
       headers: _headers,
       body: jsonEncode({
         'id_token': idToken,
@@ -484,6 +525,9 @@ class LeaderboardEntry {
   final int averageScore;
 
   int get losses => games < wins ? 0 : games - wins;
+
+  /// Wins per 100 ranked games.
+  int get winPercent => games <= 0 ? 0 : (wins * 100) ~/ games;
 
   factory LeaderboardEntry.fromJson(Map<String, dynamic> json) {
     return LeaderboardEntry(

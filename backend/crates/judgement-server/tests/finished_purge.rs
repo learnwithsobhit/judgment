@@ -175,10 +175,11 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
     // Play out the single 1-card round.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     while tokio::time::Instant::now() < deadline {
-        if clients
-            .iter()
-            .all(|c| c.last.as_ref().is_some_and(|v| v.phase == GamePhase::Finished))
-        {
+        if clients.iter().all(|c| {
+            c.last
+                .as_ref()
+                .is_some_and(|v| v.phase == GamePhase::Finished)
+        }) {
             break;
         }
 
@@ -301,7 +302,11 @@ async fn natural_finish_deletes_game_and_returns_room_to_lobby() {
 
     panic!(
         "finish cleanup incomplete; history={:?} room={:?} actor={}",
-        store.load_game_history(game_id).await.unwrap().map(|h| h.status),
+        store
+            .load_game_history(game_id)
+            .await
+            .unwrap()
+            .map(|h| h.status),
         state_ref
             .rooms
             .lock()

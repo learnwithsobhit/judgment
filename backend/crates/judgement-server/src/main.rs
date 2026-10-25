@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use judgement_persistence::{MemoryStore, PostgresStore};
-use judgement_server::rag_boot::build_explanation_service;
 use judgement_server::leaderboard::spawn_leaderboard_refresh;
+use judgement_server::rag_boot::build_explanation_service;
 use judgement_server::reaper::spawn_reaper;
 use judgement_server::restore::restore_from_store;
 use judgement_server::{build_router, state::AppState};
@@ -69,8 +69,7 @@ fn migrations_dir() -> PathBuf {
         PathBuf::from("crates/judgement-persistence/migrations"),
         PathBuf::from("backend/crates/judgement-persistence/migrations"),
         PathBuf::from("/srv/migrations/persistence"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../judgement-persistence/migrations"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../judgement-persistence/migrations"),
     ];
     candidates
         .into_iter()

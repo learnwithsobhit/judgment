@@ -71,37 +71,49 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
     final winners = ranking.where((r) => r.rank == 1).toList();
     final winnerIds = winners.map((w) => w.playerId).toSet();
 
-    final seats = <({String id, String name, String? avatar, bool winner})>[
-      (
-        id: widget.controller.myPlayerId,
-        name: widget.controller.myNickname,
-        avatar: view.ownAvatarId,
-        winner: winnerIds.contains(widget.controller.myPlayerId),
-      ),
-      for (final o in view.opponents)
-        (
-          id: o.playerId,
-          name: o.nickname,
-          avatar: o.avatarId,
-          winner: winnerIds.contains(o.playerId),
-        ),
-    ]..sort((a, b) {
-        final ra = ranking
-            .where((r) => r.playerId == a.id)
-            .map((r) => r.rank)
-            .firstOrNull;
-        final rb = ranking
-            .where((r) => r.playerId == b.id)
-            .map((r) => r.rank)
-            .firstOrNull;
-        return (ra ?? 99).compareTo(rb ?? 99);
-      });
+    final seats =
+        <
+            ({
+              String id,
+              String name,
+              String? avatar,
+              int? boardRank,
+              bool winner,
+            })
+          >[
+            (
+              id: widget.controller.myPlayerId,
+              name: widget.controller.myNickname,
+              avatar: view.ownAvatarId,
+              boardRank: view.ownLadderRank,
+              winner: winnerIds.contains(widget.controller.myPlayerId),
+            ),
+            for (final o in view.opponents)
+              (
+                id: o.playerId,
+                name: o.nickname,
+                avatar: o.avatarId,
+                boardRank: o.ladderRank,
+                winner: winnerIds.contains(o.playerId),
+              ),
+          ]
+          ..sort((a, b) {
+            final ra = ranking
+                .where((r) => r.playerId == a.id)
+                .map((r) => r.rank)
+                .firstOrNull;
+            final rb = ranking
+                .where((r) => r.playerId == b.id)
+                .map((r) => r.rank)
+                .firstOrNull;
+            return (ra ?? 99).compareTo(rb ?? 99);
+          });
 
     final headline = winners.isEmpty
         ? 'Game over!'
         : winners.length == 1
-            ? '${widget.controller.nicknameOf(winners.first.playerId)} wins!'
-            : 'Shared victory!';
+        ? '${widget.controller.nicknameOf(winners.first.playerId)} wins!'
+        : 'Shared victory!';
 
     return Scaffold(
       body: Stack(
@@ -166,6 +178,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
                             _DancingSeat(
                               name: seats[i].name,
                               avatarId: seats[i].avatar,
+                              boardRank: seats[i].boardRank,
                               isWinner: seats[i].winner,
                               phase: _dance.value,
                               index: i,
@@ -242,7 +255,9 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
     required String title,
   }) {
     final c = widget.controller;
-    final list = ranking.isNotEmpty ? ranking : (c.view?.finalRanking ?? const []);
+    final list = ranking.isNotEmpty
+        ? ranking
+        : (c.view?.finalRanking ?? const []);
     final text = buildResultsShareText(
       nicknameOf: c.nicknameOf,
       myPlayerId: c.myPlayerId,
@@ -268,6 +283,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
 class _DancingSeat extends StatelessWidget {
   final String name;
   final String? avatarId;
+  final int? boardRank;
   final bool isWinner;
   final double phase;
   final int index;
@@ -275,6 +291,7 @@ class _DancingSeat extends StatelessWidget {
   const _DancingSeat({
     required this.name,
     required this.avatarId,
+    required this.boardRank,
     required this.isWinner,
     required this.phase,
     required this.index,
@@ -319,10 +336,17 @@ class _DancingSeat extends StatelessWidget {
                     nickname: name,
                     radius: 28,
                     highlight: isWinner,
+                    boardRank: boardRank,
                   ),
-                  if (isWinner)
+                  if (isWinner && boardRank == null)
                     const Positioned(
                       top: -10,
+                      child: Text('👑', style: TextStyle(fontSize: 22)),
+                    ),
+                  if (isWinner && boardRank != null)
+                    const Positioned(
+                      top: -4,
+                      left: -4,
                       child: Text('👑', style: TextStyle(fontSize: 22)),
                     ),
                 ],
@@ -383,7 +407,11 @@ class _CrackerPainter extends CustomPainter {
       // Mini cracker shard / confetti rectangle
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset.zero, width: p.size, height: p.size * 0.45),
+          Rect.fromCenter(
+            center: Offset.zero,
+            width: p.size,
+            height: p.size * 0.45,
+          ),
           const Radius.circular(2),
         ),
         paint,

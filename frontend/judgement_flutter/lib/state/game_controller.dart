@@ -21,12 +21,7 @@ import '../util/session_exit_analytics.dart';
 import '../util/soundboard.dart';
 import '../util/table_audio.dart';
 
-enum GameConnectionState {
-  connecting,
-  connected,
-  reconnecting,
-  disconnected,
-}
+enum GameConnectionState { connecting, connected, reconnecting, disconnected }
 
 /// Ephemeral reaction / cheer for the blast overlays.
 class EmoteBurst {
@@ -66,16 +61,22 @@ class GameController extends ChangeNotifier {
   StreamSubscription<ServerMessage>? _subscription;
   bool _disposed = false;
   int _reconnectAttempts = 0;
+
   /// Stop auto-reconnect after abort / intentional switch to a new game.
   bool _suppressReconnect = false;
+
   /// Set when the player confirmed Leave so socket teardown is not logged as network drop.
   bool _intentionalLeave = false;
+
   /// When the current socket first looked unstable; used to debounce chrome.
   DateTime? _connectionUnstableSince;
+
   /// Ignore re-entrant [connect] while one handshake is in flight.
   bool _connectInFlight = false;
+
   /// Pending exponential-backoff reconnect timer (cancelled on new connect).
   Timer? _reconnectTimer;
+
   /// Inbound WS keepalive so Railway/proxy idle timers see client traffic.
   Timer? _keepAliveTimer;
   static const _keepAliveInterval = Duration(seconds: 10);
@@ -131,8 +132,7 @@ class GameController extends ChangeNotifier {
   bool _resyncing = false;
 
   /// Label for the in-table save/sync progress banner.
-  String get progressBannerLabel =>
-      _resyncing ? 'Syncing…' : 'Saving table…';
+  String get progressBannerLabel => _resyncing ? 'Syncing…' : 'Saving table…';
 
   /// Most recent rejection to surface to the user (cleared after display).
   String? lastRejection;
@@ -232,7 +232,8 @@ class GameController extends ChangeNotifier {
     for (final entry in playerPace) {
       seen.add(entry.playerId);
       final ms = entry.elapsedMs + _openExtraMs(entry.playerId);
-      if (entry.decisions == 0 && (open == null || open.playerId != entry.playerId)) {
+      if (entry.decisions == 0 &&
+          (open == null || open.playerId != entry.playerId)) {
         continue;
       }
       if (ms <= 0 && entry.decisions == 0) continue;
@@ -287,9 +288,7 @@ class GameController extends ChangeNotifier {
       return heldCompletedTrick!.plays;
     }
     if (v.currentTrick.isNotEmpty) return v.currentTrick;
-    return heldCompletedTrick?.plays ??
-        v.lastCompletedTrick?.plays ??
-        const [];
+    return heldCompletedTrick?.plays ?? v.lastCompletedTrick?.plays ?? const [];
   }
 
   bool get showingCompletedTrick {
@@ -308,6 +307,20 @@ class GameController extends ChangeNotifier {
     final o = view?.opponents.where((e) => e.playerId == playerId);
     if (o == null || o.isEmpty) return null;
     return o.first.avatarId;
+  }
+
+  /// Overall board place, 1–3, for a player at this table.
+  int? boardRankOf(String playerId) {
+    final current = view;
+    if (current == null) return null;
+    final rank = playerId == myPlayerId
+        ? current.ownLadderRank
+        : current.opponents
+              .where((opponent) => opponent.playerId == playerId)
+              .map((opponent) => opponent.ladderRank)
+              .firstOrNull;
+    if (rank == null || rank < 1 || rank > 3) return null;
+    return rank;
   }
 
   String nicknameOf(String playerId) {
@@ -417,8 +430,9 @@ class GameController extends ChangeNotifier {
     }
     if (willReconnect) {
       _reconnectAttempts += 1;
-      final delay =
-          Duration(milliseconds: 500 * pow(2, _reconnectAttempts).toInt());
+      final delay = Duration(
+        milliseconds: 500 * pow(2, _reconnectAttempts).toInt(),
+      );
       _reconnectTimer?.cancel();
       _reconnectTimer = Timer(delay, () {
         if (!_disposed && !_suppressReconnect && !gameAborted) connect();
@@ -428,7 +442,12 @@ class GameController extends ChangeNotifier {
 
   void _handleMessage(ServerMessage message) {
     switch (message) {
-      case StateSnapshot(:final view, :final startedAt, :final pace, :final paceOpen):
+      case StateSnapshot(
+        :final view,
+        :final startedAt,
+        :final pace,
+        :final paceOpen,
+      ):
         gameStartedAt = startedAt ?? gameStartedAt ?? DateTime.now();
         if (view.isFinished && gameFinishedAt == null) {
           gameFinishedAt = DateTime.now();
@@ -442,12 +461,12 @@ class GameController extends ChangeNotifier {
           _notify();
         }
       case CommandRejected(
-          :final actionId,
-          :final message,
-          :final retryable,
-          :final reasonKind,
-          :final errorCode
-        ):
+        :final actionId,
+        :final message,
+        :final retryable,
+        :final reasonKind,
+        :final errorCode,
+      ):
         lastRejectionCode = errorCode;
         final mine = actionId == null || actionId == pendingActionId;
         if (!mine) {
@@ -456,7 +475,8 @@ class GameController extends ChangeNotifier {
           return;
         }
         if (retryable &&
-            (reasonKind == 'persist_unavailable' || reasonKind == 'queue_full') &&
+            (reasonKind == 'persist_unavailable' ||
+                reasonKind == 'queue_full') &&
             _pendingAction != null &&
             pendingActionId != null) {
           // Progress only — do not set lastRejection (avoids error SnackBar).
@@ -469,7 +489,8 @@ class GameController extends ChangeNotifier {
         // Version skew only (not every kind=game reject). Resync, then resend
         // with the updated expected_state_version. Server also pushes a snapshot
         // on STALE_STATE rejects.
-        final isStale = (errorCode?.toLowerCase().contains('stale') ?? false) ||
+        final isStale =
+            (errorCode?.toLowerCase().contains('stale') ?? false) ||
             message.toLowerCase().contains('stale');
         if (_pendingAction != null && pendingActionId != null && isStale) {
           _resyncing = true;
@@ -486,8 +507,9 @@ class GameController extends ChangeNotifier {
         if (_timerDeadlineId != timer.deadlineId) {
           _timerDeadlineId = timer.deadlineId;
           turnTotalMs = timer.remainingMs.clamp(1, 1 << 31);
-          turnDeadline =
-              DateTime.now().add(Duration(milliseconds: timer.remainingMs));
+          turnDeadline = DateTime.now().add(
+            Duration(milliseconds: timer.remainingMs),
+          );
           _notify();
         }
       case GamePaused(:final reason, :final remainingMs):
@@ -535,16 +557,16 @@ class GameController extends ChangeNotifier {
         api.token = token;
         _persistReclaimStore();
       case TableEventMessage(
-          :final kind,
-          :final from,
-          :final target,
-          :final emojis,
-          :final text,
-          :final mood,
-          :final stickerId,
-          :final soundId,
-          :final ttlMs
-        ):
+        :final kind,
+        :final from,
+        :final target,
+        :final emojis,
+        :final text,
+        :final mood,
+        :final stickerId,
+        :final soundId,
+        :final ttlMs,
+      ):
         _onTableEvent(
           kind: kind,
           from: from,
@@ -557,12 +579,12 @@ class GameController extends ChangeNotifier {
           ttlMs: ttlMs,
         );
       case VoiceNoteMessage(
-          :final from,
-          :final mime,
-          :final durationMs,
-          :final audioB64,
-          :final ttlMs
-        ):
+        :final from,
+        :final mime,
+        :final durationMs,
+        :final audioB64,
+        :final ttlMs,
+      ):
         _onVoiceNote(
           from: from,
           mime: mime,
@@ -571,11 +593,11 @@ class GameController extends ChangeNotifier {
           ttlMs: ttlMs,
         );
       case BotTookOver() ||
-            PlayerResumedControl() ||
-            PlayerConnected() ||
-            PlayerDisconnected() ||
-            KeepAlive() ||
-            UnknownMessage():
+          PlayerResumedControl() ||
+          PlayerConnected() ||
+          PlayerDisconnected() ||
+          KeepAlive() ||
+          UnknownMessage():
         break;
     }
   }
@@ -604,8 +626,7 @@ class GameController extends ChangeNotifier {
   }
 
   /// True while leaving the route would vacate a live seat (back/close guard).
-  bool get shouldGuardExit =>
-      !gameAborted && !(view?.isFinished ?? false);
+  bool get shouldGuardExit => !gameAborted && !(view?.isFinished ?? false);
 
   Future<void> endGameAsHost() async {
     if (!amHost) {
@@ -730,12 +751,12 @@ class GameController extends ChangeNotifier {
     // the client keeps showing it for at least 1.6s.
     if (next.lastCompletedTrick != null && next.currentTrick.isEmpty) {
       final incoming = next.lastCompletedTrick!;
-      final same = heldCompletedTrick?.trickIndex == incoming.trickIndex &&
+      final same =
+          heldCompletedTrick?.trickIndex == incoming.trickIndex &&
           heldCompletedTrick?.winnerId == incoming.winnerId;
       if (!same) {
         heldCompletedTrick = incoming;
-        trickBanner =
-            '${nicknameOf(incoming.winnerId)} takes the trick';
+        trickBanner = '${nicknameOf(incoming.winnerId)} takes the trick';
         _armHold();
       }
     } else if (next.currentTrick.isNotEmpty) {
@@ -761,8 +782,10 @@ class GameController extends ChangeNotifier {
         next.roundHistory.isNotEmpty) {
       final last = next.roundHistory.last;
       final lines = last.entries
-          .map((e) =>
-              '${nicknameOf(e.playerId)} ${e.score} (bid ${e.bid}→${e.tricksWon})')
+          .map(
+            (e) =>
+                '${nicknameOf(e.playerId)} ${e.score} (bid ${e.bid}→${e.tricksWon})',
+          )
           .join(' · ');
       final prevTotals = prev == null
           ? false
@@ -843,13 +866,15 @@ class GameController extends ChangeNotifier {
   }) {
     if (muteReactions && kind != 'auto_cheer') return;
     if (kind == 'soundboard' && soundId != null) {
-      audio.enqueue(TableAudioItem(
-        id: _uuid.v4(),
-        from: from,
-        kind: TableAudioKind.soundboard,
-        soundId: soundId,
-        durationMs: ttlMs,
-      ));
+      audio.enqueue(
+        TableAudioItem(
+          id: _uuid.v4(),
+          from: from,
+          kind: TableAudioKind.soundboard,
+          soundId: soundId,
+          durationMs: ttlMs,
+        ),
+      );
       _notify();
       return;
     }
@@ -894,14 +919,16 @@ class GameController extends ChangeNotifier {
     if (muteReactions) return;
     try {
       final bytes = base64Decode(audioB64);
-      audio.enqueue(TableAudioItem(
-        id: _uuid.v4(),
-        from: from,
-        kind: TableAudioKind.voice,
-        mime: mime,
-        bytes: bytes,
-        durationMs: durationMs > 0 ? durationMs : ttlMs,
-      ));
+      audio.enqueue(
+        TableAudioItem(
+          id: _uuid.v4(),
+          from: from,
+          kind: TableAudioKind.voice,
+          mime: mime,
+          bytes: bytes,
+          durationMs: durationMs > 0 ? durationMs : ttlMs,
+        ),
+      );
     } catch (_) {
       // Ignore corrupt payloads.
     }
@@ -921,11 +948,7 @@ class GameController extends ChangeNotifier {
   }
 
   void sendReaction(String emoji, {String? target}) {
-    _sendAction({
-      'type': 'send_reaction',
-      'emoji': emoji,
-      'target': ?target,
-    });
+    _sendAction({'type': 'send_reaction', 'emoji': emoji, 'target': ?target});
   }
 
   void sendEmoteText(String text) {
@@ -979,10 +1002,13 @@ class GameController extends ChangeNotifier {
   /// legal-action list).
   String? cardBlockedReason(CardModel card) {
     final v = view;
-    if (v == null || v.phase != 'playing') return 'Card play has not started yet';
+    if (v == null || v.phase != 'playing')
+      return 'Card play has not started yet';
     if (v.currentTurn != myPlayerId) return 'It is not your turn';
     if (v.legalActions.playableCards.contains(card.id)) return null;
-    final lead = v.currentTrick.isNotEmpty ? v.currentTrick.first.card.suit : null;
+    final lead = v.currentTrick.isNotEmpty
+        ? v.currentTrick.first.card.suit
+        : null;
     if (lead != null) return 'You must follow $lead';
     return 'This card cannot be played right now';
   }
@@ -1046,11 +1072,7 @@ class GameController extends ChangeNotifier {
     _resyncing = false;
     savingInProgress = true;
     _notify();
-    _send(
-      actionId: actionId,
-      stateVersion: v.stateVersion,
-      action: action,
-    );
+    _send(actionId: actionId, stateVersion: v.stateVersion, action: action);
   }
 
   void _sendAction(Map<String, dynamic> action) {
@@ -1066,12 +1088,14 @@ class GameController extends ChangeNotifier {
     required int stateVersion,
     required Map<String, dynamic> action,
   }) {
-    _socket?.sendEnvelope(buildEnvelope(
-      actionId: actionId,
-      gameId: gameId,
-      expectedStateVersion: stateVersion,
-      action: action,
-    ));
+    _socket?.sendEnvelope(
+      buildEnvelope(
+        actionId: actionId,
+        gameId: gameId,
+        expectedStateVersion: stateVersion,
+        action: action,
+      ),
+    );
   }
 
   void clearRejection() {

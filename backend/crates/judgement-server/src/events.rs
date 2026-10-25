@@ -52,7 +52,12 @@ pub fn normalize_mobile(raw: &str) -> Result<String, ApiError> {
     let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
     let e164 = if trimmed.starts_with('+') {
         format!("+{digits}")
-    } else if digits.len() == 10 && digits.chars().next().is_some_and(|c| matches!(c, '6'..='9')) {
+    } else if digits.len() == 10
+        && digits
+            .chars()
+            .next()
+            .is_some_and(|c| matches!(c, '6'..='9'))
+    {
         format!("+91{digits}")
     } else if digits.len() == 12 && digits.starts_with("91") {
         format!("+{digits}")
@@ -64,7 +69,9 @@ pub fn normalize_mobile(raw: &str) -> Result<String, ApiError> {
         ));
     };
     if e164.len() < 12 || e164.len() > 16 {
-        return Err(ApiError::BadRequest("mobile number length is invalid".into()));
+        return Err(ApiError::BadRequest(
+            "mobile number length is invalid".into(),
+        ));
     }
     Ok(e164)
 }
@@ -120,7 +127,9 @@ impl ScheduledEvent {
             round_schedule: self.round_schedule.clone(),
             // Summary for the eventual lobby size (going, or seat cap if empty).
             round_schedule_summary: self.round_schedule.summary(
-                going_count.clamp(MIN_PLAYERS, EVENT_SEAT_CAP).max(MIN_PLAYERS),
+                going_count
+                    .clamp(MIN_PLAYERS, EVENT_SEAT_CAP)
+                    .max(MIN_PLAYERS),
             ),
             status: self.status,
             going_count,
@@ -268,7 +277,10 @@ fn url_origin(url: &str) -> Option<String> {
     Some(format!("{scheme}://{host}"))
 }
 
-fn extract_manage_token(headers: &HeaderMap, query_token: Option<&str>) -> Result<String, ApiError> {
+fn extract_manage_token(
+    headers: &HeaderMap,
+    query_token: Option<&str>,
+) -> Result<String, ApiError> {
     if let Some(t) = query_token.filter(|s| !s.is_empty()) {
         return Ok(t.to_string());
     }
@@ -296,7 +308,12 @@ async fn persist_event(state: &AppState, event: &ScheduledEvent) -> Result<(), A
 
 fn room_code_for(state: &AppState, room_id: Option<RoomId>) -> Option<String> {
     let room_id = room_id?;
-    state.rooms.lock().unwrap().get(&room_id).map(|r| r.code.clone())
+    state
+        .rooms
+        .lock()
+        .unwrap()
+        .get(&room_id)
+        .map(|r| r.code.clone())
 }
 
 pub async fn create_event(
@@ -408,60 +425,59 @@ pub async fn create_rsvp(
     let rsvp_id = RsvpId::new();
     let now = Utc::now();
 
-    let (view, stored, rsvp_status, waitlist_position) = {
-        let mut events = state.events.lock().unwrap();
-        let event = events
-            .values_mut()
-            .find(|e| e.slug == slug)
-            .ok_or(ApiError::NotFound("event"))?;
-        if event.status != GameEventStatus::Open {
-            return Err(ApiError::Conflict(
-                "this event is not accepting RSVPs".into(),
-            ));
-        }
-        let grace_end = event.starts_at + Duration::hours(2);
-        if Utc::now() > grace_end {
-            event.status = GameEventStatus::Expired;
-            event.updated_at = now;
-            return Err(ApiError::Conflict("this event has expired".into()));
-        }
-        if event
-            .rsvps
-            .iter()
-            .any(|r| r.mobile_e164 == mobile && (r.status == "going" || r.status == "waitlisted"))
+    let (view, stored, rsvp_status, waitlist_position) =
         {
-            return Err(ApiError::Conflict(
-                "this mobile number is already registered".into(),
-            ));
-        }
-        let going = event.going_rsvps().count() as u8;
-        let waitlisted = event.waitlisted_rsvps().count() as u8;
-        let (status, waitlist_position) = if going < EVENT_SEAT_CAP {
-            ("going".to_string(), None)
-        } else if waitlisted < EVENT_WAITLIST_CAP {
-            ("waitlisted".to_string(), Some(waitlisted + 1))
-        } else {
-            return Err(ApiError::Conflict(
-                "seats and waitlist are full (8 players + 5 waitlist)".into(),
-            ));
+            let mut events = state.events.lock().unwrap();
+            let event = events
+                .values_mut()
+                .find(|e| e.slug == slug)
+                .ok_or(ApiError::NotFound("event"))?;
+            if event.status != GameEventStatus::Open {
+                return Err(ApiError::Conflict(
+                    "this event is not accepting RSVPs".into(),
+                ));
+            }
+            let grace_end = event.starts_at + Duration::hours(2);
+            if Utc::now() > grace_end {
+                event.status = GameEventStatus::Expired;
+                event.updated_at = now;
+                return Err(ApiError::Conflict("this event has expired".into()));
+            }
+            if event.rsvps.iter().any(|r| {
+                r.mobile_e164 == mobile && (r.status == "going" || r.status == "waitlisted")
+            }) {
+                return Err(ApiError::Conflict(
+                    "this mobile number is already registered".into(),
+                ));
+            }
+            let going = event.going_rsvps().count() as u8;
+            let waitlisted = event.waitlisted_rsvps().count() as u8;
+            let (status, waitlist_position) = if going < EVENT_SEAT_CAP {
+                ("going".to_string(), None)
+            } else if waitlisted < EVENT_WAITLIST_CAP {
+                ("waitlisted".to_string(), Some(waitlisted + 1))
+            } else {
+                return Err(ApiError::Conflict(
+                    "seats and waitlist are full (8 players + 5 waitlist)".into(),
+                ));
+            };
+            event.rsvps.push(crate::state::EventRsvp {
+                id: rsvp_id,
+                display_name,
+                mobile_e164: mobile,
+                status: status.clone(),
+                manage_token_hash: hash_token(&rsvp_token),
+                contact_consent: body.contact_consent,
+                created_at: now,
+            });
+            event.updated_at = now;
+            (
+                event.public_view(room_code_for(&state, event.room_id)),
+                event.to_stored(),
+                status,
+                waitlist_position,
+            )
         };
-        event.rsvps.push(crate::state::EventRsvp {
-            id: rsvp_id,
-            display_name,
-            mobile_e164: mobile,
-            status: status.clone(),
-            manage_token_hash: hash_token(&rsvp_token),
-            contact_consent: body.contact_consent,
-            created_at: now,
-        });
-        event.updated_at = now;
-        (
-            event.public_view(room_code_for(&state, event.room_id)),
-            event.to_stored(),
-            status,
-            waitlist_position,
-        )
-    };
     state
         .store
         .upsert_scheduled_event(&stored)
@@ -705,17 +721,20 @@ pub async fn open_lobby(
         dealer_total_restriction: false,
         open_start: false,
     };
-    let room_view = room.view();
+    let mut room_view = room.view();
     state
         .store
         .upsert_room(&stored_room(&room))
         .await
         .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
     state.rooms.lock().unwrap().insert(room_id, room);
+    crate::leaderboard::stamp_room_ladder_ranks(&state, &mut room_view);
 
     let (event_view, stored) = {
         let mut events = state.events.lock().unwrap();
-        let event = events.get_mut(&event_id).ok_or(ApiError::NotFound("event"))?;
+        let event = events
+            .get_mut(&event_id)
+            .ok_or(ApiError::NotFound("event"))?;
         event.status = GameEventStatus::LobbyOpen;
         event.room_id = Some(room_id);
         event.host_session_id = Some(session.id);
@@ -830,7 +849,9 @@ END:VCALENDAR\r\n"
             (
                 header::CONTENT_DISPOSITION,
                 HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
-                    .unwrap_or_else(|_| HeaderValue::from_static("attachment; filename=\"event.ics\"")),
+                    .unwrap_or_else(|_| {
+                        HeaderValue::from_static("attachment; filename=\"event.ics\"")
+                    }),
             ),
         ],
         ics,

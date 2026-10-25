@@ -30,7 +30,9 @@ struct MemoryInner {
     games: HashMap<GameId, StoredGame>,
     scheduled_events: HashMap<EventId, StoredScheduledEvent>,
     users: HashMap<Uuid, StoredUser>,
-    identities: HashMap<String, Uuid>,
+    /// `(provider, subject)` so the same subject string on two providers
+    /// stays two accounts.
+    identities: HashMap<(String, String), Uuid>,
     stats: HashMap<Uuid, UserStatsRow>,
     /// (game_id, user_id) already applied. Survives delete_game.
     recorded: HashSet<(Uuid, Uuid)>,
@@ -85,7 +87,11 @@ impl GameStore for MemoryStore {
     }
 
     async fn upsert_room(&self, room: &StoredRoom) -> Result<(), PersistError> {
-        self.inner.lock().unwrap().rooms.insert(room.room_id, room.clone());
+        self.inner
+            .lock()
+            .unwrap()
+            .rooms
+            .insert(room.room_id, room.clone());
         Ok(())
     }
 
@@ -95,7 +101,14 @@ impl GameStore for MemoryStore {
     }
 
     async fn load_sessions(&self) -> Result<Vec<StoredSession>, PersistError> {
-        Ok(self.inner.lock().unwrap().sessions.values().cloned().collect())
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .sessions
+            .values()
+            .cloned()
+            .collect())
     }
 
     async fn load_rooms(&self) -> Result<Vec<StoredRoom>, PersistError> {
@@ -157,7 +170,11 @@ impl GameStore for MemoryStore {
                 .games
                 .get(&commit.game_id)
                 .ok_or_else(|| PersistError::NotFound(format!("game {}", commit.game_id)))?;
-            if game.events.iter().any(|e| e.action_id == Some(commit.action_id)) {
+            if game
+                .events
+                .iter()
+                .any(|e| e.action_id == Some(commit.action_id))
+            {
                 return Ok(());
             }
             game.players.clone()
@@ -178,7 +195,8 @@ impl GameStore for MemoryStore {
                 .insert(commit.state.version, commit.state.clone());
 
             if let Some(round) = &commit.round_result {
-                game.round_results.retain(|r| r.round_index != round.round_index);
+                game.round_results
+                    .retain(|r| r.round_index != round.round_index);
                 game.round_results.push(round.clone());
             }
             if commit.game_result.is_some() {
@@ -205,10 +223,7 @@ impl GameStore for MemoryStore {
         let Some(game) = inner.games.get(&game_id) else {
             return Ok(false);
         };
-        Ok(game
-            .events
-            .iter()
-            .any(|e| e.action_id == Some(action_id)))
+        Ok(game.events.iter().any(|e| e.action_id == Some(action_id)))
     }
 
     async fn load_active_games(&self) -> Result<Vec<RestoredGame>, PersistError> {
@@ -282,7 +297,10 @@ impl GameStore for MemoryStore {
         Ok(dedup_from_events(&game.events))
     }
 
-    async fn load_game_history(&self, game_id: GameId) -> Result<Option<GameHistory>, PersistError> {
+    async fn load_game_history(
+        &self,
+        game_id: GameId,
+    ) -> Result<Option<GameHistory>, PersistError> {
         let inner = self.inner.lock().unwrap();
         let Some(game) = inner.games.get(&game_id) else {
             return Ok(None);
@@ -297,7 +315,10 @@ impl GameStore for MemoryStore {
         }))
     }
 
-    async fn upsert_scheduled_event(&self, event: &StoredScheduledEvent) -> Result<(), PersistError> {
+    async fn upsert_scheduled_event(
+        &self,
+        event: &StoredScheduledEvent,
+    ) -> Result<(), PersistError> {
         self.inner
             .lock()
             .unwrap()
@@ -394,26 +415,32 @@ impl GameStore for MemoryStore {
     }
 
     async fn upsert_user(&self, user: &StoredUser) -> Result<(), PersistError> {
-        self.inner.lock().unwrap().users.insert(user.user_id, user.clone());
+        self.inner
+            .lock()
+            .unwrap()
+            .users
+            .insert(user.user_id, user.clone());
         Ok(())
     }
 
     async fn upsert_identity(&self, identity: &StoredIdentity) -> Result<(), PersistError> {
         let mut inner = self.inner.lock().unwrap();
-        inner
-            .identities
-            .insert(identity.subject.clone(), identity.user_id);
+        inner.identities.insert(
+            (identity.provider.clone(), identity.subject.clone()),
+            identity.user_id,
+        );
         Ok(())
     }
 
-    async fn find_user_by_google_subject(
+    async fn find_user_by_identity(
         &self,
+        provider: &str,
         subject: &str,
     ) -> Result<Option<StoredUser>, PersistError> {
         let inner = self.inner.lock().unwrap();
         Ok(inner
             .identities
-            .get(subject)
+            .get(&(provider.to_string(), subject.to_string()))
             .and_then(|id| inner.users.get(id).cloned()))
     }
 

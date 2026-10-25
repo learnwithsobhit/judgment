@@ -676,19 +676,14 @@ class _TopBar extends StatelessWidget {
           ),
         ),
       ],
-      if (view.trump != null) ...[
-        const SizedBox(width: 8),
-        _trumpChip(view),
-      ],
+      if (view.trump != null) ...[const SizedBox(width: 8), _trumpChip(view)],
     ];
     final tools = <Widget>[
       if (remainingSeconds != null && !view.isFinished) ...[
         Icon(
           Icons.timer_outlined,
           size: 18,
-          color: remainingSeconds <= 10
-              ? Colors.orangeAccent
-              : Colors.white70,
+          color: remainingSeconds <= 10 ? Colors.orangeAccent : Colors.white70,
         ),
         const SizedBox(width: 4),
         Text(
@@ -738,10 +733,7 @@ class _TopBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(children: [...status, const Spacer()]),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: tools,
-                ),
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: tools),
               ],
             )
           else
@@ -1032,6 +1024,7 @@ class _TableArea extends StatelessWidget {
                 nickname: controller.myNickname,
                 radius: 12,
                 highlight: isMyTurn,
+                boardRank: view.ownLadderRank,
                 flashMood: controller.avatarFlashes[controller.myPlayerId],
                 onLongPress: () => controller.sendAvatarFlash('cheer'),
               ),
@@ -1161,6 +1154,7 @@ class _OpponentSeat extends StatelessWidget {
                 radius: avatarRadius,
                 highlight: isTurn || isLeader,
                 muted: disconnected,
+                boardRank: opponent.ladderRank,
                 flashMood: controller.avatarFlashes[opponent.playerId],
                 onLongPress: () =>
                     controller.sendReaction('👏', target: opponent.playerId),

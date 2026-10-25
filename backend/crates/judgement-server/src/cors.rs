@@ -11,7 +11,9 @@ pub fn cors_layer_from_env() -> CorsLayer {
         Ok(raw) => {
             let trimmed = raw.trim();
             if trimmed.is_empty() || trimmed == "*" {
-                tracing::warn!("ALLOWED_ORIGINS is permissive — set explicit origins in production");
+                tracing::warn!(
+                    "ALLOWED_ORIGINS is permissive — set explicit origins in production"
+                );
                 return CorsLayer::permissive();
             }
             let origins: Vec<_> = trimmed

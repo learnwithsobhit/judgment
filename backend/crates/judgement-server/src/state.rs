@@ -13,8 +13,8 @@ use rand::distr::Alphanumeric;
 use rand::Rng;
 use tokio::sync::mpsc;
 
-use judgement_ai::ExplanationService;
 use chrono::{DateTime, Utc};
+use judgement_ai::ExplanationService;
 use judgement_domain::{
     EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit, MIN_PLAYERS,
 };
@@ -114,6 +114,7 @@ impl Room {
                 is_host: s.session_id == self.host_session,
                 avatar_id: s.avatar_id.clone(),
                 vacant: false,
+                ladder_rank: None,
             })
             .collect();
         seats.sort_by_key(|s| s.seat);
@@ -202,7 +203,10 @@ pub struct AppState {
     /// Applied at game start and persisted on `GameRules.reconnect_grace_seconds`.
     pub reconnect_grace: Duration,
     /// Public Top 10. Refreshed in the background; reads never hit the database.
-    pub leaderboard: Mutex<std::sync::Arc<Vec<judgement_persistence::LeaderboardRow>>>,
+    /// Shared with game actors so a seat cap tracks the same snapshot.
+    pub leaderboard: std::sync::Arc<
+        Mutex<std::sync::Arc<Vec<judgement_persistence::LeaderboardRow>>>,
+    >,
     /// Short memo for GET /me/stats so a profile open does not query every time.
     pub stats_memo: Mutex<HashMap<uuid::Uuid, (Instant, judgement_persistence::UserStatsView)>>,
 }
@@ -227,7 +231,7 @@ impl AppState {
             active_websockets: std::sync::atomic::AtomicU64::new(0),
             restart_limits: Mutex::default(),
             reconnect_grace: reconnect_grace_from_env(),
-            leaderboard: Mutex::new(std::sync::Arc::new(Vec::new())),
+            leaderboard: std::sync::Arc::new(Mutex::new(std::sync::Arc::new(Vec::new()))),
             stats_memo: Mutex::default(),
         }
     }
@@ -240,8 +244,14 @@ impl AppState {
             avatar_id: None,
             user_id: None,
         };
-        self.sessions.lock().unwrap().insert(session.id, session.clone());
-        self.tokens.lock().unwrap().insert(session.token.clone(), session.id);
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(session.id, session.clone());
+        self.tokens
+            .lock()
+            .unwrap()
+            .insert(session.token.clone(), session.id);
         session
     }
 
@@ -259,8 +269,14 @@ impl AppState {
             avatar_id,
             user_id: Some(user_id),
         };
-        self.sessions.lock().unwrap().insert(session.id, session.clone());
-        self.tokens.lock().unwrap().insert(session.token.clone(), session.id);
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(session.id, session.clone());
+        self.tokens
+            .lock()
+            .unwrap()
+            .insert(session.token.clone(), session.id);
         session
     }
 

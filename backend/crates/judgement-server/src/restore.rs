@@ -129,13 +129,11 @@ fn spawn_restored_actor(
     // the original seed would reshuffle future deals as if from round 1
     // (Phase 5 audit). The current deal is already in the snapshot.
     let _ = game.seed;
-    engine
-        .check_invariants()
-        .map_err(|e| {
-            judgement_persistence::PersistError::Conflict(format!(
-                "restored game {game_id} failed invariants: {e}"
-            ))
-        })?;
+    engine.check_invariants().map_err(|e| {
+        judgement_persistence::PersistError::Conflict(format!(
+            "restored game {game_id} failed invariants: {e}"
+        ))
+    })?;
 
     let turn_timeout = game
         .rules
@@ -166,6 +164,12 @@ fn spawn_restored_actor(
         on_host_changed: Some(make_host_changed_hook(state.clone(), game.room_id)),
         on_aborted: Some(make_aborted_hook(state.clone(), game.room_id)),
         on_finished: Some(make_finished_hook(state.clone())),
+        leaderboard: state.leaderboard.clone(),
+        seat_users: game
+            .players
+            .iter()
+            .map(|player| (player.player_id, player.user_id))
+            .collect(),
     });
 
     let players: HashMap<_, _> = game

@@ -77,8 +77,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
     try {
       final room = await widget.api.getRoom(_room.roomId);
       if (!mounted) return;
-      final stillSeated =
-          room.seats.any((s) => s.playerId == widget.myPlayerId);
+      final stillSeated = room.seats.any(
+        (s) => s.playerId == widget.myPlayerId,
+      );
       if (!stillSeated && room.phase == 'lobby') {
         _poll?.cancel();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -89,7 +90,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
       }
       setState(() {
         _room = room;
-        _myAvatarId = room.seats
+        _myAvatarId =
+            room.seats
                 .where((s) => s.playerId == widget.myPlayerId)
                 .map((s) => s.avatarId)
                 .firstOrNull ??
@@ -124,8 +126,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     if (confirmed != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      final room =
-          await widget.api.removePlayer(_room.roomId, seat.playerId);
+      final room = await widget.api.removePlayer(_room.roomId, seat.playerId);
       if (mounted) setState(() => _room = room);
     } on ApiException catch (error) {
       _showError(error.message);
@@ -147,21 +148,22 @@ class _LobbyScreenState extends State<LobbyScreen> {
       nickname: widget.nickname,
       gameId: gameId,
     );
-    final controller = GameController(
-      api: widget.api,
-      gameId: gameId,
-      myPlayerId: widget.myPlayerId,
-      myNickname: widget.nickname,
-    )
-      ..roomCode = _room.code
-      ..countsForProfile =
-          AccountSession.instance.isSignedIn &&
-          widget.api.token == AccountSession.instance.token
-      ..amHost = _amHost;
+    final controller =
+        GameController(
+            api: widget.api,
+            gameId: gameId,
+            myPlayerId: widget.myPlayerId,
+            myNickname: widget.nickname,
+          )
+          ..roomCode = _room.code
+          ..countsForProfile =
+              AccountSession.instance.isSignedIn &&
+              widget.api.token == AccountSession.instance.token
+          ..amHost = _amHost;
     controller.connect();
-    Navigator.of(context).pushReplacement(MaterialPageRoute(
-      builder: (_) => TableScreen(controller: controller),
-    ));
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => TableScreen(controller: controller)),
+    );
   }
 
   bool get _amHost =>
@@ -252,7 +254,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _showCapacityFull(String message) {
@@ -285,176 +289,191 @@ class _LobbyScreenState extends State<LobbyScreen> {
         }
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: const Text('Lobby'),
-        backgroundColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          tooltip: 'Leave room',
-          onPressed: _leaving
-              ? null
-              : () => unawaited(_requestLeave(source: ExitSource.appBar)),
+        appBar: AppBar(
+          title: const Text('Lobby'),
+          backgroundColor: Colors.transparent,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Leave room',
+            onPressed: _leaving
+                ? null
+                : () => unawaited(_requestLeave(source: ExitSource.appBar)),
+          ),
         ),
-      ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 16),
-                    child: Column(
-                      children: [
-                        Text(
-                          _room.code,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 8,
-                            color: goldAccent,
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 16,
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            _room.code,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 8,
+                              color: goldAccent,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Share the link — friends only need a nickname',
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              FilledButton.tonalIcon(
+                                onPressed: () {
+                                  final text = buildLobbyInviteText(_room.code);
+                                  final url = roomInviteUrl(
+                                    _room.code,
+                                    medium: 'whatsapp',
+                                  );
+                                  showSocialShareSheet(
+                                    context: context,
+                                    title: 'Invite friends',
+                                    text: text,
+                                    url: url,
+                                    campaign: ShareCampaign.lobbyInvite,
+                                  );
+                                },
+                                icon: const Icon(Icons.ios_share, size: 18),
+                                label: const Text('Invite friends'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  final link = roomInviteUrl(_room.code);
+                                  Clipboard.setData(ClipboardData(text: link));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Join link copied'),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.link, size: 18),
+                                label: const Text('Copy join link'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  Clipboard.setData(
+                                    ClipboardData(text: _room.code),
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Room code copied'),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.copy, size: 18),
+                                label: const Text('Copy code'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Players $filled / $total',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          Text(
+                            [
+                              _room.turnTimeoutSeconds == null
+                                  ? 'No turn timer'
+                                  : '${_room.turnTimeoutSeconds}s turn timer',
+                              _room.roundScheduleSummary,
+                              _room.dealerTotalRestriction
+                                  ? 'dealer bid restriction on'
+                                  : 'dealer may match total',
+                            ].join(' · '),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          _trumpSummaryWidget(_room),
+                          const SizedBox(height: 8),
+                          for (var seat = 0; seat < total; seat++)
+                            _seatTile(seat),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Your avatar',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  AvatarPicker(
+                    selectedId: _myAvatarId,
+                    onSelected: _busy ? (_) {} : _pickAvatar,
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy ? null : _toggleReady,
+                          icon: Icon(_amReady ? Icons.close : Icons.check),
+                          label: Text(_amReady ? 'Not ready' : 'Ready'),
+                        ),
+                      ),
+                      if (_amHost) ...[
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _busy || !_canStart ? null : _start,
+                            icon: const Icon(Icons.play_arrow),
+                            label: const Text('Start game'),
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'Share the link — friends only need a nickname',
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: [
-                            FilledButton.tonalIcon(
-                              onPressed: () {
-                                final text = buildLobbyInviteText(_room.code);
-                                final url = roomInviteUrl(
-                                  _room.code,
-                                  medium: 'whatsapp',
-                                );
-                                showSocialShareSheet(
-                                  context: context,
-                                  title: 'Invite friends',
-                                  text: text,
-                                  url: url,
-                                  campaign: ShareCampaign.lobbyInvite,
-                                );
-                              },
-                              icon: const Icon(Icons.ios_share, size: 18),
-                              label: const Text('Invite friends'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                final link = roomInviteUrl(_room.code);
-                                Clipboard.setData(ClipboardData(text: link));
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text('Join link copied')),
-                                );
-                              },
-                              icon: const Icon(Icons.link, size: 18),
-                              label: const Text('Copy join link'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                Clipboard.setData(
-                                    ClipboardData(text: _room.code));
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text('Room code copied')),
-                                );
-                              },
-                              icon: const Icon(Icons.copy, size: 18),
-                              label: const Text('Copy code'),
-                            ),
-                          ],
-                        ),
                       ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      children: [
-                        Text('Players $filled / $total',
-                            style: Theme.of(context).textTheme.titleMedium),
-                        Text(
-                          [
-                            _room.turnTimeoutSeconds == null
-                                ? 'No turn timer'
-                                : '${_room.turnTimeoutSeconds}s turn timer',
-                            _room.roundScheduleSummary,
-                            _room.dealerTotalRestriction
-                                ? 'dealer bid restriction on'
-                                : 'dealer may match total',
-                          ].join(' · '),
-                          style: const TextStyle(fontSize: 12, color: Colors.white54),
-                        ),
-                        const SizedBox(height: 4),
-                        _trumpSummaryWidget(_room),
-                        const SizedBox(height: 8),
-                        for (var seat = 0; seat < total; seat++)
-                          _seatTile(seat),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('Your avatar', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 8),
-                AvatarPicker(
-                  selectedId: _myAvatarId,
-                  onSelected: _busy ? (_) {} : _pickAvatar,
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _busy ? null : _toggleReady,
-                        icon: Icon(_amReady ? Icons.close : Icons.check),
-                        label: Text(_amReady ? 'Not ready' : 'Ready'),
-                      ),
-                    ),
-                    if (_amHost) ...[
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _busy || !_canStart ? null : _start,
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text('Start game'),
-                        ),
-                      ),
                     ],
-                  ],
-                ),
-                if (_amHost && !_canStart)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      filled < _room.minPlayers
-                          ? 'Waiting for at least ${_room.minPlayers} players '
-                              '(${_room.minPlayers - filled} more)…'
-                          : 'Waiting for everyone to be ready…',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
-                    ),
                   ),
-                const SizedBox(height: 20),
-                const AppVersionBar(),
-              ],
+                  if (_amHost && !_canStart)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        filled < _room.minPlayers
+                            ? 'Waiting for at least ${_room.minPlayers} players '
+                                  '(${_room.minPlayers - filled} more)…'
+                            : 'Waiting for everyone to be ready…',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+                  const AppVersionBar(),
+                ],
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -475,10 +494,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 ),
               TextSpan(
                 text: suitSymbols[cycle[i]] ?? '?',
-                style: TextStyle(
-                  color: suitColor(cycle[i]),
-                  fontSize: 16,
-                ),
+                style: TextStyle(color: suitColor(cycle[i]), fontSize: 16),
               ),
             ],
           ],
@@ -493,10 +509,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
             const TextSpan(text: 'Trump rotates from '),
             TextSpan(
               text: suitSymbols[room.firstTrump] ?? '?',
-              style: TextStyle(
-                color: suitColor(room.firstTrump),
-                fontSize: 16,
-              ),
+              style: TextStyle(color: suitColor(room.firstTrump), fontSize: 16),
             ),
           ],
         ),
@@ -517,17 +530,24 @@ class _LobbyScreenState extends State<LobbyScreen> {
       leading: seat == null
           ? const CircleAvatar(
               backgroundColor: Colors.white12,
-              child: Icon(Icons.person_outline, size: 18, color: Colors.white38),
+              child: Icon(
+                Icons.person_outline,
+                size: 18,
+                color: Colors.white38,
+              ),
             )
           : PlayerAvatar(
               avatarId: seat.avatarId,
               nickname: seat.nickname,
               radius: 18,
               highlight: isMe,
+              boardRank: seat.ladderRank,
             ),
-      title: Text(seat == null
-          ? 'Empty seat'
-          : '${seat.nickname}${isMe ? ' (you)' : ''}${seat.isHost ? ' · host' : ''}'),
+      title: Text(
+        seat == null
+            ? 'Empty seat'
+            : '${seat.nickname}${isMe ? ' (you)' : ''}${seat.isHost ? ' · host' : ''}',
+      ),
       trailing: seat == null
           ? null
           : Row(
@@ -540,8 +560,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
                     onPressed: () => _removePlayer(seat),
                   ),
                 seat.ready
-                    ? const Icon(Icons.check_circle,
-                        color: Colors.lightGreenAccent)
+                    ? const Icon(
+                        Icons.check_circle,
+                        color: Colors.lightGreenAccent,
+                      )
                     : const Icon(Icons.hourglass_empty, color: Colors.white38),
               ],
             ),

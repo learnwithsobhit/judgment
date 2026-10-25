@@ -28,14 +28,20 @@ pub enum ClientCommand {
     Ready,
     Unready,
     StartGame,
-    PlaceBid { bid: u8 },
-    PlayCard { card_id: judgement_domain::CardId },
+    PlaceBid {
+        bid: u8,
+    },
+    PlayCard {
+        card_id: judgement_domain::CardId,
+    },
     RequestStateSync,
     LeaveGame,
     /// Host ends a game paused for vacant seats (replace-or-end).
     EndGame,
     /// Built-in avatar pack id (cosmetic).
-    SetAvatar { avatar_id: String },
+    SetAvatar {
+        avatar_id: String,
+    },
     /// Quick emoji reaction (ephemeral table event).
     SendReaction {
         emoji: String,
@@ -43,11 +49,17 @@ pub enum ClientCommand {
         target: Option<PlayerId>,
     },
     /// Free-text vibe; server broadcasts resolved emoji burst (client may also resolve).
-    SendEmoteText { text: String },
+    SendEmoteText {
+        text: String,
+    },
     /// Manual avatar flash mood: cheer | laugh | facepalm | fire
-    AvatarFlash { mood: String },
+    AvatarFlash {
+        mood: String,
+    },
     /// Curated soundboard clip (asset id only; clients hold the bytes).
-    SendSoundboard { sound_id: String },
+    SendSoundboard {
+        sound_id: String,
+    },
     /// Short ephemeral voice note (Opus/WebM base64; not persisted).
     SendVoiceNote {
         mime: String,
@@ -62,9 +74,16 @@ pub enum ClientCommand {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum RejectReason {
-    Game { error: GameError },
-    UnsupportedProtocolVersion { supported: u16, received: u16 },
-    MalformedMessage { detail: String },
+    Game {
+        error: GameError,
+    },
+    UnsupportedProtocolVersion {
+        supported: u16,
+        received: u16,
+    },
+    MalformedMessage {
+        detail: String,
+    },
     MessageTooLarge,
     /// Actor command queue is full — backpressure; retry shortly.
     QueueFull,
@@ -136,10 +155,18 @@ pub enum ServerMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pace_open: Option<PaceOpen>,
     },
-    PlayerConnected { player_id: PlayerId },
-    PlayerDisconnected { player_id: PlayerId },
-    HostChanged { new_host: PlayerId },
-    TimerUpdated { timer: TimerEvent },
+    PlayerConnected {
+        player_id: PlayerId,
+    },
+    PlayerDisconnected {
+        player_id: PlayerId,
+    },
+    HostChanged {
+        new_host: PlayerId,
+    },
+    TimerUpdated {
+        timer: TimerEvent,
+    },
     /// The table is paused while a disconnected human is within the reconnect
     /// grace window (PLAN.md §15).
     GamePaused {
@@ -163,12 +190,20 @@ pub enum ServerMessage {
         aborted: Option<bool>,
     },
     /// Host restarted: same room, new `game_id` — clients must switch WS.
-    GameRestarted { game_id: GameId },
+    GameRestarted {
+        game_id: GameId,
+    },
     /// Legacy wire name; no longer emitted for live disconnect (kept for older clients).
-    BotTookOver { player_id: PlayerId },
-    PlayerResumedControl { player_id: PlayerId },
+    BotTookOver {
+        player_id: PlayerId,
+    },
+    PlayerResumedControl {
+        player_id: PlayerId,
+    },
     /// Issued on successful WebSocket reconnect (PLAN.md §15.1).
-    TokenRotated { token: String },
+    TokenRotated {
+        token: String,
+    },
     /// Ephemeral table engagement (reactions / cheers). Not stored in engine.
     TableEvent {
         kind: String,
@@ -216,7 +251,9 @@ mod tests {
             action_id: ActionId(Uuid::nil()),
             game_id: GameId(Uuid::nil()),
             expected_state_version: 84,
-            action: ClientCommand::PlayCard { card_id: "ace-of-hearts".parse().unwrap() },
+            action: ClientCommand::PlayCard {
+                card_id: "ace-of-hearts".parse().unwrap(),
+            },
         };
         let json = serde_json::to_value(&envelope).unwrap();
         assert_eq!(json["protocol_version"], 1);
@@ -235,7 +272,12 @@ mod tests {
             ClientCommand::Unready,
             ClientCommand::StartGame,
             ClientCommand::PlaceBid { bid: 3 },
-            ClientCommand::PlayCard { card_id: CardId { suit: judgement_domain::Suit::Spades, rank: judgement_domain::Rank::Seven } },
+            ClientCommand::PlayCard {
+                card_id: CardId {
+                    suit: judgement_domain::Suit::Spades,
+                    rank: judgement_domain::Rank::Seven,
+                },
+            },
             ClientCommand::RequestStateSync,
             ClientCommand::LeaveGame,
             ClientCommand::EndGame,
@@ -270,23 +312,24 @@ mod tests {
 
     #[test]
     fn unknown_command_type_is_rejected() {
-        let result: Result<ClientCommand, _> =
-            serde_json::from_str(r#"{"type":"hack_the_deck"}"#);
+        let result: Result<ClientCommand, _> = serde_json::from_str(r#"{"type":"hack_the_deck"}"#);
         assert!(result.is_err());
     }
 
     #[test]
     fn missing_fields_are_rejected() {
-        let result: Result<ClientEnvelope, _> = serde_json::from_str(
-            r#"{"protocol_version":1,"action":{"type":"ready"}}"#,
-        );
+        let result: Result<ClientEnvelope, _> =
+            serde_json::from_str(r#"{"protocol_version":1,"action":{"type":"ready"}}"#);
         assert!(result.is_err());
     }
 
     #[test]
     fn reject_reason_round_trips_with_game_error() {
         let reason = RejectReason::Game {
-            error: judgement_domain::GameError::StaleState { expected_version: 3, actual_version: 7 },
+            error: judgement_domain::GameError::StaleState {
+                expected_version: 3,
+                actual_version: 7,
+            },
         };
         let json = serde_json::to_string(&reason).unwrap();
         let back: RejectReason = serde_json::from_str(&json).unwrap();

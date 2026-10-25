@@ -20,6 +20,9 @@ pub struct OpponentView {
     pub connection_status: ConnectionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    /// 1, 2, or 3 on the overall board. The engine leaves this empty; the server fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ladder_rank: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +99,9 @@ pub struct PlayerGameView {
     pub own_tricks_won: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_avatar_id: Option<String>,
+    /// Viewer's overall board place, 1–3. The engine leaves this empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_ladder_rank: Option<u8>,
     pub opponents: Vec<OpponentView>,
     pub current_trick: Vec<PlayedCard>,
     /// Present after a trick completes until the next card is led.
@@ -161,6 +167,7 @@ pub(crate) fn project_for(
             tricks_won: round.and_then(|r| r.tricks_won.get(&p.id)).copied().unwrap_or(0),
             connection_status: p.connection_status,
             avatar_id: p.avatar_id.clone(),
+            ladder_rank: None,
         })
         .collect();
 
@@ -213,6 +220,7 @@ pub(crate) fn project_for(
         own_bid,
         own_tricks_won,
         own_avatar_id: own_player.avatar_id.clone(),
+        own_ladder_rank: None,
         opponents,
         current_trick,
         last_completed_trick,

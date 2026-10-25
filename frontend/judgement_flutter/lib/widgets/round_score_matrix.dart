@@ -12,6 +12,7 @@ class RoundScoreColumn {
   final String playerId;
   final String displayName;
   final String? avatarId;
+  final int? boardRank;
   final bool highlightHeader;
   final int? total;
 
@@ -19,6 +20,7 @@ class RoundScoreColumn {
     required this.playerId,
     required this.displayName,
     this.avatarId,
+    this.boardRank,
     this.highlightHeader = false,
     this.total,
   });
@@ -84,8 +86,8 @@ class _RoundScoreMatrixState extends State<RoundScoreMatrix> {
   void _updateFade() {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
-    final more = pos.maxScrollExtent > 0.5 &&
-        pos.pixels < pos.maxScrollExtent - 0.5;
+    final more =
+        pos.maxScrollExtent > 0.5 && pos.pixels < pos.maxScrollExtent - 0.5;
     if (more != _canScrollMore && mounted) {
       setState(() => _canScrollMore = more);
     }
@@ -98,8 +100,10 @@ class _RoundScoreMatrixState extends State<RoundScoreMatrix> {
         final available = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
-        final bodyW = (available - RoundScoreMatrix.stickyWidth)
-            .clamp(120.0, double.infinity);
+        final bodyW = (available - RoundScoreMatrix.stickyWidth).clamp(
+          120.0,
+          double.infinity,
+        );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -274,9 +278,7 @@ class _PlayerScoreBody extends StatelessWidget {
         SizedBox(
           height: RoundScoreMatrix.headerHeight,
           child: Row(
-            children: [
-              for (final col in columns) _HeaderCell(column: col),
-            ],
+            children: [for (final col in columns) _HeaderCell(column: col)],
           ),
         ),
         for (final r in history)
@@ -345,6 +347,7 @@ class _HeaderCell extends StatelessWidget {
               nickname: column.displayName,
               radius: 10,
               highlight: column.highlightHeader,
+              boardRank: column.boardRank,
             ),
             const SizedBox(height: 2),
             Text(

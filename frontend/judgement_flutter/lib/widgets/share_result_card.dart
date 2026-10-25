@@ -39,8 +39,8 @@ class ShareResultCard extends StatelessWidget {
     final headline = winners.isEmpty
         ? 'Game over'
         : winners.length == 1
-            ? '${controller.nicknameOf(winners.first.playerId)} wins!'
-            : 'Shared victory!';
+        ? '${controller.nicknameOf(winners.first.playerId)} wins!'
+        : 'Shared victory!';
     final top = ranking.take(3).toList();
 
     return RepaintBoundary(
@@ -124,10 +124,7 @@ class ShareResultCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     for (final ranked in _podiumOrder(top))
-                      _SharePodiumSeat(
-                        controller: controller,
-                        ranked: ranked,
-                      ),
+                      _SharePodiumSeat(controller: controller, ranked: ranked),
                   ],
                 ),
                 if (nightLine != null && nightLine!.isNotEmpty) ...[
@@ -160,7 +157,10 @@ class ShareResultCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         Uri.parse(webOrigin()).host,
-                        style: const TextStyle(fontSize: 12, color: Colors.white70),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       const Text(
@@ -188,10 +188,7 @@ class _SharePodiumSeat extends StatelessWidget {
   final GameController controller;
   final RankedPlayer ranked;
 
-  const _SharePodiumSeat({
-    required this.controller,
-    required this.ranked,
-  });
+  const _SharePodiumSeat({required this.controller, required this.ranked});
 
   @override
   Widget build(BuildContext context) {
@@ -215,6 +212,7 @@ class _SharePodiumSeat extends StatelessWidget {
             nickname: name,
             radius: elevate ? 28 : 22,
             highlight: elevate,
+            boardRank: controller.boardRankOf(ranked.playerId),
           ),
           const SizedBox(height: 6),
           Text(
@@ -244,8 +242,9 @@ Future<Uint8List?> captureShareCardPng(
 }) async {
   for (var attempt = 0; attempt < 8; attempt++) {
     try {
-      final boundary = boundaryKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
+      final boundary =
+          boundaryKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
       if (boundary == null || !boundary.hasSize) {
         await WidgetsBinding.instance.endOfFrame;
         continue;

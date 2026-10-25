@@ -49,20 +49,22 @@ pub trait GameStore: Send + Sync {
     async fn load_active_games(&self) -> Result<Vec<RestoredGame>, PersistError>;
 
     /// Load a single active game for actor respawn, if still `status = active`.
-    async fn load_active_game(
-        &self,
-        game_id: GameId,
-    ) -> Result<Option<RestoredGame>, PersistError>;
+    async fn load_active_game(&self, game_id: GameId)
+        -> Result<Option<RestoredGame>, PersistError>;
 
     async fn load_processed_actions(
         &self,
         game_id: GameId,
     ) -> Result<Vec<(ActionId, u64)>, PersistError>;
 
-    async fn load_game_history(&self, game_id: GameId) -> Result<Option<GameHistory>, PersistError>;
+    async fn load_game_history(&self, game_id: GameId)
+        -> Result<Option<GameHistory>, PersistError>;
 
     /// Upsert a scheduled meetup and its RSVPs (ADR 0005).
-    async fn upsert_scheduled_event(&self, event: &StoredScheduledEvent) -> Result<(), PersistError>;
+    async fn upsert_scheduled_event(
+        &self,
+        event: &StoredScheduledEvent,
+    ) -> Result<(), PersistError>;
 
     async fn load_scheduled_events(&self) -> Result<Vec<StoredScheduledEvent>, PersistError>;
 
@@ -106,8 +108,9 @@ pub trait GameStore: Send + Sync {
 
     async fn upsert_identity(&self, identity: &StoredIdentity) -> Result<(), PersistError>;
 
-    async fn find_user_by_google_subject(
+    async fn find_user_by_identity(
         &self,
+        provider: &str,
         subject: &str,
     ) -> Result<Option<StoredUser>, PersistError>;
 

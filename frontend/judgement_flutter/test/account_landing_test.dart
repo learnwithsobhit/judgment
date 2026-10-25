@@ -15,6 +15,8 @@ Future<void> _acceptLegal(WidgetTester tester) async {
 void main() {
   tearDown(() {
     debugSignInOverride = null;
+    debugEmailSignInOverride = null;
+    debugTelegramSignInOverride = null;
     leaderboardLoad = () => ApiClient().getLeaderboard();
   });
 
@@ -31,8 +33,8 @@ void main() {
     await tester.pump();
     await _acceptLegal(tester);
 
-    await tester.ensureVisible(find.text('Sign in with Google'));
-    await tester.tap(find.text('Sign in with Google'));
+    await tester.ensureVisible(find.byTooltip('Sign in with Google'));
+    await tester.tap(find.byTooltip('Sign in with Google'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -70,12 +72,53 @@ void main() {
     await tester.pump();
 
     expect(find.text('Save this game to your record?'), findsOneWidget);
-    expect(find.text('Sign in with Google'), findsWidgets);
+    expect(find.byTooltip('Sign in with Google'), findsWidgets);
+    expect(find.byTooltip('Sign in with email'), findsWidgets);
+    expect(find.byTooltip('Sign in with Facebook'), findsNothing);
+    expect(find.byTooltip('Sign in with Telegram'), findsWidgets);
+    expect(find.text('Continue as guest'), findsOneWidget);
     await tester.tap(find.text('Continue as guest'));
     await tester.pump();
 
     expect(find.text('Save this game to your record?'), findsNothing);
     await tester.pump(const Duration(seconds: 21));
+  });
+
+  testWidgets('email sign-in keeps the field above a phone keyboard', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 480));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(const JudgementApp());
+    await tester.pump();
+    await _acceptLegal(tester);
+
+    await tester.ensureVisible(find.byTooltip('Sign in with email'));
+    await tester.tap(find.byTooltip('Sign in with email'));
+    await tester.pumpAndSettle();
+
+    final emailField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'Email',
+    );
+    final email = tester.getRect(emailField);
+    expect(email.top, greaterThan(0));
+    expect(email.bottom, lessThan(360));
+    expect(find.text('Password'), findsNothing);
+
+    await tester.enterText(emailField, 'ada@example.com');
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    final passwordField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField && widget.decoration?.labelText == 'Password',
+    );
+    final password = tester.getRect(passwordField);
+    expect(password.top, greaterThan(0));
+    expect(password.bottom, lessThan(400));
+    expect(find.byTooltip('Show password'), findsOneWidget);
   });
 
   testWidgets('a failed Top players sheet does not disable Create room', (
@@ -128,14 +171,59 @@ void main() {
     expect(find.text('Name'), findsOneWidget);
     expect(find.text('Played'), findsOneWidget);
     expect(find.text('Won'), findsOneWidget);
-    expect(find.text('Loss'), findsOneWidget);
-    expect(find.text('Exact'), findsOneWidget);
-    expect(find.text('Average'), findsOneWidget);
+    expect(find.text('Win%'), findsOneWidget);
+    expect(find.text('Bids'), findsOneWidget);
+    expect(find.textContaining('wins divided by played'), findsOneWidget);
+    expect(find.textContaining('then higher Win%'), findsOneWidget);
     expect(find.text('1. Anurag Chaturvedi'), findsOneWidget);
+    expect(find.byTooltip('1st overall'), findsOneWidget);
+    expect(find.textContaining('gold is 1st'), findsOneWidget);
     expect(find.text('3'), findsOneWidget);
-    expect(find.text('2'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
+    expect(find.text('33%'), findsOneWidget);
     expect(find.text('83%'), findsOneWidget);
-    expect(find.text('119'), findsOneWidget);
+    final key = tester.getRect(find.textContaining('wins divided by played'));
+    expect(key.top, greaterThan(0));
+    expect(key.bottom, lessThanOrEqualTo(800));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('top players key stays on a short phone', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    leaderboardLoad = () async => [
+      for (var i = 0; i < 10; i++)
+        LeaderboardEntry(
+          rank: i + 1,
+          displayName: 'Player $i',
+          avatarId: 'face_01',
+          wins: 10 - i,
+          games: 20,
+          exactPercent: 70,
+          averageScore: 90,
+        ),
+    ];
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('1st overall'), findsOneWidget);
+    expect(find.byTooltip('2nd overall'), findsOneWidget);
+    expect(find.byTooltip('3rd overall'), findsOneWidget);
+    expect(find.byTooltip('4th overall'), findsNothing);
+    final name = tester.getRect(find.text('Name'));
+    final first = tester.getRect(find.text('1. Player 0'));
+    expect(first.top, greaterThan(name.bottom));
+    final key = tester.getRect(find.textContaining('Points per game'));
+    expect(key.bottom, lessThanOrEqualTo(640));
+    await tester.scrollUntilVisible(
+      find.text('10. Player 9'),
+      200,
+      scrollable: find.byType(Scrollable),
+    );
+    expect(find.text('10. Player 9'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

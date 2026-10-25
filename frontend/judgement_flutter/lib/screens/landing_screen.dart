@@ -17,6 +17,7 @@ import '../widgets/leaderboard_sheet.dart';
 import '../widgets/legal_consent_checkbox.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/profile_sheet.dart';
+import '../widgets/sign_in_brands.dart';
 import '../widgets/trump_cycle_editor.dart';
 import 'lobby_screen.dart';
 import 'setup_room_screen.dart';
@@ -257,10 +258,8 @@ class _LandingScreenState extends State<LandingScreen> {
       if (seatedId == null) {
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => SetupRoomScreen(
-              code: room.code,
-              seats: room.maxPlayers,
-            ),
+            builder: (_) =>
+                SetupRoomScreen(code: room.code, seats: room.maxPlayers),
           ),
         );
         return;
@@ -335,9 +334,22 @@ class _LandingScreenState extends State<LandingScreen> {
     );
   }
 
-  Future<void> _signIn() async {
+  String _signInFailureText(String detail) {
+    final cleaned = detail
+        .replaceFirst('Bad state: ', '')
+        .replaceFirst('StateError: ', '')
+        .trim();
+    if (cleaned.isEmpty ||
+        cleaned.contains('popup closed') ||
+        cleaned.length > 120) {
+      return 'Couldn\'t sign in. You can still play as a guest.';
+    }
+    return 'Couldn\'t sign in. $cleaned';
+  }
+
+  Future<void> _signIn(Future<void> Function(ApiClient api) signIn) async {
     try {
-      await signInWithGoogle(ApiClient());
+      await signIn(ApiClient());
     } catch (error) {
       if (!mounted) return;
       final detail = error.toString();
@@ -345,8 +357,8 @@ class _LandingScreenState extends State<LandingScreen> {
         SnackBar(
           content: Text(
             detail.contains('not configured')
-                ? 'Couldn\'t sign in. Google is not set up for this build. You can still play as a guest.'
-                : 'Couldn\'t sign in. You can still play as a guest.',
+                ? 'Couldn\'t sign in. Sign-in is not set up for this build. You can still play as a guest.'
+                : _signInFailureText(detail),
           ),
         ),
       );
@@ -794,13 +806,12 @@ class _LandingScreenState extends State<LandingScreen> {
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: 44,
-                                  child: OutlinedButton(
-                                    onPressed: _signIn,
-                                    child: const Text('Sign in with Google'),
+                                SignInBrandRow(
+                                  onGoogle: () => _signIn(signInWithGoogle),
+                                  onEmail: () => _signIn(
+                                    (api) => signInWithEmail(context, api),
                                   ),
+                                  onTelegram: () => _signIn(signInWithTelegram),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(

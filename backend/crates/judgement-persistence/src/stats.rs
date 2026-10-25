@@ -55,8 +55,17 @@ pub fn apply_finish(row: &mut UserStatsRow, seat: &SeatFinish, rounds: i32, coun
     }
 }
 
-/// Higher sorts first: wins, then exact-bid rate, then average score.
-pub fn ladder_key(row: &UserStatsRow) -> (i32, i64, i64) {
+/// Higher sorts first: wins, then win rate, then exact-bid rate, then points per game.
+///
+/// Win rate and bid rate are exact ratios scaled by 1_000_000, so a 31.6% player
+/// ranks above a 31.1% player even when the card rounds both to 31%. The Postgres
+/// `ORDER BY` in `load_leaderboard` and the rank count must use this same order.
+pub fn ladder_key(row: &UserStatsRow) -> (i32, i64, i64, i64) {
+    let win_rate = if row.ranked_games == 0 {
+        0
+    } else {
+        i64::from(row.ranked_wins) * 1_000_000 / i64::from(row.ranked_games)
+    };
     let strike = if row.ranked_rounds == 0 {
         0
     } else {
@@ -67,7 +76,7 @@ pub fn ladder_key(row: &UserStatsRow) -> (i32, i64, i64) {
     } else {
         row.ranked_points / i64::from(row.ranked_games)
     };
-    (row.ranked_wins, strike, average)
+    (row.ranked_wins, win_rate, strike, average)
 }
 
 pub fn exact_percent(exact: i32, rounds: i32) -> i32 {
@@ -130,5 +139,24 @@ mod tests {
         assert_eq!(row.wins, 1);
         assert_eq!(row.ranked_wins, 0);
         assert_eq!(row.ranked_games, 0);
+    }
+
+    fn key(wins: i32, games: i32, exact: i32, rounds: i32, points: i64) -> (i32, i64, i64, i64) {
+        ladder_key(&UserStatsRow {
+            ranked_wins: wins,
+            ranked_games: games,
+            ranked_exact: exact,
+            ranked_rounds: rounds,
+            ranked_points: points,
+            ..UserStatsRow::default()
+        })
+    }
+
+    #[test]
+    fn ladder_prefers_wins_then_win_rate_then_bids() {
+        assert!(key(3, 10, 0, 10, 0) > key(2, 2, 10, 10, 0));
+        assert!(key(7, 22, 0, 10, 0) > key(7, 30, 100, 100, 0));
+        assert!(key(4, 10, 8, 10, 0) > key(4, 10, 5, 10, 1_000));
+        assert!(key(4, 10, 5, 10, 800) > key(4, 10, 5, 10, 400));
     }
 }

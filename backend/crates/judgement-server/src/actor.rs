@@ -4,13 +4,14 @@
 //! Presence: reconnect grace → vacant seat (claim via room code) or host end.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 
 use judgement_domain::{ActionId, ConnectionStatus, GameError, GameId, PlayerId};
-use judgement_engine::{GameEngine, GameEvent, GamePhase};
+use judgement_engine::{GameEngine, GameEvent, GamePhase, PlayerGameView};
+use judgement_persistence::LeaderboardRow;
 use judgement_persistence::{GameStore, PersistError, StoredPlayerPace};
 use judgement_protocol::{
     ClientCommand, ClientEnvelope, PaceOpen, PlayerPace, RejectReason, ServerMessage, TimerEvent,
@@ -57,9 +58,13 @@ pub enum ActorMessage {
         player_id: PlayerId,
         envelope: ClientEnvelope,
     },
-    Timeout { deadline_id: u64 },
+    Timeout {
+        deadline_id: u64,
+    },
     /// Fire after [`ROUND_REVEAL_DELAY`] while phase is `RoundScoring`.
-    AdvanceAfterRoundReveal { advance_id: u64 },
+    AdvanceAfterRoundReveal {
+        advance_id: u64,
+    },
     /// Reconnect-grace window expired for a seat.
     GraceExpired {
         player_id: PlayerId,
@@ -80,6 +85,8 @@ pub enum ActorMessage {
         preferred: Option<PlayerId>,
         nickname: String,
         avatar_id: Option<String>,
+        /// Account of the person taking the seat. None for a guest.
+        user_id: Option<uuid::Uuid>,
         reply: oneshot::Sender<Result<PlayerId, String>>,
     },
     /// Host (or vacancy timeout via internal reason) ends the game.
@@ -139,6 +146,10 @@ pub struct SpawnActor {
     pub on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
     /// Remove actor + return room to Lobby after natural GameCompleted.
     pub on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
+    /// Same Top 10 snapshot the public board reads.
+    pub leaderboard: Arc<Mutex<Arc<Vec<LeaderboardRow>>>>,
+    /// Account behind each seat. Updated when a vacant seat is claimed.
+    pub seat_users: HashMap<PlayerId, Option<uuid::Uuid>>,
 }
 
 pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
@@ -186,6 +197,8 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         on_host_changed: config.on_host_changed,
         on_aborted: config.on_aborted,
         on_finished: config.on_finished,
+        leaderboard: config.leaderboard,
+        seat_users: config.seat_users,
     };
     tokio::spawn(actor.run());
     tx
@@ -242,6 +255,8 @@ struct GameActor {
     on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
     on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
+    leaderboard: Arc<Mutex<Arc<Vec<LeaderboardRow>>>>,
+    seat_users: HashMap<PlayerId, Option<uuid::Uuid>>,
 }
 
 impl GameActor {
@@ -266,7 +281,10 @@ impl GameActor {
                 } => {
                     self.handle_disconnect(player_id, conn_gen).await;
                 }
-                ActorMessage::Command { player_id, envelope } => {
+                ActorMessage::Command {
+                    player_id,
+                    envelope,
+                } => {
                     self.handle_command(player_id, envelope).await;
                 }
                 ActorMessage::Timeout { deadline_id } => {
@@ -297,9 +315,10 @@ impl GameActor {
                     preferred,
                     nickname,
                     avatar_id,
+                    user_id,
                     reply,
                 } => {
-                    let result = self.handle_claim_vacant(preferred, nickname, avatar_id);
+                    let result = self.handle_claim_vacant(preferred, nickname, avatar_id, user_id);
                     let _ = reply.send(result);
                 }
                 ActorMessage::EndGame {
@@ -590,7 +609,9 @@ impl GameActor {
         let name = self.nickname_of(player_id);
         self.pause_banner_visible = true;
         self.broadcast(ServerMessage::GamePaused {
-            reason: format!("{name} left the table — share the room code so someone can take their seat"),
+            reason: format!(
+                "{name} left the table — share the room code so someone can take their seat"
+            ),
             remaining_ms: VACANCY_TTL.as_millis() as u64,
         });
         self.broadcast_snapshots();
@@ -612,6 +633,7 @@ impl GameActor {
         preferred: Option<PlayerId>,
         nickname: String,
         avatar_id: Option<String>,
+        user_id: Option<uuid::Uuid>,
     ) -> Result<PlayerId, String> {
         if self.ended || self.engine.is_finished() {
             return Err("game is over".into());
@@ -647,6 +669,7 @@ impl GameActor {
         self.engine
             .set_seat_identity(player_id, nickname.clone(), avatar_id)
             .map_err(|e| e.to_string())?;
+        self.seat_users.insert(player_id, user_id);
         self.vacancy_ids.remove(&player_id);
         self.grace_ids.remove(&player_id);
         self.pause_announced.remove(&player_id);
@@ -713,9 +736,12 @@ impl GameActor {
                 return Err("only the host can end the game".into());
             }
             // Host must still be connected (not vacant).
-            let host_ok = self.engine.state().players.iter().any(|p| {
-                p.id == pid && p.connection_status == ConnectionStatus::Connected
-            });
+            let host_ok = self
+                .engine
+                .state()
+                .players
+                .iter()
+                .any(|p| p.id == pid && p.connection_status == ConnectionStatus::Connected);
             if !host_ok {
                 return Err("host must be connected to end the game".into());
             }
@@ -949,9 +975,13 @@ impl GameActor {
 
         // Reject human commands while the table is paused for grace/vacancy
         // (own reconnect clears pause; vacant seats cannot act).
-        if self.engine.state().players.iter().any(|p| {
-            p.id == player_id && p.connection_status == ConnectionStatus::Vacant
-        }) {
+        if self
+            .engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.id == player_id && p.connection_status == ConnectionStatus::Vacant)
+        {
             self.reject(
                 player_id,
                 Some(action_id),
@@ -971,9 +1001,13 @@ impl GameActor {
             );
             return;
         }
-        if self.engine.state().players.iter().any(|p| {
-            p.id == player_id && p.connection_status == ConnectionStatus::BotControlled
-        }) {
+        if self
+            .engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.id == player_id && p.connection_status == ConnectionStatus::BotControlled)
+        {
             self.reject(
                 player_id,
                 Some(action_id),
@@ -1557,10 +1591,7 @@ impl GameActor {
             return;
         };
         if self.engine.is_finished()
-            || !matches!(
-                self.engine.phase(),
-                GamePhase::Bidding | GamePhase::Playing
-            )
+            || !matches!(self.engine.phase(), GamePhase::Bidding | GamePhase::Playing)
         {
             return;
         }
@@ -1749,7 +1780,8 @@ impl GameActor {
 
     fn send_snapshot(&mut self, player_id: PlayerId) {
         self.sync_pace_clock();
-        if let Ok(view) = self.engine.view_for(player_id) {
+        if let Ok(mut view) = self.engine.view_for(player_id) {
+            self.apply_ladder_ranks(player_id, &mut view);
             self.send_to(
                 player_id,
                 ServerMessage::StateSnapshot {
@@ -1762,6 +1794,21 @@ impl GameActor {
                     }),
                 },
             );
+        }
+    }
+
+    fn apply_ladder_ranks(&self, viewer: PlayerId, view: &mut PlayerGameView) {
+        let board = self.leaderboard.lock().unwrap().clone();
+        let rank_of = |player_id: PlayerId| {
+            self.seat_users
+                .get(&player_id)
+                .copied()
+                .flatten()
+                .and_then(|user_id| crate::leaderboard::ladder_rank(user_id, &board))
+        };
+        view.own_ladder_rank = rank_of(viewer);
+        for opponent in &mut view.opponents {
+            opponent.ladder_rank = rank_of(opponent.player_id);
         }
     }
 
@@ -1838,7 +1885,10 @@ fn now_ms() -> u64 {
 fn reject_message(reason: &RejectReason) -> String {
     match reason {
         RejectReason::Game { error } => error.to_string(),
-        RejectReason::UnsupportedProtocolVersion { supported, received } => {
+        RejectReason::UnsupportedProtocolVersion {
+            supported,
+            received,
+        } => {
             format!("protocol version {received} is not supported (server speaks {supported})")
         }
         RejectReason::MalformedMessage { detail } => format!("malformed message: {detail}"),

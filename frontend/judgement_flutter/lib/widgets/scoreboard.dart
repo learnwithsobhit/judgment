@@ -31,6 +31,7 @@ class Scoreboard extends StatelessWidget {
         seat: view.ownSeat,
         name: '${controller.myNickname} (you)',
         avatarId: view.ownAvatarId,
+        boardRank: view.ownLadderRank,
         bid: bidsByPlayer[controller.myPlayerId] ?? view.ownBid,
         tricksWon: view.ownTricksWon,
         total: _totalFor(view, controller.myPlayerId),
@@ -41,6 +42,7 @@ class Scoreboard extends StatelessWidget {
           seat: o.seat,
           name: o.nickname,
           avatarId: o.avatarId,
+          boardRank: o.ladderRank,
           bid: o.bid,
           tricksWon: o.tricksWon,
           total: _totalFor(view, o.playerId),
@@ -69,9 +71,9 @@ class Scoreboard extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
           child: Text(
             'This round',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Colors.white70,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: Colors.white70),
           ),
         ),
         Padding(
@@ -98,9 +100,9 @@ class Scoreboard extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
           child: Text(
             'Round scores',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Colors.white70,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: Colors.white70),
           ),
         ),
         if (history.isEmpty)
@@ -124,6 +126,7 @@ class Scoreboard extends StatelessWidget {
                         .replaceAll(RegExp(r'\s*\(you\)\s*'), '')
                         .trim(),
                     avatarId: row.avatarId,
+                    boardRank: row.boardRank,
                     highlightHeader: leaderId == row.playerId,
                     total: row.total,
                   ),
@@ -181,6 +184,7 @@ class Scoreboard extends StatelessWidget {
           nickname: row.name,
           radius: 12,
           highlight: isLeader,
+          boardRank: row.boardRank,
         ),
         const SizedBox(width: 6),
         if (dealerId == row.playerId)
@@ -207,9 +211,7 @@ class Scoreboard extends StatelessWidget {
             padding: EdgeInsets.only(right: 4),
             child: Text('👑', style: TextStyle(fontSize: 12)),
           ),
-        Flexible(
-          child: Text(row.name, overflow: TextOverflow.ellipsis),
-        ),
+        Flexible(child: Text(row.name, overflow: TextOverflow.ellipsis)),
       ],
     );
   }
@@ -222,8 +224,11 @@ class Scoreboard extends StatelessWidget {
   static Widget _numCell(Widget child) =>
       SizedBox(width: 44, child: Center(child: child));
 
-  static const _headerStyle =
-      TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w600);
+  static const _headerStyle = TextStyle(
+    fontSize: 12,
+    color: Colors.white54,
+    fontWeight: FontWeight.w600,
+  );
 }
 
 class _PlayerRow {
@@ -231,6 +236,7 @@ class _PlayerRow {
   final int seat;
   final String name;
   final String? avatarId;
+  final int? boardRank;
   final int? bid;
   final int tricksWon;
   final int? total;
@@ -240,6 +246,7 @@ class _PlayerRow {
     required this.seat,
     required this.name,
     required this.avatarId,
+    required this.boardRank,
     required this.bid,
     required this.tricksWon,
     required this.total,

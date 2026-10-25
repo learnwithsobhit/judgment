@@ -51,7 +51,7 @@ async fn postgres_persists_and_restores_a_game() {
                 token: format!("tok-{sid}"),
                 created_at: Utc::now(),
                 avatar_id: None,
-            user_id: None,
+                user_id: None,
             })
             .await
             .unwrap();

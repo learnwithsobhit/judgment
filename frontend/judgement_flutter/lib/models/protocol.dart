@@ -42,8 +42,19 @@ const rankLabels = {
 };
 
 const _rankOrder = [
-  'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
-  'nine', 'ten', 'jack', 'queen', 'king', 'ace',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'jack',
+  'queen',
+  'king',
+  'ace',
 ];
 
 /// Suit ink for glyphs on dark UI (hearts/diamonds red).
@@ -113,15 +124,19 @@ class OpponentView {
   final String connectionStatus;
   final String? avatarId;
 
+  /// 1, 2, or 3 on the overall board. Null for everyone else.
+  final int? ladderRank;
+
   OpponentView.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        nickname = json['nickname'] as String,
-        seat = json['seat'] as int,
-        cardCount = json['card_count'] as int,
-        bid = json['bid'] as int?,
-        tricksWon = json['tricks_won'] as int,
-        connectionStatus = json['connection_status'] as String,
-        avatarId = json['avatar_id'] as String?;
+    : playerId = json['player_id'] as String,
+      nickname = json['nickname'] as String,
+      seat = json['seat'] as int,
+      cardCount = json['card_count'] as int,
+      bid = json['bid'] as int?,
+      tricksWon = json['tricks_won'] as int,
+      connectionStatus = json['connection_status'] as String,
+      avatarId = json['avatar_id'] as String?,
+      ladderRank = json['ladder_rank'] as int?;
 }
 
 class CompletedTrickView {
@@ -130,11 +145,11 @@ class CompletedTrickView {
   final List<PlayedCard> plays;
 
   CompletedTrickView.fromJson(Map<String, dynamic> json)
-      : trickIndex = json['trick_index'] as int,
-        winnerId = json['winner_id'] as String,
-        plays = (json['plays'] as List)
-            .map((p) => PlayedCard.fromJson(p as Map<String, dynamic>))
-            .toList();
+    : trickIndex = json['trick_index'] as int,
+      winnerId = json['winner_id'] as String,
+      plays = (json['plays'] as List)
+          .map((p) => PlayedCard.fromJson(p as Map<String, dynamic>))
+          .toList();
 }
 
 class RoundScoreLine {
@@ -144,10 +159,10 @@ class RoundScoreLine {
   final int score;
 
   RoundScoreLine.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        bid = json['bid'] as int,
-        tricksWon = json['tricks_won'] as int,
-        score = json['score'] as int;
+    : playerId = json['player_id'] as String,
+      bid = json['bid'] as int,
+      tricksWon = json['tricks_won'] as int,
+      score = json['score'] as int;
 }
 
 class RoundScoreView {
@@ -155,10 +170,10 @@ class RoundScoreView {
   final List<RoundScoreLine> entries;
 
   RoundScoreView.fromJson(Map<String, dynamic> json)
-      : roundIndex = json['round_index'] as int,
-        entries = (json['entries'] as List)
-            .map((e) => RoundScoreLine.fromJson(e as Map<String, dynamic>))
-            .toList();
+    : roundIndex = json['round_index'] as int,
+      entries = (json['entries'] as List)
+          .map((e) => RoundScoreLine.fromJson(e as Map<String, dynamic>))
+          .toList();
 }
 
 class LeaderView {
@@ -166,8 +181,8 @@ class LeaderView {
   final int margin;
 
   LeaderView.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        margin = json['margin'] as int;
+    : playerId = json['player_id'] as String,
+      margin = json['margin'] as int;
 }
 
 class PlayedCard {
@@ -175,8 +190,8 @@ class PlayedCard {
   final CardModel card;
 
   PlayedCard.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        card = CardModel.fromJson(json['card'] as Map<String, dynamic>);
+    : playerId = json['player_id'] as String,
+      card = CardModel.fromJson(json['card'] as Map<String, dynamic>);
 }
 
 class PublicBid {
@@ -184,8 +199,8 @@ class PublicBid {
   final int bid;
 
   PublicBid.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        bid = json['bid'] as int;
+    : playerId = json['player_id'] as String,
+      bid = json['bid'] as int;
 }
 
 class PlayerScore {
@@ -193,8 +208,8 @@ class PlayerScore {
   final int totalScore;
 
   PlayerScore.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        totalScore = json['total_score'] as int;
+    : playerId = json['player_id'] as String,
+      totalScore = json['total_score'] as int;
 }
 
 class PublicRoundState {
@@ -205,11 +220,11 @@ class PublicRoundState {
   final int tricksCompleted;
 
   PublicRoundState.fromJson(Map<String, dynamic> json)
-      : roundIndex = json['round_index'] as int,
-        totalRounds = json['total_rounds'] as int,
-        cardsPerPlayer = json['cards_per_player'] as int,
-        dealer = json['dealer'] as String,
-        tricksCompleted = json['tricks_completed'] as int;
+    : roundIndex = json['round_index'] as int,
+      totalRounds = json['total_rounds'] as int,
+      cardsPerPlayer = json['cards_per_player'] as int,
+      dealer = json['dealer'] as String,
+      tricksCompleted = json['tricks_completed'] as int;
 }
 
 class LegalActions {
@@ -217,8 +232,8 @@ class LegalActions {
   final List<String> playableCards;
 
   LegalActions.fromJson(Map<String, dynamic> json)
-      : legalBids = (json['legal_bids'] as List).cast<int>(),
-        playableCards = (json['playable_cards'] as List).cast<String>();
+    : legalBids = (json['legal_bids'] as List).cast<int>(),
+      playableCards = (json['playable_cards'] as List).cast<String>();
 }
 
 class RankedPlayer {
@@ -230,12 +245,12 @@ class RankedPlayer {
   final int thinkingMs;
 
   RankedPlayer.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        rank = json['rank'] as int,
-        totalScore = json['total_score'] as int,
-        exactBidRounds = json['exact_bid_rounds'] as int,
-        totalTricksMissed = json['total_tricks_missed'] as int,
-        thinkingMs = json['thinking_ms'] as int? ?? 0;
+    : playerId = json['player_id'] as String,
+      rank = json['rank'] as int,
+      totalScore = json['total_score'] as int,
+      exactBidRounds = json['exact_bid_rounds'] as int,
+      totalTricksMissed = json['total_tricks_missed'] as int,
+      thinkingMs = json['thinking_ms'] as int? ?? 0;
 }
 
 class PlayerGameView {
@@ -250,6 +265,9 @@ class PlayerGameView {
   final int? ownBid;
   final int ownTricksWon;
   final String? ownAvatarId;
+
+  /// Viewer's place on the overall board, 1–3.
+  final int? ownLadderRank;
   final List<OpponentView> opponents;
   final List<PlayedCard> currentTrick;
   final CompletedTrickView? lastCompletedTrick;
@@ -265,51 +283,54 @@ class PlayerGameView {
   final List<RankedPlayer>? finalRanking;
 
   PlayerGameView.fromJson(Map<String, dynamic> json)
-      : gameId = json['game_id'] as String,
-        stateVersion = json['state_version'] as int,
-        phase = json['phase'] as String,
-        ownHand = (json['own_hand'] as List)
-            .map((c) => CardModel.fromJson(c as Map<String, dynamic>))
-            .toList(),
-        ownSeat = json['own_seat'] as int,
-        ownBid = json['own_bid'] as int?,
-        ownTricksWon = json['own_tricks_won'] as int,
-        ownAvatarId = json['own_avatar_id'] as String?,
-        opponents = (json['opponents'] as List)
-            .map((o) => OpponentView.fromJson(o as Map<String, dynamic>))
-            .toList(),
-        currentTrick = (json['current_trick'] as List)
-            .map((p) => PlayedCard.fromJson(p as Map<String, dynamic>))
-            .toList(),
-        lastCompletedTrick = json['last_completed_trick'] == null
-            ? null
-            : CompletedTrickView.fromJson(
-                json['last_completed_trick'] as Map<String, dynamic>),
-        trump = json['trump'] as String?,
-        trumpCard = json['trump_card'] == null
-            ? null
-            : CardModel.fromJson(json['trump_card'] as Map<String, dynamic>),
-        currentTurn = json['current_turn'] as String?,
-        bids = (json['bids'] as List)
-            .map((b) => PublicBid.fromJson(b as Map<String, dynamic>))
-            .toList(),
-        scores = (json['scores'] as List)
-            .map((s) => PlayerScore.fromJson(s as Map<String, dynamic>))
-            .toList(),
-        roundHistory = (json['round_history'] as List? ?? const [])
-            .map((r) => RoundScoreView.fromJson(r as Map<String, dynamic>))
-            .toList(),
-        leader = json['leader'] == null
-            ? null
-            : LeaderView.fromJson(json['leader'] as Map<String, dynamic>),
-        round = json['round'] == null
-            ? null
-            : PublicRoundState.fromJson(json['round'] as Map<String, dynamic>),
-        legalActions =
-            LegalActions.fromJson(json['legal_actions'] as Map<String, dynamic>),
-        finalRanking = json['final_ranking'] == null
-            ? null
-            : (json['final_ranking'] as List)
+    : gameId = json['game_id'] as String,
+      stateVersion = json['state_version'] as int,
+      phase = json['phase'] as String,
+      ownHand = (json['own_hand'] as List)
+          .map((c) => CardModel.fromJson(c as Map<String, dynamic>))
+          .toList(),
+      ownSeat = json['own_seat'] as int,
+      ownBid = json['own_bid'] as int?,
+      ownTricksWon = json['own_tricks_won'] as int,
+      ownAvatarId = json['own_avatar_id'] as String?,
+      ownLadderRank = json['own_ladder_rank'] as int?,
+      opponents = (json['opponents'] as List)
+          .map((o) => OpponentView.fromJson(o as Map<String, dynamic>))
+          .toList(),
+      currentTrick = (json['current_trick'] as List)
+          .map((p) => PlayedCard.fromJson(p as Map<String, dynamic>))
+          .toList(),
+      lastCompletedTrick = json['last_completed_trick'] == null
+          ? null
+          : CompletedTrickView.fromJson(
+              json['last_completed_trick'] as Map<String, dynamic>,
+            ),
+      trump = json['trump'] as String?,
+      trumpCard = json['trump_card'] == null
+          ? null
+          : CardModel.fromJson(json['trump_card'] as Map<String, dynamic>),
+      currentTurn = json['current_turn'] as String?,
+      bids = (json['bids'] as List)
+          .map((b) => PublicBid.fromJson(b as Map<String, dynamic>))
+          .toList(),
+      scores = (json['scores'] as List)
+          .map((s) => PlayerScore.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      roundHistory = (json['round_history'] as List? ?? const [])
+          .map((r) => RoundScoreView.fromJson(r as Map<String, dynamic>))
+          .toList(),
+      leader = json['leader'] == null
+          ? null
+          : LeaderView.fromJson(json['leader'] as Map<String, dynamic>),
+      round = json['round'] == null
+          ? null
+          : PublicRoundState.fromJson(json['round'] as Map<String, dynamic>),
+      legalActions = LegalActions.fromJson(
+        json['legal_actions'] as Map<String, dynamic>,
+      ),
+      finalRanking = json['final_ranking'] == null
+          ? null
+          : (json['final_ranking'] as List)
                 .map((r) => RankedPlayer.fromJson(r as Map<String, dynamic>))
                 .toList();
 
@@ -326,9 +347,9 @@ class TimerEvent {
   final int serverNowMs;
 
   TimerEvent.fromJson(Map<String, dynamic> json)
-      : deadlineId = json['deadline_id'] as int,
-        remainingMs = json['remaining_ms'] as int,
-        serverNowMs = json['server_now_ms'] as int;
+    : deadlineId = json['deadline_id'] as int,
+      remainingMs = json['remaining_ms'] as int,
+      serverNowMs = json['server_now_ms'] as int;
 }
 
 sealed class ServerMessage {
@@ -344,7 +365,8 @@ sealed class ServerMessage {
         return CommandRejected(
           actionId: json['action_id'] as String?,
           reasonKind: reason['kind'] as String,
-          errorCode: (reason['error'] as Map<String, dynamic>?)?['code'] as String?,
+          errorCode:
+              (reason['error'] as Map<String, dynamic>?)?['code'] as String?,
           retryable: json['retryable'] as bool,
           message: json['message'] as String,
         );
@@ -355,7 +377,9 @@ sealed class ServerMessage {
               ? null
               : DateTime.parse(json['started_at'] as String).toLocal(),
           pace: (json['pace'] as List<dynamic>? ?? const [])
-              .map((entry) => PlayerPace.fromJson(entry as Map<String, dynamic>))
+              .map(
+                (entry) => PlayerPace.fromJson(entry as Map<String, dynamic>),
+              )
               .toList(),
           paceOpen: json['pace_open'] == null
               ? null
@@ -640,9 +664,9 @@ class GuestSession {
   final String token;
 
   GuestSession.fromJson(Map<String, dynamic> json)
-      : sessionId = json['session_id'] as String,
-        nickname = json['nickname'] as String,
-        token = json['token'] as String;
+    : sessionId = json['session_id'] as String,
+      nickname = json['nickname'] as String,
+      token = json['token'] as String;
 }
 
 class SeatView {
@@ -654,14 +678,18 @@ class SeatView {
   final String? avatarId;
   final bool vacant;
 
+  /// 1, 2, or 3 on the overall board. Null for guests and everyone else.
+  final int? ladderRank;
+
   SeatView.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        nickname = json['nickname'] as String,
-        seat = json['seat'] as int,
-        ready = json['ready'] as bool,
-        isHost = json['is_host'] as bool,
-        avatarId = json['avatar_id'] as String?,
-        vacant = json['vacant'] as bool? ?? false;
+    : playerId = json['player_id'] as String,
+      nickname = json['nickname'] as String,
+      seat = json['seat'] as int,
+      ready = json['ready'] as bool,
+      isHost = json['is_host'] as bool,
+      avatarId = json['avatar_id'] as String?,
+      vacant = json['vacant'] as bool? ?? false,
+      ladderRank = json['ladder_rank'] as int?;
 }
 
 /// One manual schedule step: deal [cards] for [repeat] consecutive rounds.
@@ -671,7 +699,8 @@ class ManualRoundStep {
 
   const ManualRoundStep({required this.cards, required this.repeat});
 
-  factory ManualRoundStep.fromJson(Map<String, dynamic> json) => ManualRoundStep(
+  factory ManualRoundStep.fromJson(Map<String, dynamic> json) =>
+      ManualRoundStep(
         cards: json['cards'] as int,
         repeat: json['repeat'] as int,
       );
@@ -700,9 +729,9 @@ class RoundSchedule {
   }
 
   Map<String, dynamic> toJson() => {
-        'mode': mode,
-        if (steps != null) 'steps': steps!.map((s) => s.toJson()).toList(),
-      };
+    'mode': mode,
+    if (steps != null) 'steps': steps!.map((s) => s.toJson()).toList(),
+  };
 
   /// `max_cards = floor(51 / playerCount)` — mirrors server derivation.
   static int maxCardsPerPlayer(int playerCount) => 51 ~/ playerCount;
@@ -795,28 +824,28 @@ class RoomView {
   final List<SeatView> seats;
 
   RoomView.fromJson(Map<String, dynamic> json)
-      : roomId = json['room_id'] as String,
-        code = json['code'] as String,
-        phase = json['phase'] as String,
-        gameId = json['game_id'] as String?,
-        maxPlayers = json['max_players'] as int,
-        minPlayers = json['min_players'] as int,
-        turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
-        firstTrump = json['first_trump'] as String?,
-        trumpCycle = (json['trump_cycle'] as List?)
-            ?.map((s) => s as String)
-            .toList(),
-        roundSchedule = RoundSchedule.fromJson(
-          json['round_schedule'] as Map<String, dynamic>?,
-        ),
-        roundScheduleSummary =
-            (json['round_schedule_summary'] as String?) ?? 'Automatic',
-        dealerTotalRestriction =
-            json['dealer_total_restriction'] as bool? ?? false,
-        openStart = json['open_start'] as bool? ?? false,
-        seats = (json['seats'] as List)
-            .map((s) => SeatView.fromJson(s as Map<String, dynamic>))
-            .toList();
+    : roomId = json['room_id'] as String,
+      code = json['code'] as String,
+      phase = json['phase'] as String,
+      gameId = json['game_id'] as String?,
+      maxPlayers = json['max_players'] as int,
+      minPlayers = json['min_players'] as int,
+      turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
+      firstTrump = json['first_trump'] as String?,
+      trumpCycle = (json['trump_cycle'] as List?)
+          ?.map((s) => s as String)
+          .toList(),
+      roundSchedule = RoundSchedule.fromJson(
+        json['round_schedule'] as Map<String, dynamic>?,
+      ),
+      roundScheduleSummary =
+          (json['round_schedule_summary'] as String?) ?? 'Automatic',
+      dealerTotalRestriction =
+          json['dealer_total_restriction'] as bool? ?? false,
+      openStart = json['open_start'] as bool? ?? false,
+      seats = (json['seats'] as List)
+          .map((s) => SeatView.fromJson(s as Map<String, dynamic>))
+          .toList();
 }
 
 // ---------------------------------------------------------------------------
@@ -850,37 +879,37 @@ class GameEventPublicView {
   bool get canRsvp => seatsLeft > 0 || waitlistLeft > 0;
 
   GameEventPublicView.fromJson(Map<String, dynamic> json)
-      : eventId = json['event_id'] as String,
-        slug = json['slug'] as String,
-        title = json['title'] as String,
-        hostNickname = json['host_nickname'] as String,
-        startsAt = DateTime.parse(json['starts_at'] as String),
-        timezone = json['timezone'] as String,
-        durationMinutes = json['duration_minutes'] as int,
-        maxPlayers = json['max_players'] as int? ?? 8,
-        turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
-        firstTrump = json['first_trump'] as String?,
-        trumpCycle = (json['trump_cycle'] as List?)
-            ?.map((s) => s as String)
-            .toList(),
-        roundSchedule = RoundSchedule.fromJson(
-          json['round_schedule'] as Map<String, dynamic>?,
-        ),
-        roundScheduleSummary =
-            (json['round_schedule_summary'] as String?) ?? 'Automatic',
-        status = json['status'] as String,
-        goingCount = json['going_count'] as int,
-        seatsLeft = json['seats_left'] as int,
-        waitlistedCount = json['waitlisted_count'] as int? ?? 0,
-        waitlistLeft = json['waitlist_left'] as int? ?? 0,
-        roomCode = json['room_code'] as String?,
-        roomId = json['room_id'] as String?,
-        goingNames = (json['going_names'] as List? ?? const [])
-            .map((e) => e as String)
-            .toList(),
-        waitlistedNames = (json['waitlisted_names'] as List? ?? const [])
-            .map((e) => e as String)
-            .toList();
+    : eventId = json['event_id'] as String,
+      slug = json['slug'] as String,
+      title = json['title'] as String,
+      hostNickname = json['host_nickname'] as String,
+      startsAt = DateTime.parse(json['starts_at'] as String),
+      timezone = json['timezone'] as String,
+      durationMinutes = json['duration_minutes'] as int,
+      maxPlayers = json['max_players'] as int? ?? 8,
+      turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
+      firstTrump = json['first_trump'] as String?,
+      trumpCycle = (json['trump_cycle'] as List?)
+          ?.map((s) => s as String)
+          .toList(),
+      roundSchedule = RoundSchedule.fromJson(
+        json['round_schedule'] as Map<String, dynamic>?,
+      ),
+      roundScheduleSummary =
+          (json['round_schedule_summary'] as String?) ?? 'Automatic',
+      status = json['status'] as String,
+      goingCount = json['going_count'] as int,
+      seatsLeft = json['seats_left'] as int,
+      waitlistedCount = json['waitlisted_count'] as int? ?? 0,
+      waitlistLeft = json['waitlist_left'] as int? ?? 0,
+      roomCode = json['room_code'] as String?,
+      roomId = json['room_id'] as String?,
+      goingNames = (json['going_names'] as List? ?? const [])
+          .map((e) => e as String)
+          .toList(),
+      waitlistedNames = (json['waitlisted_names'] as List? ?? const [])
+          .map((e) => e as String)
+          .toList();
 }
 
 class CreateGameEventResult {
@@ -890,12 +919,12 @@ class CreateGameEventResult {
   final String invitePath;
 
   CreateGameEventResult.fromJson(Map<String, dynamic> json)
-      : event = GameEventPublicView.fromJson(
-          json['event'] as Map<String, dynamic>,
-        ),
-        manageToken = json['manage_token'] as String,
-        managePath = json['manage_path'] as String,
-        invitePath = json['invite_path'] as String;
+    : event = GameEventPublicView.fromJson(
+        json['event'] as Map<String, dynamic>,
+      ),
+      manageToken = json['manage_token'] as String,
+      managePath = json['manage_path'] as String,
+      invitePath = json['invite_path'] as String;
 }
 
 class CreateRsvpResult {
@@ -906,13 +935,13 @@ class CreateRsvpResult {
   final GameEventPublicView event;
 
   CreateRsvpResult.fromJson(Map<String, dynamic> json)
-      : rsvpId = json['rsvp_id'] as String,
-        rsvpToken = json['rsvp_token'] as String,
-        rsvpStatus = json['rsvp_status'] as String? ?? 'going',
-        waitlistPosition = json['waitlist_position'] as int?,
-        event = GameEventPublicView.fromJson(
-          json['event'] as Map<String, dynamic>,
-        );
+    : rsvpId = json['rsvp_id'] as String,
+      rsvpToken = json['rsvp_token'] as String,
+      rsvpStatus = json['rsvp_status'] as String? ?? 'going',
+      waitlistPosition = json['waitlist_position'] as int?,
+      event = GameEventPublicView.fromJson(
+        json['event'] as Map<String, dynamic>,
+      );
 }
 
 class RsvpHostView {
@@ -924,12 +953,12 @@ class RsvpHostView {
   final DateTime createdAt;
 
   RsvpHostView.fromJson(Map<String, dynamic> json)
-      : rsvpId = json['rsvp_id'] as String,
-        displayName = json['display_name'] as String,
-        mobileE164 = json['mobile_e164'] as String,
-        status = json['status'] as String? ?? 'going',
-        contactConsent = json['contact_consent'] as bool? ?? false,
-        createdAt = DateTime.parse(json['created_at'] as String);
+    : rsvpId = json['rsvp_id'] as String,
+      displayName = json['display_name'] as String,
+      mobileE164 = json['mobile_e164'] as String,
+      status = json['status'] as String? ?? 'going',
+      contactConsent = json['contact_consent'] as bool? ?? false,
+      createdAt = DateTime.parse(json['created_at'] as String);
 }
 
 class GameEventManageView {
@@ -938,13 +967,13 @@ class GameEventManageView {
   final String shareText;
 
   GameEventManageView.fromJson(Map<String, dynamic> json)
-      : event = GameEventPublicView.fromJson(
-          json['event'] as Map<String, dynamic>,
-        ),
-        rsvps = (json['rsvps'] as List? ?? const [])
-            .map((e) => RsvpHostView.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        shareText = json['share_text'] as String;
+    : event = GameEventPublicView.fromJson(
+        json['event'] as Map<String, dynamic>,
+      ),
+      rsvps = (json['rsvps'] as List? ?? const [])
+          .map((e) => RsvpHostView.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      shareText = json['share_text'] as String;
 }
 
 class OpenLobbyResult {
@@ -954,12 +983,12 @@ class OpenLobbyResult {
   final String? capacity;
 
   OpenLobbyResult.fromJson(Map<String, dynamic> json)
-      : event = GameEventPublicView.fromJson(
-          json['event'] as Map<String, dynamic>,
-        ),
-        room = RoomView.fromJson(json['room'] as Map<String, dynamic>),
-        playerId = json['player_id'] as String,
-        capacity = json['capacity'] as String?;
+    : event = GameEventPublicView.fromJson(
+        json['event'] as Map<String, dynamic>,
+      ),
+      room = RoomView.fromJson(json['room'] as Map<String, dynamic>),
+      playerId = json['player_id'] as String,
+      capacity = json['capacity'] as String?;
 }
 
 /// Response from `POST /api/v1/ai/rules/query` (PLAN.md §18.1).
@@ -972,14 +1001,14 @@ class ExplanationResponse {
   final String? fallbackReason;
 
   ExplanationResponse.fromJson(Map<String, dynamic> json)
-      : answer = json['answer'] as String,
-        ruleReferences = (json['rule_references'] as List? ?? const [])
-            .map((e) => e as String)
-            .toList(),
-        confidence = (json['confidence'] as num).toDouble(),
-        suggestedAction = json['suggested_action'] as String?,
-        deterministic = json['deterministic'] as bool? ?? true,
-        fallbackReason = json['fallback_reason'] as String?;
+    : answer = json['answer'] as String,
+      ruleReferences = (json['rule_references'] as List? ?? const [])
+          .map((e) => e as String)
+          .toList(),
+      confidence = (json['confidence'] as num).toDouble(),
+      suggestedAction = json['suggested_action'] as String?,
+      deterministic = json['deterministic'] as bool? ?? true,
+      fallbackReason = json['fallback_reason'] as String?;
 }
 
 /// `GET /api/v1/games/{id}/coach/{player_id}` (PLAN.md §18.6).
@@ -998,22 +1027,22 @@ class CoachingResponse {
   final String? fallbackReason;
 
   CoachingResponse.fromJson(Map<String, dynamic> json)
-      : playerId = json['player_id'] as String,
-        headline = json['headline'] as String,
-        overall = json['overall'] as String,
-        strongestRound = json['strongest_round'] as String?,
-        weakestRound = json['weakest_round'] as String?,
-        riskPattern = json['risk_pattern'] as String,
-        improvements = (json['improvements'] as List? ?? const [])
-            .map((e) => e as String)
-            .toList(),
-        positive = json['positive'] as String,
-        evidence = (json['evidence'] as List? ?? const [])
-            .map((e) => e as String)
-            .toList(),
-        analysis = (json['analysis'] as Map<String, dynamic>?) ?? const {},
-        deterministic = json['deterministic'] as bool? ?? true,
-        fallbackReason = json['fallback_reason'] as String?;
+    : playerId = json['player_id'] as String,
+      headline = json['headline'] as String,
+      overall = json['overall'] as String,
+      strongestRound = json['strongest_round'] as String?,
+      weakestRound = json['weakest_round'] as String?,
+      riskPattern = json['risk_pattern'] as String,
+      improvements = (json['improvements'] as List? ?? const [])
+          .map((e) => e as String)
+          .toList(),
+      positive = json['positive'] as String,
+      evidence = (json['evidence'] as List? ?? const [])
+          .map((e) => e as String)
+          .toList(),
+      analysis = (json['analysis'] as Map<String, dynamic>?) ?? const {},
+      deterministic = json['deterministic'] as bool? ?? true,
+      fallbackReason = json['fallback_reason'] as String?;
 }
 
 /// `GET /api/v1/games/{id}/highlights` (PLAN.md §18.8).
@@ -1024,8 +1053,10 @@ class HighlightsResponse {
   final String? fallbackReason;
 
   HighlightsResponse.fromJson(Map<String, dynamic> json)
-      : lines = (json['lines'] as List? ?? const []).map((e) => e as String).toList(),
-        facts = (json['facts'] as Map<String, dynamic>?) ?? const {},
-        deterministic = json['deterministic'] as bool? ?? true,
-        fallbackReason = json['fallback_reason'] as String?;
+    : lines = (json['lines'] as List? ?? const [])
+          .map((e) => e as String)
+          .toList(),
+      facts = (json['facts'] as Map<String, dynamic>?) ?? const {},
+      deterministic = json['deterministic'] as bool? ?? true,
+      fallbackReason = json['fallback_reason'] as String?;
 }

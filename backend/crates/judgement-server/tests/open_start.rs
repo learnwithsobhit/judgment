@@ -96,17 +96,23 @@ async fn setup_room_starts_like_a_normal_lobby_once_three_are_ready() {
     let third = guest(&http, &base, "Third").await;
 
     let joined_first = join(&http, &base, &first.token, &code).await;
-    assert!(joined_first.room.seats.iter().any(|s| {
-        s.player_id == joined_first.player_id && s.is_host
-    }));
+    assert!(joined_first
+        .room
+        .seats
+        .iter()
+        .any(|s| { s.player_id == joined_first.player_id && s.is_host }));
 
     let joined_second = join(&http, &base, &second.token, &code).await;
-    assert!(joined_second.room.seats.iter().any(|s| {
-        s.player_id == joined_second.player_id && !s.is_host
-    }));
-    assert!(joined_second.room.seats.iter().any(|s| {
-        s.player_id == joined_first.player_id && s.is_host
-    }));
+    assert!(joined_second
+        .room
+        .seats
+        .iter()
+        .any(|s| { s.player_id == joined_second.player_id && !s.is_host }));
+    assert!(joined_second
+        .room
+        .seats
+        .iter()
+        .any(|s| { s.player_id == joined_first.player_id && s.is_host }));
 
     assert_eq!(start_status(&http, &base, &first.token, &code).await, 409);
     assert_eq!(start_status(&http, &base, &second.token, &code).await, 403);
@@ -150,9 +156,11 @@ async fn normal_create_still_seats_the_host_and_rejects_a_guest_start() {
 
     let host_player = created.player_id.expect("creator is seated");
     assert!(!created.room.open_start);
-    assert!(created.room.seats.iter().any(|s| {
-        s.player_id == host_player && s.is_host
-    }));
+    assert!(created
+        .room
+        .seats
+        .iter()
+        .any(|s| { s.player_id == host_player && s.is_host }));
 
     let other = guest(&http, &base, "Other").await;
     let code = created.room.code;

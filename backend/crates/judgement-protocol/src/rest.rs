@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use chrono::{DateTime, Utc};
 
-use judgement_domain::{
-    EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit,
-};
+use judgement_domain::{EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit};
 
 // ---------------------------------------------------------------------------
 // Guest sessions
@@ -191,6 +189,9 @@ pub struct SeatView {
     /// True while this in-game seat is vacant and claimable (omit/false in lobby).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub vacant: bool,
+    /// 1, 2, or 3 on the overall board. Omitted for guests and everyone else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ladder_rank: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -481,6 +482,16 @@ pub struct FirebaseAuthRequest {
     pub legal_version: Option<String>,
 }
 
+/// Telegram Login Widget `id_token`. Not a Firebase token.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramAuthRequest {
+    pub id_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legal_version: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicUser {
     pub user_id: String,
@@ -547,4 +558,3 @@ pub struct LeaderboardEntry {
 pub struct LeaderboardResponse {
     pub players: Vec<LeaderboardEntry>,
 }
-

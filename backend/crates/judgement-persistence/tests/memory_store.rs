@@ -220,10 +220,7 @@ async fn action_committed_detects_durable_action_id() {
         .await
         .unwrap();
 
-    assert!(store
-        .action_committed(game_id, start_action)
-        .await
-        .unwrap());
+    assert!(store.action_committed(game_id, start_action).await.unwrap());
     assert!(!store
         .action_committed(game_id, ActionId::new())
         .await

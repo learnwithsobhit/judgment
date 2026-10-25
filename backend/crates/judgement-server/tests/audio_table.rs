@@ -7,8 +7,8 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use judgement_persistence::MemoryStore;
 use judgement_protocol::{CreateGuestSessionResponse, RoomView};
+use judgement_server::build_router;
 use judgement_server::restore::bootstrap;
-use judgement_server::{build_router};
 use serde_json::Value;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -68,11 +68,7 @@ async fn soundboard_broadcasts_without_persist() {
         .await
         .unwrap();
 
-    for (token, ready) in [
-        (&host.token, true),
-        (&p2.token, true),
-        (&p3.token, true),
-    ] {
+    for (token, ready) in [(&host.token, true), (&p2.token, true), (&p3.token, true)] {
         http.post(format!("{base}/api/v1/rooms/{room_id}/ready"))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({ "ready": ready }))

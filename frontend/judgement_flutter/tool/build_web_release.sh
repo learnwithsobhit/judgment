@@ -23,7 +23,7 @@ DEFINES=(
   --dart-define=APP_BUILD_ID="$BUILD_ID"
 )
 # Optional Google sign-in. Empty values are omitted so the client stays guest-only.
-for key in FIREBASE_API_KEY FIREBASE_APP_ID FIREBASE_MESSAGING_SENDER_ID FIREBASE_PROJECT_ID FIREBASE_AUTH_DOMAIN GOOGLE_WEB_CLIENT_ID; do
+for key in FIREBASE_API_KEY FIREBASE_APP_ID FIREBASE_MESSAGING_SENDER_ID FIREBASE_PROJECT_ID FIREBASE_AUTH_DOMAIN GOOGLE_WEB_CLIENT_ID TELEGRAM_CLIENT_ID; do
   val="${!key:-}"
   if [[ -n "$val" ]]; then
     DEFINES+=(--dart-define="${key}=${val}")

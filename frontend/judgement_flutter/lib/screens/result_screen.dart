@@ -68,10 +68,7 @@ class ResultScreen extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
-                    _StandingsTable(
-                      controller: controller,
-                      ranking: ranking,
-                    ),
+                    _StandingsTable(controller: controller, ranking: ranking),
                     PaceLine(controller: controller),
                   ],
                   if (history.isNotEmpty) ...[
@@ -145,12 +142,12 @@ class ResultScreen extends StatelessWidget {
                                   roomCode: controller.roomCode,
                                   campaign: ShareCampaign.resultWin,
                                 );
-                                final url = (controller.roomCode != null &&
+                                final url =
+                                    (controller.roomCode != null &&
                                         controller.roomCode!.isNotEmpty)
                                     ? roomInviteUrl(
                                         controller.roomCode!,
-                                        campaign:
-                                            ShareCampaign.resultChallenge,
+                                        campaign: ShareCampaign.resultChallenge,
                                       )
                                     : playHomeUrl(
                                         campaign: ShareCampaign.resultWin,
@@ -197,8 +194,9 @@ class ResultScreen extends StatelessWidget {
                         label: const Text('Copy results summary'),
                       ),
                       FilledButton.tonalIcon(
-                        onPressed: () => Navigator.of(context)
-                            .popUntil((route) => route.isFirst),
+                        onPressed: () => Navigator.of(
+                          context,
+                        ).popUntil((route) => route.isFirst),
                         icon: const Icon(Icons.home),
                         label: const Text('Back to home'),
                       ),
@@ -242,8 +240,8 @@ class _HeroBanner extends StatelessWidget {
     final headline = winners.isEmpty
         ? 'Game over'
         : winners.length == 1
-            ? '${controller.nicknameOf(winners.first.playerId)} wins!'
-            : 'Shared victory: ${winners.map((w) => controller.nicknameOf(w.playerId)).join(', ')}';
+        ? '${controller.nicknameOf(winners.first.playerId)} wins!'
+        : 'Shared victory: ${winners.map((w) => controller.nicknameOf(w.playerId)).join(', ')}';
 
     return Column(
       children: [
@@ -303,10 +301,7 @@ class _PodiumStrip extends StatelessWidget {
   final GameController controller;
   final List<RankedPlayer> ranking;
 
-  const _PodiumStrip({
-    required this.controller,
-    required this.ranking,
-  });
+  const _PodiumStrip({required this.controller, required this.ranking});
 
   @override
   Widget build(BuildContext context) {
@@ -314,9 +309,7 @@ class _PodiumStrip extends StatelessWidget {
     if (top.isEmpty) return const SizedBox.shrink();
 
     // Display order: 2nd, 1st, 3rd when we have 3; otherwise natural.
-    final display = top.length >= 3
-        ? [top[1], top[0], top[2]]
-        : top;
+    final display = top.length >= 3 ? [top[1], top[0], top[2]] : top;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -364,11 +357,7 @@ class _PodiumSeat extends StatelessWidget {
     final you = ranked.playerId == controller.myPlayerId;
 
     return Padding(
-      padding: EdgeInsets.only(
-        left: 4,
-        right: 4,
-        bottom: elevate ? 0 : 12,
-      ),
+      padding: EdgeInsets.only(left: 4, right: 4, bottom: elevate ? 0 : 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -386,6 +375,7 @@ class _PodiumSeat extends StatelessWidget {
             nickname: name,
             radius: elevate ? 28 : 22,
             highlight: ranked.rank == 1,
+            boardRank: controller.boardRankOf(ranked.playerId),
           ),
           const SizedBox(height: 8),
           Text(
@@ -426,10 +416,7 @@ class _StandingsTable extends StatelessWidget {
   final GameController controller;
   final List<RankedPlayer> ranking;
 
-  const _StandingsTable({
-    required this.controller,
-    required this.ranking,
-  });
+  const _StandingsTable({required this.controller, required this.ranking});
 
   @override
   Widget build(BuildContext context) {
@@ -475,9 +462,7 @@ class _StandingsTable extends StatelessWidget {
             for (final ranked in ranking)
               DataRow(
                 color: ranked.rank == 1
-                    ? WidgetStatePropertyAll(
-                        goldAccent.withValues(alpha: 0.15),
-                      )
+                    ? WidgetStatePropertyAll(goldAccent.withValues(alpha: 0.15))
                     : null,
                 cells: [
                   DataCell(Text('${ranked.rank}')),
@@ -490,6 +475,7 @@ class _StandingsTable extends StatelessWidget {
                           nickname: controller.nicknameOf(ranked.playerId),
                           radius: 12,
                           highlight: ranked.rank == 1,
+                          boardRank: controller.boardRankOf(ranked.playerId),
                         ),
                         const SizedBox(width: 8),
                         Text(
@@ -506,18 +492,22 @@ class _StandingsTable extends StatelessWidget {
                       ],
                     ),
                   ),
-                  DataCell(Text(
-                    '${ranked.totalScore}',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  )),
+                  DataCell(
+                    Text(
+                      '${ranked.totalScore}',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
                   DataCell(Text('${ranked.exactBidRounds}')),
                   DataCell(Text('${ranked.totalTricksMissed}')),
-                  DataCell(Text(
-                    formatPace(Duration(milliseconds: ranked.thinkingMs)),
-                    style: const TextStyle(
-                      fontFeatures: [FontFeature.tabularFigures()],
+                  DataCell(
+                    Text(
+                      formatPace(Duration(milliseconds: ranked.thinkingMs)),
+                      style: const TextStyle(
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  )),
+                  ),
                 ],
               ),
           ],
@@ -747,6 +737,7 @@ class _RoundVerifyMatrix extends StatelessWidget {
             playerId: playerId,
             displayName: controller.nicknameOf(playerId),
             avatarId: controller.avatarOf(playerId),
+            boardRank: controller.boardRankOf(playerId),
             highlightHeader: playerId == controller.myPlayerId,
             total: _columnSum(playerId),
           ),

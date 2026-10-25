@@ -49,7 +49,10 @@ impl PostgresStore {
     }
 
     /// Run SQL migrations from `crates/judgement-persistence/migrations`.
-    pub async fn migrate(&self, migrations_dir: impl AsRef<std::path::Path>) -> Result<(), PersistError> {
+    pub async fn migrate(
+        &self,
+        migrations_dir: impl AsRef<std::path::Path>,
+    ) -> Result<(), PersistError> {
         let migrator = sqlx::migrate::Migrator::new(migrations_dir.as_ref())
             .await
             .map_err(|e| PersistError::Conflict(format!("migration load failed: {e}")))?;
@@ -608,7 +611,10 @@ impl GameStore for PostgresStore {
             .collect())
     }
 
-    async fn load_game_history(&self, game_id: GameId) -> Result<Option<GameHistory>, PersistError> {
+    async fn load_game_history(
+        &self,
+        game_id: GameId,
+    ) -> Result<Option<GameHistory>, PersistError> {
         let Some(row) = sqlx::query("SELECT status, rules FROM games WHERE game_id = $1")
             .bind(game_id.0)
             .fetch_optional(&self.pool)
@@ -659,7 +665,10 @@ impl GameStore for PostgresStore {
         }))
     }
 
-    async fn upsert_scheduled_event(&self, event: &StoredScheduledEvent) -> Result<(), PersistError> {
+    async fn upsert_scheduled_event(
+        &self,
+        event: &StoredScheduledEvent,
+    ) -> Result<(), PersistError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"
@@ -791,9 +800,7 @@ impl GameStore for PostgresStore {
                 slug: row.get("slug"),
                 manage_token_hash: row.get("manage_token_hash"),
                 host_nickname: row.get("host_nickname"),
-                host_session_id: row
-                    .get::<Option<Uuid>, _>("host_session_id")
-                    .map(SessionId),
+                host_session_id: row.get::<Option<Uuid>, _>("host_session_id").map(SessionId),
                 title: row.get("title"),
                 starts_at: row.get("starts_at"),
                 timezone: row.get("timezone"),
@@ -1000,8 +1007,9 @@ impl GameStore for PostgresStore {
         Ok(())
     }
 
-    async fn find_user_by_google_subject(
+    async fn find_user_by_identity(
         &self,
+        provider: &str,
         subject: &str,
     ) -> Result<Option<StoredUser>, PersistError> {
         let row = sqlx::query(
@@ -1010,9 +1018,10 @@ impl GameStore for PostgresStore {
                    u.created_at, u.updated_at, u.last_seen_at
             FROM users u
             JOIN user_identities i ON i.user_id = u.user_id
-            WHERE i.provider = 'google' AND i.subject = $1
+            WHERE i.provider = $1 AND i.subject = $2
             "#,
         )
+        .bind(provider)
         .bind(subject)
         .fetch_optional(&self.pool)
         .await?;
@@ -1042,13 +1051,11 @@ impl GameStore for PostgresStore {
     }
 
     async fn set_user_avatar(&self, user_id: Uuid, avatar_id: &str) -> Result<(), PersistError> {
-        sqlx::query(
-            "UPDATE users SET avatar_id = $2, updated_at = now() WHERE user_id = $1",
-        )
-        .bind(user_id)
-        .bind(avatar_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE users SET avatar_id = $2, updated_at = now() WHERE user_id = $1")
+            .bind(user_id)
+            .bind(avatar_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -1062,9 +1069,9 @@ impl GameStore for PostgresStore {
             JOIN users u ON u.user_id = s.user_id
             WHERE s.ranked_games > 0
             ORDER BY s.ranked_wins DESC,
-                     COALESCE(s.ranked_exact * 1000000 / NULLIF(s.ranked_rounds, 0), 0) DESC,
-                     COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) DESC,
-                     s.ranked_games DESC
+                     COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) DESC,
+                     COALESCE(s.ranked_exact::bigint * 1000000 / NULLIF(s.ranked_rounds, 0), 0) DESC,
+                     COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) DESC
             LIMIT $1
             "#,
         )
@@ -1106,26 +1113,41 @@ impl GameStore for PostgresStore {
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await?;
-        let (games, wins, points, rounds, exact, ranked_games, ranked_wins, ranked_points, ranked_rounds, ranked_exact) =
-            if let Some(row) = row {
-                (
-                    row.get::<i32, _>("games_played"),
-                    row.get::<i32, _>("wins"),
-                    row.get::<i64, _>("lifetime_points"),
-                    row.get::<i32, _>("rounds_played"),
-                    row.get::<i32, _>("exact_bid_rounds"),
-                    row.get::<i32, _>("ranked_games"),
-                    row.get::<i32, _>("ranked_wins"),
-                    row.get::<i64, _>("ranked_points"),
-                    row.get::<i32, _>("ranked_rounds"),
-                    row.get::<i32, _>("ranked_exact"),
-                )
-            } else {
-                (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-            };
+        let (
+            games,
+            wins,
+            points,
+            rounds,
+            exact,
+            ranked_games,
+            ranked_wins,
+            ranked_points,
+            ranked_rounds,
+            ranked_exact,
+        ) = if let Some(row) = row {
+            (
+                row.get::<i32, _>("games_played"),
+                row.get::<i32, _>("wins"),
+                row.get::<i64, _>("lifetime_points"),
+                row.get::<i32, _>("rounds_played"),
+                row.get::<i32, _>("exact_bid_rounds"),
+                row.get::<i32, _>("ranked_games"),
+                row.get::<i32, _>("ranked_wins"),
+                row.get::<i64, _>("ranked_points"),
+                row.get::<i32, _>("ranked_rounds"),
+                row.get::<i32, _>("ranked_exact"),
+            )
+        } else {
+            (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        };
         let rank = if ranked_games == 0 {
             None
         } else {
+            let win_rate = if ranked_games == 0 {
+                0
+            } else {
+                i64::from(ranked_wins) * 1_000_000 / i64::from(ranked_games)
+            };
             let strike = if ranked_rounds == 0 {
                 0
             } else {
@@ -1145,18 +1167,25 @@ impl GameStore for PostgresStore {
                     s.ranked_wins > $2
                     OR (
                       s.ranked_wins = $2
-                      AND COALESCE(s.ranked_exact * 1000000 / NULLIF(s.ranked_rounds, 0), 0) > $3
+                      AND COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) > $3
                     )
                     OR (
                       s.ranked_wins = $2
-                      AND COALESCE(s.ranked_exact * 1000000 / NULLIF(s.ranked_rounds, 0), 0) = $3
-                      AND COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) > $4
+                      AND COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) = $3
+                      AND COALESCE(s.ranked_exact::bigint * 1000000 / NULLIF(s.ranked_rounds, 0), 0) > $4
+                    )
+                    OR (
+                      s.ranked_wins = $2
+                      AND COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) = $3
+                      AND COALESCE(s.ranked_exact::bigint * 1000000 / NULLIF(s.ranked_rounds, 0), 0) = $4
+                      AND COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) > $5
                     )
                   )
                 "#,
             )
             .bind(user_id)
             .bind(ranked_wins)
+            .bind(win_rate)
             .bind(strike)
             .bind(average)
             .fetch_one(&self.pool)
@@ -1257,10 +1286,18 @@ async fn record_user_stats(
         if inserted.is_none() {
             continue;
         }
-        let ranked_wins = if counted && seat.finish_rank == 1 { 1 } else { 0 };
+        let ranked_wins = if counted && seat.finish_rank == 1 {
+            1
+        } else {
+            0
+        };
         let wins = if seat.finish_rank == 1 { 1 } else { 0 };
         let ranked_games = if counted { 1 } else { 0 };
-        let ranked_points = if counted { i64::from(seat.total_score) } else { 0 };
+        let ranked_points = if counted {
+            i64::from(seat.total_score)
+        } else {
+            0
+        };
         let ranked_rounds = if counted { rounds } else { 0 };
         let ranked_exact = if counted { seat.exact_bid_rounds } else { 0 };
         sqlx::query(

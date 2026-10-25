@@ -21,7 +21,7 @@ pub struct HttpLimitConfig {
     pub max_requests_per_window: u32,
     pub window: Duration,
     /// Stricter limit for unauthenticated guest-session creation.
-    pub             guest_max_per_window: u32,
+    pub guest_max_per_window: u32,
     /// Public Top 10 reads. Lower than the authenticated API budget.
     pub board_max_per_window: u32,
 }
@@ -67,7 +67,9 @@ impl HttpRateLimiter {
         let mut guard = self.buckets.lock().expect("http rate limiter");
         let bucket = guard.entry(key.to_string()).or_default();
         let now = Instant::now();
-        bucket.events.retain(|t| now.duration_since(*t) < self.config.window);
+        bucket
+            .events
+            .retain(|t| now.duration_since(*t) < self.config.window);
         if bucket.events.len() as u32 >= max {
             return false;
         }

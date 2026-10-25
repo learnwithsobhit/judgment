@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use judgement_ai::ExplanationService;
 use judgement_rag::{
-    default_migrations_dir, default_rules_dir, ensure_ingested, ChunkStore, DeterministicHashEmbedder,
-    Embedder, MemoryChunkStore, PostgresChunkStore, RetrievalFilter, VectorRuleRetriever,
-    DEFAULT_RULESET_VERSION,
+    default_migrations_dir, default_rules_dir, ensure_ingested, ChunkStore,
+    DeterministicHashEmbedder, Embedder, MemoryChunkStore, PostgresChunkStore, RetrievalFilter,
+    VectorRuleRetriever, DEFAULT_RULESET_VERSION,
 };
 
 /// `RAG_ENABLED=1|true|yes` turns on vector retrieval after FAQ miss.
@@ -21,9 +21,7 @@ pub fn rag_enabled_from_env() -> bool {
 }
 
 /// Build the explanation service, optionally with an ingested RAG retriever.
-pub async fn build_explanation_service(
-    database_url: Option<&str>,
-) -> ExplanationService {
+pub async fn build_explanation_service(database_url: Option<&str>) -> ExplanationService {
     let base = ExplanationService::default();
     if !rag_enabled_from_env() {
         tracing::info!("RAG_ENABLED unset/false — Phase 7 FAQ/templates only");
@@ -78,10 +76,12 @@ pub async fn build_explanation_service(
 
     let retriever = Arc::new(VectorRuleRetriever::new(embedder, store));
     tracing::info!("RAG enabled (deterministic-hash-v1 embeddings, ruleset mvp-1)");
-    base.with_retriever(retriever).with_retrieval_filter(RetrievalFilter {
-        ruleset_version: DEFAULT_RULESET_VERSION.to_string(),
-        embedding_model_version: judgement_rag::DETERMINISTIC_EMBEDDING_MODEL_VERSION.to_string(),
-        top_k: 3,
-        min_score: 0.12,
-    })
+    base.with_retriever(retriever)
+        .with_retrieval_filter(RetrievalFilter {
+            ruleset_version: DEFAULT_RULESET_VERSION.to_string(),
+            embedding_model_version: judgement_rag::DETERMINISTIC_EMBEDDING_MODEL_VERSION
+                .to_string(),
+            top_k: 3,
+            min_score: 0.12,
+        })
 }

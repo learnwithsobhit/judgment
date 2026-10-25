@@ -1,7 +1,12 @@
-//! Optional Google sign-in. Guest routes stay available when this is unset.
+//! Optional account sign-in. Guest routes stay available when this is unset.
 //!
-//! Production verifies Firebase ID tokens (RS256 + cached Google JWKS).
-//! Tests mint HS256 tokens with `JUDGEMENT_FIREBASE_DEV_SECRET`.
+//! Firebase ID tokens for Google and email/password are checked here. Production
+//! verifies RS256 against Google's JWKS. Tests mint HS256 tokens with
+//! `JUDGEMENT_FIREBASE_DEV_SECRET`.
+//!
+//! Telegram is a separate token. Production verifies RS256 against
+//! `https://oauth.telegram.org`. Tests mint HS256 tokens with
+//! `JUDGEMENT_TELEGRAM_DEV_SECRET`.
 
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -15,7 +20,7 @@ use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use judgement_persistence::{StoredIdentity, StoredUser};
 use judgement_protocol::{
     AuthSessionResponse, FirebaseAuthRequest, LeaderboardEntry, LeaderboardResponse, MeResponse,
-    MeStatsResponse, PatchMeRequest, PublicUser,
+    MeStatsResponse, PatchMeRequest, PublicUser, TelegramAuthRequest,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -32,10 +37,27 @@ pub async fn auth_firebase(
     Json(body): Json<FirebaseAuthRequest>,
 ) -> Result<Json<AuthSessionResponse>, ApiError> {
     let identity = verify_id_token(&body.id_token).await?;
+    open_account_session(&state, identity, body.display_name, body.legal_version).await
+}
+
+pub async fn auth_telegram(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<TelegramAuthRequest>,
+) -> Result<Json<AuthSessionResponse>, ApiError> {
+    let identity = verify_telegram_token(&body.id_token).await?;
+    open_account_session(&state, identity, body.display_name, body.legal_version).await
+}
+
+async fn open_account_session(
+    state: &AppState,
+    identity: VerifiedAccount,
+    requested_name: Option<String>,
+    requested_legal: Option<String>,
+) -> Result<Json<AuthSessionResponse>, ApiError> {
     let now = Utc::now();
     let existing = state
         .store
-        .find_user_by_google_subject(&identity.subject)
+        .find_user_by_identity(&identity.provider, &identity.subject)
         .await
         .map_err(|e| ApiError::Conflict(format!("lookup account: {e}")))?;
 
@@ -44,21 +66,20 @@ pub async fn auth_firebase(
         .map(|user| user.user_id)
         .unwrap_or_else(uuid::Uuid::new_v4);
     let display_name = clip_chars(
-        &body
-            .display_name
+        &requested_name
             .as_deref()
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .map(str::to_string)
             .or_else(|| existing.as_ref().map(|user| user.display_name.clone()))
-            .or(identity.name)
+            .or(identity.name.clone())
+            .or_else(|| email_local_part(identity.email.as_deref()))
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Player".into()),
         40,
     );
     let avatar_id = existing.as_ref().and_then(|user| user.avatar_id.clone());
-    let legal_version = body
-        .legal_version
+    let legal_version = requested_legal
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -87,7 +108,7 @@ pub async fn auth_firebase(
         .store
         .upsert_identity(&StoredIdentity {
             user_id,
-            provider: "google".into(),
+            provider: identity.provider,
             subject: identity.subject,
             email: identity.email,
         })
@@ -298,7 +319,8 @@ pub struct LimitQuery {
     pub limit: Option<i64>,
 }
 
-struct VerifiedGoogle {
+struct VerifiedAccount {
+    provider: String,
     subject: String,
     email: Option<String>,
     name: Option<String>,
@@ -321,7 +343,7 @@ struct FirebaseClaim {
     sign_in_provider: Option<String>,
 }
 
-async fn verify_id_token(token: &str) -> Result<VerifiedGoogle, ApiError> {
+async fn verify_id_token(token: &str) -> Result<VerifiedAccount, ApiError> {
     let header =
         decode_header(token).map_err(|_| ApiError::BadRequest("invalid Google token".into()))?;
     if header.alg == Algorithm::HS256 {
@@ -334,7 +356,7 @@ async fn verify_id_token(token: &str) -> Result<VerifiedGoogle, ApiError> {
     verify_firebase_token(token, &project).await
 }
 
-fn verify_dev_token(token: &str, secret: &str) -> Result<VerifiedGoogle, ApiError> {
+fn verify_dev_token(token: &str, secret: &str) -> Result<VerifiedAccount, ApiError> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_aud = false;
     validation.set_issuer(&["judgement-dev"]);
@@ -347,13 +369,13 @@ fn verify_dev_token(token: &str, secret: &str) -> Result<VerifiedGoogle, ApiErro
     accept_claims(data.claims)
 }
 
-async fn verify_firebase_token(token: &str, project_id: &str) -> Result<VerifiedGoogle, ApiError> {
+async fn verify_firebase_token(token: &str, project_id: &str) -> Result<VerifiedAccount, ApiError> {
     let header =
         decode_header(token).map_err(|_| ApiError::BadRequest("invalid Google token".into()))?;
     let kid = header
         .kid
         .ok_or_else(|| ApiError::BadRequest("invalid Google token".into()))?;
-    let jwks = cached_jwks().await?;
+    let jwks = cached_jwks(GOOGLE_JWKS, google_jwks_cache(), "Google").await?;
     let jwk = jwks
         .find(&kid)
         .ok_or_else(|| ApiError::BadRequest("invalid Google token".into()))?;
@@ -367,22 +389,155 @@ async fn verify_firebase_token(token: &str, project_id: &str) -> Result<Verified
     accept_claims(data.claims)
 }
 
-fn accept_claims(claims: TokenClaims) -> Result<VerifiedGoogle, ApiError> {
-    if let Some(provider) = claims.firebase.sign_in_provider.as_deref() {
-        if provider != "google.com" {
+fn accept_claims(claims: TokenClaims) -> Result<VerifiedAccount, ApiError> {
+    let provider = match claims.firebase.sign_in_provider.as_deref() {
+        None | Some("google.com") => "google",
+        Some("password") => "email",
+        Some(_) => {
             return Err(ApiError::BadRequest(
-                "only Google sign-in is enabled".into(),
+                "this sign-in method is not enabled".into(),
             ));
         }
-    }
+    };
     if claims.sub.trim().is_empty() {
         return Err(ApiError::BadRequest("invalid Google token".into()));
     }
-    Ok(VerifiedGoogle {
+    Ok(VerifiedAccount {
+        provider: provider.into(),
         subject: claims.sub,
         email: claims.email.filter(|email| !email.is_empty()),
         name: claims.name.filter(|name| !name.is_empty()),
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramClaims {
+    #[serde(deserialize_with = "json_string")]
+    sub: String,
+    #[serde(default)]
+    aud: serde_json::Value,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    given_name: Option<String>,
+    #[serde(default)]
+    family_name: Option<String>,
+    #[serde(default)]
+    preferred_username: Option<String>,
+}
+
+fn json_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(text) => Ok(text),
+        serde_json::Value::Number(number) => Ok(number.to_string()),
+        _ => Err(serde::de::Error::custom("expected string")),
+    }
+}
+
+fn audience_matches(aud: &serde_json::Value, client_id: &str) -> bool {
+    match aud {
+        serde_json::Value::String(value) => value == client_id,
+        serde_json::Value::Number(value) => value.to_string() == client_id,
+        serde_json::Value::Array(values) => {
+            values.iter().any(|value| audience_matches(value, client_id))
+        }
+        _ => false,
+    }
+}
+
+const TELEGRAM_JWKS: &str = "https://oauth.telegram.org/.well-known/jwks.json";
+const GOOGLE_JWKS: &str =
+    "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
+
+async fn verify_telegram_token(token: &str) -> Result<VerifiedAccount, ApiError> {
+    let header =
+        decode_header(token).map_err(|_| ApiError::BadRequest("invalid Telegram token".into()))?;
+    if header.alg == Algorithm::HS256 {
+        let secret = std::env::var("JUDGEMENT_TELEGRAM_DEV_SECRET")
+            .map_err(|_| ApiError::BadRequest("Telegram sign-in is not configured".into()))?;
+        return verify_telegram_dev_token(token, &secret);
+    }
+    let client_id = std::env::var("TELEGRAM_CLIENT_ID")
+        .map_err(|_| ApiError::BadRequest("Telegram sign-in is not configured".into()))?;
+    let kid = header
+        .kid
+        .ok_or_else(|| ApiError::BadRequest("invalid Telegram token".into()))?;
+    let jwks = cached_jwks(TELEGRAM_JWKS, telegram_jwks_cache(), "Telegram").await?;
+    let jwk = jwks
+        .find(&kid)
+        .ok_or_else(|| ApiError::BadRequest("invalid Telegram token".into()))?;
+    let key = DecodingKey::from_jwk(jwk)
+        .map_err(|_| ApiError::BadRequest("invalid Telegram token".into()))?;
+    if !matches!(
+        header.alg,
+        Algorithm::RS256 | Algorithm::ES256 | Algorithm::EdDSA
+    ) {
+        return Err(ApiError::BadRequest("invalid Telegram token".into()));
+    }
+    let mut validation = Validation::new(header.alg);
+    validation.validate_aud = false;
+    validation.set_issuer(&["https://oauth.telegram.org"]);
+    let data = decode::<TelegramClaims>(token, &key, &validation).map_err(|err| {
+        tracing::warn!(error = %err, "telegram token rejected");
+        ApiError::BadRequest("invalid Telegram token".into())
+    })?;
+    if !audience_matches(&data.claims.aud, &client_id) {
+        return Err(ApiError::BadRequest("invalid Telegram token".into()));
+    }
+    telegram_account(data.claims)
+}
+
+fn verify_telegram_dev_token(token: &str, secret: &str) -> Result<VerifiedAccount, ApiError> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_aud = false;
+    validation.set_issuer(&["judgement-dev-telegram"]);
+    let data = decode::<TelegramClaims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| ApiError::BadRequest("invalid Telegram token".into()))?;
+    telegram_account(data.claims)
+}
+
+fn telegram_account(claims: TelegramClaims) -> Result<VerifiedAccount, ApiError> {
+    if claims.sub.trim().is_empty() {
+        return Err(ApiError::BadRequest("invalid Telegram token".into()));
+    }
+    let name = telegram_name(&claims);
+    Ok(VerifiedAccount {
+        provider: "telegram".into(),
+        subject: claims.sub,
+        email: None,
+        name,
+    })
+}
+
+fn telegram_name(claims: &TelegramClaims) -> Option<String> {
+    let direct = claims
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    if let Some(name) = direct {
+        return Some(name.to_string());
+    }
+    let given = claims.given_name.as_deref().unwrap_or("").trim();
+    let family = claims.family_name.as_deref().unwrap_or("").trim();
+    let combined = format!("{given} {family}").trim().to_string();
+    if !combined.is_empty() {
+        return Some(combined);
+    }
+    claims
+        .preferred_username
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
 }
 
 struct CachedJwks {
@@ -390,13 +545,22 @@ struct CachedJwks {
     set: JwkSet,
 }
 
-fn jwks_cache() -> &'static Mutex<Option<CachedJwks>> {
+fn google_jwks_cache() -> &'static Mutex<Option<CachedJwks>> {
     static CACHE: OnceLock<Mutex<Option<CachedJwks>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
-async fn cached_jwks() -> Result<JwkSet, ApiError> {
-    if let Some(cached) = jwks_cache().lock().unwrap().as_ref() {
+fn telegram_jwks_cache() -> &'static Mutex<Option<CachedJwks>> {
+    static CACHE: OnceLock<Mutex<Option<CachedJwks>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+async fn cached_jwks(
+    url: &str,
+    cache: &Mutex<Option<CachedJwks>>,
+    who: &str,
+) -> Result<JwkSet, ApiError> {
+    if let Some(cached) = cache.lock().unwrap().as_ref() {
         if cached.fetched.elapsed() < Duration::from_secs(60 * 60) {
             return Ok(cached.set.clone());
         }
@@ -404,20 +568,48 @@ async fn cached_jwks() -> Result<JwkSet, ApiError> {
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
-        .map_err(|_| ApiError::Conflict("could not reach Google".into()))?
-        .get("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
+        .map_err(|_| ApiError::Conflict(format!("could not reach {who}")))?
+        .get(url)
         .send()
         .await
-        .map_err(|_| ApiError::Conflict("could not reach Google".into()))?;
-    let set: JwkSet = response
-        .json()
+        .map_err(|_| ApiError::Conflict(format!("could not reach {who}")))?;
+    let body = response
+        .text()
         .await
-        .map_err(|_| ApiError::Conflict("could not read Google keys".into()))?;
-    *jwks_cache().lock().unwrap() = Some(CachedJwks {
+        .map_err(|_| ApiError::Conflict(format!("could not read {who} keys")))?;
+    let set = jwk_set_from_json(&body).map_err(|err| {
+        tracing::warn!(error = %err, %who, "jwks parse failed");
+        ApiError::Conflict(format!("could not read {who} keys"))
+    })?;
+    *cache.lock().unwrap() = Some(CachedJwks {
         fetched: Instant::now(),
         set: set.clone(),
     });
     Ok(set)
+}
+
+/// Telegram publishes ES256K keys this crate cannot decode. Drop those
+/// before parsing so one unused key does not reject the whole set.
+fn jwk_set_from_json(body: &str) -> Result<JwkSet, serde_json::Error> {
+    let mut value: serde_json::Value = serde_json::from_str(body)?;
+    if let Some(keys) = value.get_mut("keys").and_then(|keys| keys.as_array_mut()) {
+        keys.retain(|key| {
+            matches!(
+                key.get("alg").and_then(|alg| alg.as_str()),
+                Some("RS256" | "ES256" | "EdDSA")
+            )
+        });
+    }
+    serde_json::from_value(value)
+}
+
+fn email_local_part(email: Option<&str>) -> Option<String> {
+    let local = email?.split('@').next()?.trim();
+    if local.is_empty() {
+        None
+    } else {
+        Some(local.to_string())
+    }
 }
 
 fn clip_chars(value: &str, max: usize) -> String {
@@ -444,6 +636,46 @@ fn table_nickname_from_display(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::table_nickname_from_display;
+
+    #[test]
+    fn telegram_jwks_ignores_unsupported_es256k_keys() {
+        let set = super::jwk_set_from_json(
+            r#"{"keys":[
+                {"kty":"RSA","alg":"RS256","kid":"oidc-1","n":"sQ","e":"AQAB"},
+                {"kty":"EC","alg":"ES256K","kid":"oidc-es256k-1","crv":"secp256k1","x":"a","y":"b"}
+            ]}"#,
+        )
+        .expect("supported keys parse");
+        assert_eq!(set.keys.len(), 1);
+        assert_eq!(set.keys[0].common.key_id.as_deref(), Some("oidc-1"));
+    }
+
+    #[test]
+    fn telegram_audience_accepts_the_bot_client_id() {
+        assert!(super::audience_matches(
+            &serde_json::json!("8994800560"),
+            "8994800560"
+        ));
+        assert!(super::audience_matches(
+            &serde_json::json!(8_994_800_560_i64),
+            "8994800560"
+        ));
+        assert!(super::audience_matches(
+            &serde_json::json!(["8994800560"]),
+            "8994800560"
+        ));
+        assert!(!super::audience_matches(
+            &serde_json::json!("other"),
+            "8994800560"
+        ));
+    }
+
+    #[test]
+    fn telegram_subject_accepts_a_numeric_id() {
+        let claims: super::TelegramClaims =
+            serde_json::from_value(serde_json::json!({"sub": 424242, "name": "Ada"})).unwrap();
+        assert_eq!(claims.sub, "424242");
+    }
 
     #[test]
     fn table_nickname_uses_first_name_and_next_initial() {

@@ -40,7 +40,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/metrics", get(metrics_endpoint))
         .route("/api/v1/guest-sessions", post(routes::create_guest_session))
         .route("/api/v1/auth/firebase", post(auth::auth_firebase))
-        .route("/api/v1/me", get(auth::get_me).patch(auth::patch_me).delete(auth::delete_me))
+        .route("/api/v1/auth/telegram", post(auth::auth_telegram))
+        .route(
+            "/api/v1/me",
+            get(auth::get_me)
+                .patch(auth::patch_me)
+                .delete(auth::delete_me),
+        )
         .route("/api/v1/me/logout", post(auth::logout_me))
         .route("/api/v1/me/stats", get(auth::get_me_stats))
         .route("/api/v1/leaderboard", get(auth::get_leaderboard))
@@ -50,7 +56,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/rooms/{room_ref}/join", post(routes::join_room))
         .route("/api/v1/rooms/{room_ref}/claim", post(routes::claim_seat))
         .route("/api/v1/rooms/{room_ref}/end", post(routes::end_game))
-        .route("/api/v1/rooms/{room_ref}/restart", post(routes::restart_game))
+        .route(
+            "/api/v1/rooms/{room_ref}/restart",
+            post(routes::restart_game),
+        )
         .route("/api/v1/rooms/{room_ref}/leave", post(routes::leave_room))
         .route(
             "/api/v1/rooms/{room_ref}/remove-player",
@@ -61,10 +70,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/events", post(events::create_event))
         .route("/api/v1/events/{slug}", get(events::get_event))
         .route("/api/v1/events/{slug}/rsvps", post(events::create_rsvp))
-        .route(
-            "/api/v1/events/{slug}/rsvps/me",
-            post(events::cancel_rsvp),
-        )
+        .route("/api/v1/events/{slug}/rsvps/me", post(events::cancel_rsvp))
         .route("/api/v1/events/{slug}/manage", get(events::manage_event))
         .route("/api/v1/events/{slug}/open-lobby", post(events::open_lobby))
         .route("/api/v1/events/{slug}/cancel", post(events::cancel_event))
@@ -72,10 +78,22 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/events/{slug}/calendar.ics",
             get(events::calendar_ics),
         )
-        .route("/api/v1/games/{game_id}/history", get(routes::get_game_history))
-        .route("/api/v1/games/{game_id}/result", get(routes::get_game_result))
-        .route("/api/v1/games/{game_id}/coach/{player_id}", get(routes::get_game_coach))
-        .route("/api/v1/games/{game_id}/highlights", get(routes::get_game_highlights))
+        .route(
+            "/api/v1/games/{game_id}/history",
+            get(routes::get_game_history),
+        )
+        .route(
+            "/api/v1/games/{game_id}/result",
+            get(routes::get_game_result),
+        )
+        .route(
+            "/api/v1/games/{game_id}/coach/{player_id}",
+            get(routes::get_game_coach),
+        )
+        .route(
+            "/api/v1/games/{game_id}/highlights",
+            get(routes::get_game_highlights),
+        )
         .route(
             "/api/v1/games/{game_id}/rounds/{round_index}/summary",
             get(routes::get_round_summary),

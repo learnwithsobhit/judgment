@@ -178,9 +178,11 @@ async fn leave_marks_seat_vacant_then_claim_restores() {
             action: ClientCommand::LeaveGame,
         };
         let ws = clients[0].ws.as_mut().unwrap();
-        ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(
+            serde_json::to_string(&envelope).unwrap().into(),
+        ))
+        .await
+        .unwrap();
         clients[0].ws = None;
     }
 
@@ -193,7 +195,10 @@ async fn leave_marks_seat_vacant_then_claim_restores() {
         {
             let msg: ServerMessage = serde_json::from_str(&text).unwrap();
             match msg {
-                ServerMessage::SeatVacant { player_id, room_code } => {
+                ServerMessage::SeatVacant {
+                    player_id,
+                    room_code,
+                } => {
                     assert_eq!(player_id, vacant_player);
                     assert_eq!(room_code, code);
                     saw_vacant = true;
@@ -247,16 +252,20 @@ async fn leave_marks_seat_vacant_then_claim_restores() {
             let msg: ServerMessage = serde_json::from_str(&text).unwrap();
             match msg {
                 ServerMessage::StateSnapshot { view, .. } => {
-                    let ok = view.opponents.iter().any(|o| {
-                        o.player_id == vacant_player && o.nickname == "E"
-                    });
+                    let ok = view
+                        .opponents
+                        .iter()
+                        .any(|o| o.player_id == vacant_player && o.nickname == "E");
                     clients[1].last = Some(view);
                     if ok {
                         saw_name = true;
                         break;
                     }
                 }
-                ServerMessage::SeatClaimed { player_id, nickname } => {
+                ServerMessage::SeatClaimed {
+                    player_id,
+                    nickname,
+                } => {
                     assert_eq!(player_id, vacant_player);
                     assert_eq!(nickname, "E");
                     saw_name = true;
@@ -295,9 +304,11 @@ async fn host_can_end_game_while_vacant() {
             action: ClientCommand::LeaveGame,
         };
         let ws = clients[1].ws.as_mut().unwrap();
-        ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(
+            serde_json::to_string(&envelope).unwrap().into(),
+        ))
+        .await
+        .unwrap();
         clients[1].ws = None;
     }
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -313,9 +324,11 @@ async fn host_can_end_game_while_vacant() {
             action: ClientCommand::EndGame,
         };
         let ws = clients[0].ws.as_mut().unwrap();
-        ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
-            .await
-            .unwrap();
+        ws.send(Message::Text(
+            serde_json::to_string(&envelope).unwrap().into(),
+        ))
+        .await
+        .unwrap();
     }
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
@@ -403,8 +416,7 @@ async fn same_session_reclaim_via_ws_after_vacant() {
             let msg: ServerMessage = serde_json::from_str(&text).unwrap();
             if let ServerMessage::StateSnapshot { view, .. } = msg {
                 let vacant = view.opponents.iter().any(|o| {
-                    o.player_id == vacant_player
-                        && o.connection_status == ConnectionStatus::Vacant
+                    o.player_id == vacant_player && o.connection_status == ConnectionStatus::Vacant
                 });
                 clients[0].last = Some(view);
                 if !vacant {
@@ -454,7 +466,11 @@ async fn host_restart_drops_vacant_and_starts_new_game() {
 
     // Old actor removed; room has 3 seats in new game.
     assert!(!state_ref.games.lock().unwrap().contains_key(&old_game_id));
-    assert!(state_ref.games.lock().unwrap().contains_key(&restarted.game_id));
+    assert!(state_ref
+        .games
+        .lock()
+        .unwrap()
+        .contains_key(&restarted.game_id));
 
     let room: RoomView = http
         .get(format!("{base}/api/v1/rooms/{code}"))
@@ -532,9 +548,11 @@ async fn leave_game(client: &mut Client, game_id: GameId) {
         action: ClientCommand::LeaveGame,
     };
     let ws = client.ws.as_mut().unwrap();
-    ws.send(Message::Text(serde_json::to_string(&envelope).unwrap().into()))
-        .await
-        .unwrap();
+    ws.send(Message::Text(
+        serde_json::to_string(&envelope).unwrap().into(),
+    ))
+    .await
+    .unwrap();
     client.ws = None;
 }
 
@@ -720,9 +738,10 @@ async fn unique_nickname_hint_reclaims_matching_vacant_seat() {
 
 #[tokio::test]
 async fn silent_ws_blip_reconnects_without_vacant_or_host_change() {
-    let state = bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
-        .await
-        .unwrap();
+    let state =
+        bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
+            .await
+            .unwrap();
     let addr = spawn_with(state).await;
     let base = format!("http://{addr}");
 
@@ -771,7 +790,10 @@ async fn silent_ws_blip_reconnects_without_vacant_or_host_change() {
         }
     }
     assert!(!saw_vacant, "sub-grace reconnect must not vacant the seat");
-    assert!(!saw_host_change, "sub-grace reconnect must not steal the host");
+    assert!(
+        !saw_host_change,
+        "sub-grace reconnect must not steal the host"
+    );
     assert!(!saw_pause, "sub-3s blip must not show a pause banner");
     assert!(
         host_connected,
@@ -781,9 +803,10 @@ async fn silent_ws_blip_reconnects_without_vacant_or_host_change() {
 
 #[tokio::test]
 async fn replacing_ws_then_closing_old_socket_does_not_vacant_or_pause() {
-    let state = bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
-        .await
-        .unwrap();
+    let state =
+        bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
+            .await
+            .unwrap();
     let addr = spawn_with(state).await;
     let base = format!("http://{addr}");
 

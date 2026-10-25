@@ -15,11 +15,11 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use judgement_domain::{ActionId, GameId, PlayerId};
 use judgement_engine::{GamePhase, PlayerGameView};
+use judgement_persistence::MemoryStore;
 use judgement_protocol::{
     ClientCommand, ClientEnvelope, CreateGuestSessionResponse, CreateRoomResponse,
     JoinRoomResponse, RejectReason, ServerMessage, StartGameResponse, PROTOCOL_VERSION,
 };
-use judgement_persistence::MemoryStore;
 use judgement_server::{build_router, state::AppState};
 
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
@@ -54,7 +54,12 @@ struct Harness {
 
 impl Harness {
     async fn new(addr: SocketAddr) -> Self {
-        Self { addr, http: reqwest::Client::new(), game_id: None, clients: Vec::new() }
+        Self {
+            addr,
+            http: reqwest::Client::new(),
+            game_id: None,
+            clients: Vec::new(),
+        }
     }
 
     fn url(&self, path: &str) -> String {
@@ -128,7 +133,11 @@ impl Harness {
                 .send()
                 .await
                 .unwrap();
-            assert!(response.status().is_success(), "ready failed for {}", client.nickname);
+            assert!(
+                response.status().is_success(),
+                "ready failed for {}",
+                client.nickname
+            );
         }
 
         let start: StartGameResponse = self
@@ -283,7 +292,10 @@ impl Harness {
     }
 
     fn envelope(&self, index: usize, action: ClientCommand) -> ClientEnvelope {
-        let view = self.clients[index].view.as_ref().expect("client has a view");
+        let view = self.clients[index]
+            .view
+            .as_ref()
+            .expect("client has a view");
         ClientEnvelope {
             protocol_version: PROTOCOL_VERSION,
             action_id: ActionId::new(),
@@ -308,12 +320,18 @@ impl Harness {
     /// Drive one command from the current actor and wait for the resulting
     /// snapshot on every client.
     async fn step(&mut self) {
-        let index = self.current_actor().expect("someone must have a legal action");
+        let index = self
+            .current_actor()
+            .expect("someone must have a legal action");
         let view = self.clients[index].view.as_ref().unwrap();
         let action = if !view.legal_actions.legal_bids.is_empty() {
-            ClientCommand::PlaceBid { bid: view.legal_actions.legal_bids[0] }
+            ClientCommand::PlaceBid {
+                bid: view.legal_actions.legal_bids[0],
+            }
         } else {
-            ClientCommand::PlayCard { card_id: view.legal_actions.playable_cards[0] }
+            ClientCommand::PlayCard {
+                card_id: view.legal_actions.playable_cards[0],
+            }
         };
         let envelope = self.envelope(index, action);
         self.send_envelope(index, &envelope).await;
@@ -378,7 +396,10 @@ async fn six_clients_complete_a_full_game() {
     while harness.phase() != GamePhase::Finished {
         harness.step().await;
         steps += 1;
-        assert!(steps <= 264, "game did not finish within the expected command count");
+        assert!(
+            steps <= 264,
+            "game did not finish within the expected command count"
+        );
     }
     assert_eq!(steps, 264, "8 rounds = 48 bids + 216 card plays");
 
@@ -418,10 +439,14 @@ async fn duplicate_actions_do_not_apply_twice() {
         let messages = harness.read_until_snapshot(index).await;
         for m in &messages {
             match m {
-                ServerMessage::CommandAccepted { new_state_version, .. } => {
+                ServerMessage::CommandAccepted {
+                    new_state_version, ..
+                } => {
                     first_version = Some(*new_state_version);
                 }
-                ServerMessage::CommandRejected { message, reason, .. } => {
+                ServerMessage::CommandRejected {
+                    message, reason, ..
+                } => {
                     panic!("first send rejected: {message} ({reason:?})");
                 }
                 _ => {}
@@ -437,15 +462,24 @@ async fn duplicate_actions_do_not_apply_twice() {
     let second_version = messages
         .iter()
         .find_map(|m| match m {
-            ServerMessage::CommandAccepted { new_state_version, .. } => Some(*new_state_version),
+            ServerMessage::CommandAccepted {
+                new_state_version, ..
+            } => Some(*new_state_version),
             _ => None,
         })
         .expect("duplicate returns the prior CommandAccepted");
     assert_eq!(first_version, second_version);
 
     let view = harness.clients[index].view.as_ref().unwrap();
-    assert_eq!(view.state_version, first_version, "state did not advance twice");
-    let own_bid_count = view.bids.iter().filter(|b| b.player_id == harness.clients[index].player_id).count();
+    assert_eq!(
+        view.state_version, first_version,
+        "state did not advance twice"
+    );
+    let own_bid_count = view
+        .bids
+        .iter()
+        .filter(|b| b.player_id == harness.clients[index].player_id)
+        .count();
     assert_eq!(own_bid_count, 1, "the bid was recorded exactly once");
 }
 
@@ -472,16 +506,23 @@ async fn stale_clients_are_rejected_and_resynchronised() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
         match harness.read_message(index).await {
-            ServerMessage::CommandRejected { reason, retryable, .. } => {
+            ServerMessage::CommandRejected {
+                reason, retryable, ..
+            } => {
                 assert!(matches!(
                     reason,
-                    RejectReason::Game { error: judgement_domain::GameError::StaleState { .. } }
+                    RejectReason::Game {
+                        error: judgement_domain::GameError::StaleState { .. }
+                    }
                 ));
                 assert!(!retryable);
                 rejected = true;
             }
             ServerMessage::StateSnapshot { view, .. } if rejected => {
-                assert_eq!(view.state_version, real_version, "resync snapshot is current");
+                assert_eq!(
+                    view.state_version, real_version,
+                    "resync snapshot is current"
+                );
                 return;
             }
             _ => {}
@@ -504,11 +545,17 @@ async fn timer_expiry_applies_legal_automatic_actions() {
     // snapshot broadcast. Wait until the game reaches Playing.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     while harness.phase() != GamePhase::Playing {
-        assert!(tokio::time::Instant::now() < deadline, "auto-bids did not progress the game");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "auto-bids did not progress the game"
+        );
         harness.read_until_snapshot(0).await;
     }
 
     let view = harness.clients[0].view.as_ref().unwrap();
     assert_eq!(view.bids.len(), 6, "every seat auto-bid exactly once");
-    assert_eq!(view.state_version, 7, "start + six auto-bids, no duplicates from stale deadlines");
+    assert_eq!(
+        view.state_version, 7,
+        "start + six auto-bids, no duplicates from stale deadlines"
+    );
 }
