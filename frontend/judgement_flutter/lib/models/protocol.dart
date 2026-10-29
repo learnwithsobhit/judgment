@@ -127,6 +127,9 @@ class OpponentView {
   /// 1, 2, or 3 on the overall board. Null for everyone else.
   final int? ladderRank;
 
+  /// True when this opponent's seat is bound to an account.
+  final bool signedIn;
+
   OpponentView.fromJson(Map<String, dynamic> json)
     : playerId = json['player_id'] as String,
       nickname = json['nickname'] as String,
@@ -136,7 +139,8 @@ class OpponentView {
       tricksWon = json['tricks_won'] as int,
       connectionStatus = json['connection_status'] as String,
       avatarId = json['avatar_id'] as String?,
-      ladderRank = json['ladder_rank'] as int?;
+      ladderRank = json['ladder_rank'] as int?,
+      signedIn = json['signed_in'] as bool? ?? false;
 }
 
 class CompletedTrickView {
@@ -268,6 +272,9 @@ class PlayerGameView {
 
   /// Viewer's place on the overall board, 1–3.
   final int? ownLadderRank;
+
+  /// True when the viewer's seat is bound to an account.
+  final bool ownSignedIn;
   final List<OpponentView> opponents;
   final List<PlayedCard> currentTrick;
   final CompletedTrickView? lastCompletedTrick;
@@ -294,6 +301,7 @@ class PlayerGameView {
       ownTricksWon = json['own_tricks_won'] as int,
       ownAvatarId = json['own_avatar_id'] as String?,
       ownLadderRank = json['own_ladder_rank'] as int?,
+      ownSignedIn = json['own_signed_in'] as bool? ?? false,
       opponents = (json['opponents'] as List)
           .map((o) => OpponentView.fromJson(o as Map<String, dynamic>))
           .toList(),
@@ -681,6 +689,9 @@ class SeatView {
   /// 1, 2, or 3 on the overall board. Null for guests and everyone else.
   final int? ladderRank;
 
+  /// Account on this seat. False for guests and when the field is omitted.
+  final bool signedIn;
+
   SeatView.fromJson(Map<String, dynamic> json)
     : playerId = json['player_id'] as String,
       nickname = json['nickname'] as String,
@@ -689,7 +700,8 @@ class SeatView {
       isHost = json['is_host'] as bool,
       avatarId = json['avatar_id'] as String?,
       vacant = json['vacant'] as bool? ?? false,
-      ladderRank = json['ladder_rank'] as int?;
+      ladderRank = json['ladder_rank'] as int?,
+      signedIn = json['signed_in'] as bool? ?? false;
 }
 
 /// One manual schedule step: deal [cards] for [repeat] consecutive rounds.

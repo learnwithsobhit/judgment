@@ -14,7 +14,8 @@ use uuid::Uuid;
 use crate::error::PersistError;
 use crate::models::*;
 use crate::stats::{
-    apply_finish, average_score, exact_percent, ladder_key, stats_enabled, SeatFinish, UserStatsRow,
+    apply_finish, average_score, exact_percent, ladder_key, match_pulse, stats_enabled,
+    PulseFinish, SeatFinish, UserStatsRow,
 };
 use crate::GameStore;
 
@@ -36,6 +37,8 @@ struct MemoryInner {
     stats: HashMap<Uuid, UserStatsRow>,
     /// (game_id, user_id) already applied. Survives delete_game.
     recorded: HashSet<(Uuid, Uuid)>,
+    /// Counted finishes kept so a local run can answer the same pulse as Postgres.
+    pulse: Vec<PulseFinish>,
 }
 
 type SessionKey = uuid::Uuid;
@@ -482,9 +485,11 @@ impl GameStore for MemoryStore {
             })
             .collect();
         rows.sort_by(|a, b| b.0.cmp(&a.0));
+        if limit > 0 {
+            rows.truncate(limit as usize);
+        }
         Ok(rows
             .into_iter()
-            .take(limit.max(0) as usize)
             .map(|(_, user, row)| LeaderboardRow {
                 user_id: user.user_id,
                 display_name: user.display_name.clone(),
@@ -527,6 +532,16 @@ impl GameStore for MemoryStore {
             rank,
         }))
     }
+
+    async fn load_match_pulse(&self) -> Result<MatchPulse, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let names = inner
+            .users
+            .iter()
+            .map(|(id, user)| (*id, user.display_name.clone()))
+            .collect();
+        Ok(match_pulse(&inner.pulse, Utc::now(), &names))
+    }
 }
 
 fn record_finishes(
@@ -566,6 +581,17 @@ fn record_finishes(
         }
         let row = inner.stats.entry(seat.user_id).or_default();
         apply_finish(row, &seat, rounds, counted);
+        if counted {
+            inner.pulse.push(PulseFinish {
+                game_id,
+                user_id: seat.user_id,
+                finished_at: Utc::now(),
+                finish_rank: seat.finish_rank,
+                exact_bid_rounds: seat.exact_bid_rounds,
+                rounds_played: rounds,
+                total_score: seat.total_score,
+            });
+        }
     }
 }
 

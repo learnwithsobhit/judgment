@@ -1,0 +1,2923 @@
+diff --git a/backend/crates/judgement-persistence/src/lib.rs b/backend/crates/judgement-persistence/src/lib.rs
+index d0f07cd..05b4c51 100644
+--- a/backend/crates/judgement-persistence/src/lib.rs
++++ b/backend/crates/judgement-persistence/src/lib.rs
+@@ -132,6 +132,10 @@ pub trait GameStore: Send + Sync {
+         &self,
+         user_id: uuid::Uuid,
+     ) -> Result<Option<UserStatsView>, PersistError>;
++
++    /// Distinct ranked games for today, this week, and all time.
++    /// Called from the background board refresh, never from a game commit.
++    async fn load_match_pulse(&self) -> Result<MatchPulse, PersistError>;
+ }
+ 
+ /// Round / game completion events also warrant keeping an explicit historical
+diff --git a/backend/crates/judgement-persistence/src/memory.rs b/backend/crates/judgement-persistence/src/memory.rs
+index 0096c35..cbed8fa 100644
+--- a/backend/crates/judgement-persistence/src/memory.rs
++++ b/backend/crates/judgement-persistence/src/memory.rs
+@@ -14,7 +14,8 @@ use uuid::Uuid;
+ use crate::error::PersistError;
+ use crate::models::*;
+ use crate::stats::{
+-    apply_finish, average_score, exact_percent, ladder_key, stats_enabled, SeatFinish, UserStatsRow,
++    apply_finish, average_score, exact_percent, ladder_key, match_pulse, stats_enabled,
++    PulseFinish, SeatFinish, UserStatsRow,
+ };
+ use crate::GameStore;
+ 
+@@ -36,6 +37,8 @@ struct MemoryInner {
+     stats: HashMap<Uuid, UserStatsRow>,
+     /// (game_id, user_id) already applied. Survives delete_game.
+     recorded: HashSet<(Uuid, Uuid)>,
++    /// Counted finishes kept so a local run can answer the same pulse as Postgres.
++    pulse: Vec<PulseFinish>,
+ }
+ 
+ type SessionKey = uuid::Uuid;
+@@ -482,9 +485,11 @@ impl GameStore for MemoryStore {
+             })
+             .collect();
+         rows.sort_by(|a, b| b.0.cmp(&a.0));
++        if limit > 0 {
++            rows.truncate(limit as usize);
++        }
+         Ok(rows
+             .into_iter()
+-            .take(limit.max(0) as usize)
+             .map(|(_, user, row)| LeaderboardRow {
+                 user_id: user.user_id,
+                 display_name: user.display_name.clone(),
+@@ -527,6 +532,16 @@ impl GameStore for MemoryStore {
+             rank,
+         }))
+     }
++
++    async fn load_match_pulse(&self) -> Result<MatchPulse, PersistError> {
++        let inner = self.inner.lock().unwrap();
++        let names = inner
++            .users
++            .iter()
++            .map(|(id, user)| (*id, user.display_name.clone()))
++            .collect();
++        Ok(match_pulse(&inner.pulse, Utc::now(), &names))
++    }
+ }
+ 
+ fn record_finishes(
+@@ -566,6 +581,17 @@ fn record_finishes(
+         }
+         let row = inner.stats.entry(seat.user_id).or_default();
+         apply_finish(row, &seat, rounds, counted);
++        if counted {
++            inner.pulse.push(PulseFinish {
++                game_id,
++                user_id: seat.user_id,
++                finished_at: Utc::now(),
++                finish_rank: seat.finish_rank,
++                exact_bid_rounds: seat.exact_bid_rounds,
++                rounds_played: rounds,
++                total_score: seat.total_score,
++            });
++        }
+     }
+ }
+ 
+diff --git a/backend/crates/judgement-persistence/src/models.rs b/backend/crates/judgement-persistence/src/models.rs
+index 9eea0bc..25fd944 100644
+--- a/backend/crates/judgement-persistence/src/models.rs
++++ b/backend/crates/judgement-persistence/src/models.rs
+@@ -35,6 +35,10 @@ pub struct StoredRoomPlayer {
+     pub avatar_id: Option<String>,
+ }
+ 
++fn default_listed() -> bool {
++    true
++}
++
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct StoredRoom {
+     pub room_id: RoomId,
+@@ -54,6 +58,9 @@ pub struct StoredRoom {
+     /// Creator is not seated; first joiner becomes host.
+     #[serde(default)]
+     pub open_start: bool,
++    /// Join room may show this table. Omitted rows stay listed.
++    #[serde(default = "default_listed")]
++    pub listed: bool,
+     pub phase: String,
+     pub game_id: Option<GameId>,
+     pub players: Vec<StoredRoomPlayer>,
+@@ -194,6 +201,21 @@ pub struct LeaderboardRow {
+     pub average_score: i32,
+ }
+ 
++/// Ranked-game totals from `user_game_results`. Open seats are not part of this.
++#[derive(Debug, Clone, Default)]
++pub struct MatchPulse {
++    pub games_all: i64,
++    pub games_today: i64,
++    pub games_week: i64,
++    pub games_last_week: i64,
++    pub players_week: i64,
++    pub since: Option<DateTime<Utc>>,
++    pub week_leader_name: Option<String>,
++    pub week_leader_wins: i64,
++    pub last_week_leader_name: Option<String>,
++    pub last_week_leader_wins: i64,
++}
++
+ #[derive(Debug, Clone)]
+ pub struct UserStatsView {
+     pub user_id: uuid::Uuid,
+diff --git a/backend/crates/judgement-persistence/src/postgres.rs b/backend/crates/judgement-persistence/src/postgres.rs
+index d30cdef..1cbd27d 100644
+--- a/backend/crates/judgement-persistence/src/postgres.rs
++++ b/backend/crates/judgement-persistence/src/postgres.rs
+@@ -1,6 +1,7 @@
+ //! sqlx-backed PostgreSQL implementation.
+ 
+ use async_trait::async_trait;
++use chrono::Utc;
+ use judgement_domain::{
+     ActionId, EventId, GameId, GameRules, PlayerId, RankedPlayer, RoomId, RsvpId, SessionId, Suit,
+ };
+@@ -108,8 +109,8 @@ impl GameStore for PostgresStore {
+             INSERT INTO rooms (
+                 room_id, code, host_session_id, max_players, turn_timeout_seconds,
+                 first_trump, trump_cycle, round_schedule, dealer_total_restriction,
+-                open_start, phase, game_id, created_at
+-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
++                open_start, listed, phase, game_id, created_at
++            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+             ON CONFLICT (room_id) DO UPDATE SET
+                 host_session_id = EXCLUDED.host_session_id,
+                 max_players = EXCLUDED.max_players,
+@@ -119,6 +120,7 @@ impl GameStore for PostgresStore {
+                 round_schedule = EXCLUDED.round_schedule,
+                 dealer_total_restriction = EXCLUDED.dealer_total_restriction,
+                 open_start = EXCLUDED.open_start,
++                listed = EXCLUDED.listed,
+                 phase = EXCLUDED.phase,
+                 game_id = EXCLUDED.game_id
+             "#,
+@@ -133,6 +135,7 @@ impl GameStore for PostgresStore {
+         .bind(serde_json::to_value(&room.round_schedule)?)
+         .bind(room.dealer_total_restriction)
+         .bind(room.open_start)
++        .bind(room.listed)
+         .bind(&room.phase)
+         .bind(room.game_id.map(|g| g.0))
+         .bind(room.created_at)
+@@ -201,7 +204,7 @@ impl GameStore for PostgresStore {
+             r#"
+             SELECT room_id, code, host_session_id, max_players, turn_timeout_seconds,
+                    first_trump, trump_cycle, round_schedule, dealer_total_restriction,
+-                   open_start, phase, game_id, created_at
++                   open_start, listed, phase, game_id, created_at
+             FROM rooms
+             "#,
+         )
+@@ -256,6 +259,7 @@ impl GameStore for PostgresStore {
+                 round_schedule,
+                 dealer_total_restriction: row.get("dealer_total_restriction"),
+                 open_start: row.get("open_start"),
++                listed: row.get("listed"),
+                 phase: row.get("phase"),
+                 game_id: row.get::<Option<Uuid>, _>("game_id").map(GameId),
+                 players,
+@@ -1075,7 +1079,7 @@ impl GameStore for PostgresStore {
+             LIMIT $1
+             "#,
+         )
+-        .bind(limit)
++        .bind(if limit > 0 { limit } else { i64::MAX })
+         .fetch_all(&self.pool)
+         .await?;
+         Ok(rows
+@@ -1098,6 +1102,110 @@ impl GameStore for PostgresStore {
+             .collect())
+     }
+ 
++    async fn load_match_pulse(&self) -> Result<MatchPulse, PersistError> {
++        let (today, week, last_week) = crate::stats::india_bounds(Utc::now());
++        let mut tx = self.pool.begin().await?;
++        // Timeout dies with this transaction, so the pooled connection stays usable.
++        sqlx::query("SET LOCAL statement_timeout = '2s'")
++            .execute(&mut *tx)
++            .await?;
++        let row = sqlx::query(
++            r#"
++            WITH counted AS (
++                SELECT game_id, user_id, finished_at, finish_rank,
++                       exact_bid_rounds, rounds_played, total_score
++                FROM user_game_results
++                WHERE counted
++            ),
++            bounds AS (
++                SELECT
++                    COUNT(DISTINCT game_id) AS games_all,
++                    COUNT(DISTINCT game_id) FILTER (WHERE finished_at >= $1) AS games_today,
++                    COUNT(DISTINCT game_id) FILTER (WHERE finished_at >= $2) AS games_week,
++                    COUNT(DISTINCT game_id) FILTER (
++                        WHERE finished_at >= $3 AND finished_at < $2
++                    ) AS games_last_week,
++                    COUNT(DISTINCT user_id) FILTER (WHERE finished_at >= $2) AS players_week,
++                    MIN(finished_at) AS since
++                FROM counted
++            ),
++            week_user AS (
++                SELECT user_id,
++                       COUNT(DISTINCT game_id)::int AS games,
++                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS wins,
++                       COALESCE(SUM(exact_bid_rounds), 0)::int AS exact,
++                       COALESCE(SUM(rounds_played), 0)::int AS rounds,
++                       COALESCE(SUM(total_score), 0)::bigint AS points
++                FROM counted
++                WHERE finished_at >= $2
++                GROUP BY user_id
++            ),
++            leader AS (
++                SELECT u.display_name, w.wins
++                FROM week_user w
++                JOIN users u ON u.user_id = w.user_id
++                WHERE w.wins > 0
++                ORDER BY w.wins DESC,
++                         COALESCE(w.wins::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
++                         COALESCE(w.exact::bigint * 1000000 / NULLIF(w.rounds, 0), 0) DESC,
++                         COALESCE(w.points / NULLIF(w.games, 0), 0) DESC
++                LIMIT 1
++            ),
++            last_user AS (
++                SELECT user_id,
++                       COUNT(DISTINCT game_id)::int AS games,
++                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS wins,
++                       COALESCE(SUM(exact_bid_rounds), 0)::int AS exact,
++                       COALESCE(SUM(rounds_played), 0)::int AS rounds,
++                       COALESCE(SUM(total_score), 0)::bigint AS points
++                FROM counted
++                WHERE finished_at >= $3 AND finished_at < $2
++                GROUP BY user_id
++            ),
++            last_leader AS (
++                SELECT u.display_name, w.wins
++                FROM last_user w
++                JOIN users u ON u.user_id = w.user_id
++                WHERE w.wins > 0
++                ORDER BY w.wins DESC,
++                         COALESCE(w.wins::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
++                         COALESCE(w.exact::bigint * 1000000 / NULLIF(w.rounds, 0), 0) DESC,
++                         COALESCE(w.points / NULLIF(w.games, 0), 0) DESC
++                LIMIT 1
++            )
++            SELECT b.games_all, b.games_today, b.games_week, b.games_last_week,
++                   b.players_week, b.since,
++                   l.display_name AS week_leader_name,
++                   l.wins AS week_leader_wins,
++                   ll.display_name AS last_week_leader_name,
++                   ll.wins AS last_week_leader_wins
++            FROM bounds b
++            LEFT JOIN leader l ON true
++            LEFT JOIN last_leader ll ON true
++            "#,
++        )
++        .bind(today)
++        .bind(week)
++        .bind(last_week)
++        .fetch_one(&mut *tx)
++        .await?;
++        tx.commit().await?;
++        let wins: Option<i32> = row.get("week_leader_wins");
++        let last_wins: Option<i32> = row.get("last_week_leader_wins");
++        Ok(MatchPulse {
++            games_all: row.get("games_all"),
++            games_today: row.get("games_today"),
++            games_week: row.get("games_week"),
++            games_last_week: row.get("games_last_week"),
++            players_week: row.get("players_week"),
++            since: row.get("since"),
++            week_leader_name: row.get("week_leader_name"),
++            week_leader_wins: i64::from(wins.unwrap_or(0)),
++            last_week_leader_name: row.get("last_week_leader_name"),
++            last_week_leader_wins: i64::from(last_wins.unwrap_or(0)),
++        })
++    }
++
+     async fn load_user_stats(&self, user_id: Uuid) -> Result<Option<UserStatsView>, PersistError> {
+         let user = match self.load_user(user_id).await? {
+             Some(user) => user,
+diff --git a/backend/crates/judgement-persistence/src/stats.rs b/backend/crates/judgement-persistence/src/stats.rs
+index b9a778b..bd0ac3d 100644
+--- a/backend/crates/judgement-persistence/src/stats.rs
++++ b/backend/crates/judgement-persistence/src/stats.rs
+@@ -1,7 +1,12 @@
+ //! Pure stat increments. Stores apply these only after an idempotent insert.
+ 
++use std::collections::{HashMap, HashSet};
++
++use chrono::{DateTime, Datelike, Days, FixedOffset, Utc};
+ use uuid::Uuid;
+ 
++use crate::MatchPulse;
++
+ #[derive(Debug, Clone)]
+ pub struct SeatFinish {
+     pub user_id: Uuid,
+@@ -95,6 +100,167 @@ pub fn average_score(points: i64, games: i32) -> i32 {
+     }
+ }
+ 
++/// One counted finish already stored. A 2-player or guest-only game is not a row.
++#[derive(Debug, Clone)]
++pub struct PulseFinish {
++    pub game_id: Uuid,
++    pub user_id: Uuid,
++    pub finished_at: DateTime<Utc>,
++    pub finish_rank: i32,
++    pub exact_bid_rounds: i32,
++    pub rounds_played: i32,
++    pub total_score: i32,
++}
++
++fn india() -> FixedOffset {
++    FixedOffset::east_opt(5 * 3600 + 30 * 60).expect("IST offset")
++}
++
++/// Today, this Monday, and the previous Monday, each at 00:00 India time as UTC.
++pub fn india_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>, DateTime<Utc>) {
++    let zone = india();
++    let local = now.with_timezone(&zone);
++    let today = local
++        .date_naive()
++        .and_hms_opt(0, 0, 0)
++        .expect("midnight")
++        .and_local_timezone(zone)
++        .single()
++        .expect("IST day")
++        .with_timezone(&Utc);
++    let back = u64::from(local.weekday().num_days_from_monday());
++    let monday = local
++        .date_naive()
++        .checked_sub_days(Days::new(back))
++        .expect("monday")
++        .and_hms_opt(0, 0, 0)
++        .expect("midnight")
++        .and_local_timezone(zone)
++        .single()
++        .expect("IST week")
++        .with_timezone(&Utc);
++    let last_week = monday
++        .checked_sub_days(Days::new(7))
++        .expect("previous monday");
++    (today, monday, last_week)
++}
++
++struct WeekTotals {
++    games: HashSet<Uuid>,
++    wins: HashSet<Uuid>,
++    exact: i32,
++    rounds: i32,
++    points: i64,
++}
++
++impl Default for WeekTotals {
++    fn default() -> Self {
++        Self {
++            games: HashSet::new(),
++            wins: HashSet::new(),
++            exact: 0,
++            rounds: 0,
++            points: 0,
++        }
++    }
++}
++
++/// Distinct ranked games. Three signed-in seats in one game count once.
++pub fn match_pulse(
++    finishes: &[PulseFinish],
++    now: DateTime<Utc>,
++    names: &HashMap<Uuid, String>,
++) -> MatchPulse {
++    let (today, week, last_week) = india_bounds(now);
++    let mut all = HashSet::new();
++    let mut today_games = HashSet::new();
++    let mut week_games = HashSet::new();
++    let mut last_week_games = HashSet::new();
++    let mut week_players = HashSet::new();
++    let mut since: Option<DateTime<Utc>> = None;
++    let mut by_user: HashMap<Uuid, WeekTotals> = HashMap::new();
++    let mut last_by_user: HashMap<Uuid, WeekTotals> = HashMap::new();
++
++    for finish in finishes {
++        all.insert(finish.game_id);
++        if since.is_none_or(|earliest| finish.finished_at < earliest) {
++            since = Some(finish.finished_at);
++        }
++        if finish.finished_at >= today {
++            today_games.insert(finish.game_id);
++        }
++        if finish.finished_at >= week {
++            week_games.insert(finish.game_id);
++            week_players.insert(finish.user_id);
++            record_week(&mut by_user, finish);
++        } else if finish.finished_at >= last_week {
++            last_week_games.insert(finish.game_id);
++            record_week(&mut last_by_user, finish);
++        }
++    }
++
++    let (week_leader_name, week_leader_wins) = pick_leader(&by_user, names);
++    let (last_week_leader_name, last_week_leader_wins) = pick_leader(&last_by_user, names);
++
++    MatchPulse {
++        games_all: all.len() as i64,
++        games_today: today_games.len() as i64,
++        games_week: week_games.len() as i64,
++        games_last_week: last_week_games.len() as i64,
++        players_week: week_players.len() as i64,
++        since,
++        week_leader_name,
++        week_leader_wins,
++        last_week_leader_name,
++        last_week_leader_wins,
++    }
++}
++
++fn record_week(by_user: &mut HashMap<Uuid, WeekTotals>, finish: &PulseFinish) {
++    let totals = by_user.entry(finish.user_id).or_default();
++    totals.games.insert(finish.game_id);
++    if finish.finish_rank == 1 {
++        totals.wins.insert(finish.game_id);
++    }
++    totals.exact = totals.exact.saturating_add(finish.exact_bid_rounds);
++    totals.rounds = totals.rounds.saturating_add(finish.rounds_played);
++    totals.points = totals.points.saturating_add(i64::from(finish.total_score));
++}
++
++fn pick_leader(
++    by_user: &HashMap<Uuid, WeekTotals>,
++    names: &HashMap<Uuid, String>,
++) -> (Option<String>, i64) {
++    let mut leader: Option<(String, i64, UserStatsRow)> = None;
++    for (user_id, totals) in by_user {
++        if totals.wins.is_empty() {
++            continue;
++        }
++        let Some(name) = names.get(user_id).filter(|name| !name.is_empty()) else {
++            continue;
++        };
++        let row = UserStatsRow {
++            ranked_wins: totals.wins.len() as i32,
++            ranked_games: totals.games.len() as i32,
++            ranked_exact: totals.exact,
++            ranked_rounds: totals.rounds,
++            ranked_points: totals.points,
++            ..UserStatsRow::default()
++        };
++        let replace = match &leader {
++            None => true,
++            Some((_, _, current)) => ladder_key(&row) > ladder_key(current),
++        };
++        if replace {
++            leader = Some((name.clone(), totals.wins.len() as i64, row));
++        }
++    }
++    (
++        leader.as_ref().map(|(name, _, _)| name.clone()),
++        leader.as_ref().map(|(_, wins, _)| *wins).unwrap_or(0),
++    )
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -159,4 +325,121 @@ mod tests {
+         assert!(key(4, 10, 8, 10, 0) > key(4, 10, 5, 10, 1_000));
+         assert!(key(4, 10, 5, 10, 800) > key(4, 10, 5, 10, 400));
+     }
++
++    fn at(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
++        chrono::NaiveDate::from_ymd_opt(y, m, d)
++            .unwrap()
++            .and_hms_opt(h, min, 0)
++            .unwrap()
++            .and_utc()
++    }
++
++    fn seat(
++        game: Uuid,
++        user: Uuid,
++        at: DateTime<Utc>,
++        rank: i32,
++        exact: i32,
++        rounds: i32,
++        points: i32,
++    ) -> PulseFinish {
++        PulseFinish {
++            game_id: game,
++            user_id: user,
++            finished_at: at,
++            finish_rank: rank,
++            exact_bid_rounds: exact,
++            rounds_played: rounds,
++            total_score: points,
++        }
++    }
++
++    #[test]
++    fn three_signed_in_seats_are_one_ranked_game() {
++        let game = Uuid::new_v4();
++        let when = at(2026, 10, 18, 12, 0);
++        let rows = [
++            seat(game, Uuid::new_v4(), when, 1, 1, 1, 10),
++            seat(game, Uuid::new_v4(), when, 2, 0, 1, 0),
++            seat(game, Uuid::new_v4(), when, 3, 0, 1, -5),
++        ];
++        let pulse = match_pulse(&rows, when, &HashMap::new());
++        assert_eq!(pulse.games_all, 1);
++        assert_eq!(pulse.since, Some(when));
++    }
++
++    #[test]
++    fn midnight_in_india_splits_today_and_the_week() {
++        // Tuesday 20 Oct 2026, 01:00 IST = 19 Oct 19:30 UTC.
++        let now = at(2026, 10, 19, 19, 30);
++        let (today, week, last_week) = india_bounds(now);
++        assert_eq!(today, at(2026, 10, 19, 18, 30));
++        // Monday 19 Oct 00:00 IST. Last week starts the Monday before.
++        assert_eq!(week, at(2026, 10, 18, 18, 30));
++        assert_eq!(last_week, at(2026, 10, 11, 18, 30));
++
++        let game_today = Uuid::new_v4();
++        let game_evening = Uuid::new_v4();
++        let early = Uuid::new_v4();
++        let monday = Uuid::new_v4();
++        let ankit = Uuid::new_v4();
++        let beena = Uuid::new_v4();
++        // 00:30 IST Tuesday is today. 23:30 IST Monday is still Monday.
++        let just_after_midnight = at(2026, 10, 19, 19, 0);
++        let previous_evening = at(2026, 10, 19, 18, 0);
++        // Sunday 18 Oct 23:00 IST is last week. Monday 00:30 IST is this week.
++        let sunday_night = at(2026, 10, 18, 17, 30);
++        let monday_morning = at(2026, 10, 18, 19, 0);
++        let rows = [
++            seat(game_today, ankit, just_after_midnight, 1, 4, 8, 40),
++            seat(game_evening, ankit, previous_evening, 1, 4, 8, 20),
++            seat(early, beena, sunday_night, 1, 8, 8, 30),
++            seat(monday, ankit, monday_morning, 1, 4, 8, 10),
++            seat(monday, beena, monday_morning, 2, 8, 8, 50),
++        ];
++        let mut names = HashMap::new();
++        names.insert(ankit, "Ankit".to_string());
++        names.insert(beena, "Beena".to_string());
++        let pulse = match_pulse(&rows, now, &names);
++        assert_eq!(pulse.games_all, 4);
++        assert_eq!(pulse.games_today, 1);
++        assert_eq!(pulse.games_week, 3);
++        assert_eq!(pulse.games_last_week, 1);
++        assert_eq!(pulse.players_week, 2);
++        assert_eq!(pulse.since, Some(sunday_night));
++        assert_eq!(pulse.week_leader_name.as_deref(), Some("Ankit"));
++        assert_eq!(pulse.week_leader_wins, 3);
++        assert_eq!(pulse.last_week_leader_name.as_deref(), Some("Beena"));
++        assert_eq!(pulse.last_week_leader_wins, 1);
++    }
++
++    #[test]
++    fn a_shared_first_counts_for_each_player_and_bids_break_the_tie() {
++        let now = at(2026, 10, 21, 6, 30);
++        let game = Uuid::new_v4();
++        let when = at(2026, 10, 20, 4, 0);
++        let ankit = Uuid::new_v4();
++        let beena = Uuid::new_v4();
++        let rows = [
++            seat(game, ankit, when, 1, 2, 10, 10),
++            seat(game, beena, when, 1, 8, 10, 10),
++        ];
++        let mut names = HashMap::new();
++        names.insert(ankit, "Ankit".to_string());
++        names.insert(beena, "Beena".to_string());
++        let pulse = match_pulse(&rows, now, &names);
++        assert_eq!(pulse.games_all, 1);
++        assert_eq!(pulse.week_leader_name.as_deref(), Some("Beena"));
++        assert_eq!(pulse.week_leader_wins, 1);
++    }
++
++    #[test]
++    fn no_stored_finish_has_no_leader_and_no_since() {
++        let pulse = match_pulse(&[], at(2026, 10, 20, 0, 0), &HashMap::new());
++        assert_eq!(pulse.games_all, 0);
++        assert_eq!(pulse.games_today, 0);
++        assert_eq!(pulse.games_week, 0);
++        assert!(pulse.since.is_none());
++        assert!(pulse.week_leader_name.is_none());
++    }
+ }
+diff --git a/backend/crates/judgement-persistence/tests/memory_store.rs b/backend/crates/judgement-persistence/tests/memory_store.rs
+index 02a3a0f..e1eb8cf 100644
+--- a/backend/crates/judgement-persistence/tests/memory_store.rs
++++ b/backend/crates/judgement-persistence/tests/memory_store.rs
+@@ -56,6 +56,7 @@ async fn memory_store_finishes_game_and_records_history() {
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             open_start: false,
++            listed: true,
+             phase: "lobby".into(),
+             game_id: None,
+             players: game_players
+@@ -177,6 +178,7 @@ async fn action_committed_detects_durable_action_id() {
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             open_start: false,
++            listed: true,
+             phase: "lobby".into(),
+             game_id: None,
+             players: game_players
+diff --git a/backend/crates/judgement-persistence/tests/postgres_store.rs b/backend/crates/judgement-persistence/tests/postgres_store.rs
+index 8cbfa10..564ec13 100644
+--- a/backend/crates/judgement-persistence/tests/postgres_store.rs
++++ b/backend/crates/judgement-persistence/tests/postgres_store.rs
+@@ -87,6 +87,7 @@ async fn postgres_persists_and_restores_a_game() {
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             open_start: false,
++            listed: true,
+             phase: "lobby".into(),
+             game_id: None,
+             players: seats,
+diff --git a/backend/crates/judgement-protocol/src/rest.rs b/backend/crates/judgement-protocol/src/rest.rs
+index 72340c1..8022804 100644
+--- a/backend/crates/judgement-protocol/src/rest.rs
++++ b/backend/crates/judgement-protocol/src/rest.rs
+@@ -56,6 +56,35 @@ pub struct CreateRoomRequest {
+     /// needs at least 3 ready players; the table does not have to be full.
+     #[serde(default)]
+     pub open_start: bool,
++    /// When false, Join room does not show this table. The code still works.
++    /// Omitted means listed.
++    #[serde(default = "default_listed")]
++    pub listed: bool,
++}
++
++fn default_listed() -> bool {
++    true
++}
++
++/// One waiting table on Join room. The room code is not included.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct OpenTable {
++    pub room_id: RoomId,
++    pub host_nickname: String,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub host_avatar_id: Option<String>,
++    pub seated: u8,
++    pub max_players: u8,
++    pub seats_open: u8,
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    pub with_names: Vec<String>,
++    pub yours: bool,
++    pub in_game: bool,
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct OpenTablesResponse {
++    pub tables: Vec<OpenTable>,
+ }
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+@@ -554,7 +583,32 @@ pub struct LeaderboardEntry {
+     pub average_score: i32,
+ }
+ 
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct LeaderboardPulse {
++    pub games_today: i64,
++    pub games_week: i64,
++    #[serde(default)]
++    pub games_last_week: i64,
++    pub games_all: i64,
++    pub players_week: i64,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub since: Option<DateTime<Utc>>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub week_leader_name: Option<String>,
++    #[serde(default)]
++    pub week_leader_wins: i64,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub last_week_leader_name: Option<String>,
++    #[serde(default)]
++    pub last_week_leader_wins: i64,
++    #[serde(default)]
++    pub open_tables: i64,
++}
++
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct LeaderboardResponse {
+     pub players: Vec<LeaderboardEntry>,
++    /// Absent on an older server. A client that does not know it ignores the field.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub pulse: Option<LeaderboardPulse>,
+ }
+diff --git a/backend/crates/judgement-server/src/auth.rs b/backend/crates/judgement-server/src/auth.rs
+index 72d2229..137174b 100644
+--- a/backend/crates/judgement-server/src/auth.rs
++++ b/backend/crates/judgement-server/src/auth.rs
+@@ -281,8 +281,11 @@ pub async fn get_leaderboard(
+     State(state): State<Arc<AppState>>,
+     Query(query): Query<LimitQuery>,
+ ) -> Json<LeaderboardResponse> {
+-    let limit = query.limit.unwrap_or(10).clamp(1, 10) as usize;
+     let rows = state.leaderboard.lock().unwrap().clone();
++    let limit = match query.limit {
++        Some(n) => n.clamp(1, 10_000) as usize,
++        None => rows.len(),
++    };
+     let players = rows
+         .iter()
+         .take(limit)
+@@ -297,7 +300,8 @@ pub async fn get_leaderboard(
+             average_score: row.average_score,
+         })
+         .collect();
+-    Json(LeaderboardResponse { players })
++    let pulse = state.table_pulse.lock().unwrap().clone();
++    Json(LeaderboardResponse { players, pulse })
+ }
+ 
+ fn stats_response(view: &judgement_persistence::UserStatsView) -> MeStatsResponse {
+@@ -442,9 +446,9 @@ fn audience_matches(aud: &serde_json::Value, client_id: &str) -> bool {
+     match aud {
+         serde_json::Value::String(value) => value == client_id,
+         serde_json::Value::Number(value) => value.to_string() == client_id,
+-        serde_json::Value::Array(values) => {
+-            values.iter().any(|value| audience_matches(value, client_id))
+-        }
++        serde_json::Value::Array(values) => values
++            .iter()
++            .any(|value| audience_matches(value, client_id)),
+         _ => false,
+     }
+ }
+diff --git a/backend/crates/judgement-server/src/events.rs b/backend/crates/judgement-server/src/events.rs
+index d70d962..c1722b4 100644
+--- a/backend/crates/judgement-server/src/events.rs
++++ b/backend/crates/judgement-server/src/events.rs
+@@ -720,6 +720,7 @@ pub async fn open_lobby(
+         round_schedule: round_schedule.clone(),
+         dealer_total_restriction: false,
+         open_start: false,
++        listed: true,
+     };
+     let mut room_view = room.view();
+     state
+diff --git a/backend/crates/judgement-server/src/leaderboard.rs b/backend/crates/judgement-server/src/leaderboard.rs
+index 002a3be..a03a590 100644
+--- a/backend/crates/judgement-server/src/leaderboard.rs
++++ b/backend/crates/judgement-server/src/leaderboard.rs
+@@ -3,17 +3,19 @@
+ use std::sync::Arc;
+ use std::time::Duration;
+ 
+-use judgement_persistence::LeaderboardRow;
+-use judgement_protocol::RoomView;
++use judgement_persistence::{LeaderboardRow, MatchPulse};
++use judgement_protocol::{LeaderboardPulse, RoomView};
+ use uuid::Uuid;
+ 
+-use crate::state::AppState;
++use crate::state::{AppState, RoomStatus};
+ 
+ /// Board place shown as a cap. Only the first three rows qualify.
+ pub fn ladder_rank(user_id: Uuid, board: &[LeaderboardRow]) -> Option<u8> {
+-    board.iter().take(3).enumerate().find_map(|(index, row)| {
+-        (row.user_id == user_id).then_some(index as u8 + 1)
+-    })
++    board
++        .iter()
++        .take(3)
++        .enumerate()
++        .find_map(|(index, row)| (row.user_id == user_id).then_some(index as u8 + 1))
+ }
+ 
+ /// Fill each lobby seat from the account sitting there. Guests stay unset.
+@@ -52,13 +54,66 @@ pub fn spawn_leaderboard_refresh(state: Arc<AppState>) {
+     });
+ }
+ 
++/// A lobby with someone seated and a free chair. An empty room is not filling up.
++pub fn is_open_table(lobby: bool, seated: usize, max_players: u8) -> bool {
++    lobby && seated > 0 && seated < usize::from(max_players)
++}
++
++fn open_table_count(state: &AppState) -> i64 {
++    let rooms = state.rooms.lock().unwrap();
++    rooms
++        .values()
++        .filter(|room| {
++            is_open_table(
++                matches!(room.status, RoomStatus::Lobby),
++                room.seats.len(),
++                room.max_players,
++            )
++        })
++        .count() as i64
++}
++
++/// A failed count leaves the previous pulse. `loaded` is `None` in that case.
++pub fn store_pulse(
++    current: &mut Option<LeaderboardPulse>,
++    loaded: Option<MatchPulse>,
++    open_tables: i64,
++) {
++    let Some(loaded) = loaded else {
++        return;
++    };
++    *current = Some(LeaderboardPulse {
++        games_today: loaded.games_today,
++        games_week: loaded.games_week,
++        games_last_week: loaded.games_last_week,
++        games_all: loaded.games_all,
++        players_week: loaded.players_week,
++        since: loaded.since,
++        week_leader_name: loaded.week_leader_name,
++        week_leader_wins: loaded.week_leader_wins,
++        last_week_leader_name: loaded.last_week_leader_name,
++        last_week_leader_wins: loaded.last_week_leader_wins,
++        open_tables,
++    });
++}
++
+ pub async fn refresh_leaderboard(state: &AppState) {
+-    match state.store.load_leaderboard(10).await {
++    match state.store.load_leaderboard(0).await {
+         Ok(rows) => {
+             *state.leaderboard.lock().unwrap() = Arc::new(rows);
+         }
+         Err(error) => tracing::warn!(%error, "leaderboard refresh failed"),
+     }
++    let loaded = match state.store.load_match_pulse().await {
++        Ok(pulse) => Some(pulse),
++        Err(error) => {
++            tracing::warn!(%error, "match pulse refresh failed");
++            None
++        }
++    };
++    let open_tables = open_table_count(state);
++    let mut current = state.table_pulse.lock().unwrap();
++    store_pulse(&mut current, loaded, open_tables);
+ }
+ 
+ #[cfg(test)]
+@@ -91,4 +146,51 @@ mod tests {
+         assert_eq!(ladder_rank(fourth, &board), None);
+         assert_eq!(ladder_rank(guest, &board), None);
+     }
++
++    #[test]
++    fn an_empty_lobby_is_not_a_table_filling_up() {
++        assert!(!is_open_table(true, 0, 4));
++        assert!(is_open_table(true, 1, 4));
++        assert!(!is_open_table(true, 4, 4));
++        assert!(!is_open_table(false, 1, 4));
++    }
++
++    #[test]
++    fn a_failed_pulse_keeps_the_previous_one() {
++        let previous = LeaderboardPulse {
++            games_today: 2,
++            games_week: 5,
++            games_last_week: 11,
++            games_all: 9,
++            players_week: 4,
++            since: None,
++            week_leader_name: Some("Ankit".into()),
++            week_leader_wins: 3,
++            last_week_leader_name: Some("Beena".into()),
++            last_week_leader_wins: 4,
++            open_tables: 1,
++        };
++        let mut current = Some(previous.clone());
++        store_pulse(&mut current, None, 0);
++        let kept = current.as_ref().expect("previous pulse");
++        assert_eq!(kept.games_all, 9);
++        assert_eq!(kept.week_leader_name.as_deref(), Some("Ankit"));
++        assert_eq!(kept.open_tables, 1);
++
++        store_pulse(
++            &mut current,
++            Some(MatchPulse {
++                games_all: 10,
++                games_today: 1,
++                games_week: 6,
++                players_week: 4,
++                ..MatchPulse::default()
++            }),
++            0,
++        );
++        let updated = current.expect("new pulse");
++        assert_eq!(updated.games_all, 10);
++        assert_eq!(updated.open_tables, 0);
++        assert!(updated.week_leader_name.is_none());
++    }
+ }
+diff --git a/backend/crates/judgement-server/src/lib.rs b/backend/crates/judgement-server/src/lib.rs
+index a188b05..d3a2bf4 100644
+--- a/backend/crates/judgement-server/src/lib.rs
++++ b/backend/crates/judgement-server/src/lib.rs
+@@ -12,6 +12,7 @@ pub mod events;
+ pub mod http_limit;
+ pub mod leaderboard;
+ pub mod metrics;
++pub mod open_tables;
+ pub mod persist;
+ pub mod rag_boot;
+ pub mod reaper;
+@@ -51,6 +52,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
+         .route("/api/v1/me/stats", get(auth::get_me_stats))
+         .route("/api/v1/leaderboard", get(auth::get_leaderboard))
+         .route("/api/v1/me/avatar", post(routes::set_avatar))
++        .route("/api/v1/rooms/open", get(routes::list_open_tables))
+         .route("/api/v1/rooms", post(routes::create_room))
+         .route("/api/v1/rooms/{room_ref}", get(routes::get_room))
+         .route("/api/v1/rooms/{room_ref}/join", post(routes::join_room))
+@@ -66,6 +68,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
+             post(routes::remove_player),
+         )
+         .route("/api/v1/rooms/{room_ref}/ready", post(routes::set_ready))
++        .route("/api/v1/rooms/{room_ref}/seats", post(routes::add_seat))
+         .route("/api/v1/rooms/{room_ref}/start", post(routes::start_game))
+         .route("/api/v1/events", post(events::create_event))
+         .route("/api/v1/events/{slug}", get(events::get_event))
+diff --git a/backend/crates/judgement-server/src/persist.rs b/backend/crates/judgement-server/src/persist.rs
+index fa81f3d..d0bc33e 100644
+--- a/backend/crates/judgement-server/src/persist.rs
++++ b/backend/crates/judgement-server/src/persist.rs
+@@ -39,6 +39,7 @@ pub fn stored_room(room: &Room) -> StoredRoom {
+         round_schedule: room.round_schedule.clone(),
+         dealer_total_restriction: room.dealer_total_restriction,
+         open_start: room.open_start,
++        listed: room.listed,
+         phase,
+         game_id,
+         players: room
+diff --git a/backend/crates/judgement-server/src/restore.rs b/backend/crates/judgement-server/src/restore.rs
+index e1b3053..40c2c34 100644
+--- a/backend/crates/judgement-server/src/restore.rs
++++ b/backend/crates/judgement-server/src/restore.rs
+@@ -77,6 +77,7 @@ pub async fn restore_from_store(
+                     round_schedule: stored.round_schedule,
+                     dealer_total_restriction: stored.dealer_total_restriction,
+                     open_start: stored.open_start,
++                    listed: stored.listed,
+                 },
+             );
+         }
+diff --git a/backend/crates/judgement-server/src/routes.rs b/backend/crates/judgement-server/src/routes.rs
+index e1216bb..a34013d 100644
+--- a/backend/crates/judgement-server/src/routes.rs
++++ b/backend/crates/judgement-server/src/routes.rs
+@@ -1,6 +1,6 @@
+ //! REST handlers for guest sessions and room management (PLAN.md §13.1).
+ 
+-use std::collections::HashMap;
++use std::collections::{HashMap, HashSet};
+ use std::sync::Arc;
+ use std::time::Duration;
+ 
+@@ -28,9 +28,9 @@ use judgement_protocol::{
+     ClaimSeatRequest, ClaimSeatResponse, CoachingResponse, CreateGuestSessionRequest,
+     CreateGuestSessionResponse, CreateRoomRequest, CreateRoomResponse, EndGameResponse,
+     ExplanationResponse, GameHistoryResponse, GameResultResponse, HighlightsResponse,
+-    JoinRoomRequest, JoinRoomResponse, ReadyRequest, RemovePlayerRequest, RestartGameResponse,
+-    RoomView, RoundResultView, RoundSummaryResponse, RulesQueryRequest, SetAvatarRequest,
+-    SetAvatarResponse, StartGameRequest, StartGameResponse,
++    JoinRoomRequest, JoinRoomResponse, OpenTablesResponse, ReadyRequest, RemovePlayerRequest,
++    RestartGameResponse, RoomView, RoundResultView, RoundSummaryResponse, RulesQueryRequest,
++    SetAvatarRequest, SetAvatarResponse, StartGameRequest, StartGameResponse,
+ };
+ use tokio::sync::oneshot;
+ 
+@@ -203,6 +203,7 @@ pub async fn create_room(
+         round_schedule,
+         dealer_total_restriction: body.dealer_total_restriction,
+         open_start: body.open_start,
++        listed: body.listed,
+     };
+     let mut view = room.view();
+     state
+@@ -283,6 +284,109 @@ fn map_claim_error(message: String) -> ApiError {
+     }
+ }
+ 
++pub async fn list_open_tables(
++    State(state): State<Arc<AppState>>,
++    headers: HeaderMap,
++) -> Result<Json<OpenTablesResponse>, ApiError> {
++    let session = state.authenticate(&headers)?;
++    let user_id = session.user_id.ok_or(ApiError::Unauthorized)?;
++    let mine = state.session_ids_for_user(user_id);
++    let mut snaps = {
++        let rooms = state.rooms.lock().unwrap();
++        rooms
++            .values()
++            .map(crate::open_tables::RoomSnap::from_room)
++            .collect::<Vec<_>>()
++    };
++    let ids: Vec<_> = snaps
++        .iter()
++        .flat_map(|room| room.seats.iter().map(|seat| seat.session_id))
++        .collect();
++    let signed_in = state.signed_in_among(&ids);
++    crate::open_tables::mark_signed_in(&mut snaps, &signed_in);
++    Ok(Json(OpenTablesResponse {
++        tables: crate::open_tables::visible_tables(&snaps, &mine),
++    }))
++}
++
++fn account_sessions(state: &AppState, session: &Session) -> HashSet<SessionId> {
++    session
++        .user_id
++        .map(|user_id| state.session_ids_for_user(user_id))
++        .unwrap_or_default()
++}
++
++/// A second phone of the same account takes the seat it already has.
++async fn rebind_same_account(
++    state: &AppState,
++    session: &Session,
++    room_id: RoomId,
++    mine: &HashSet<SessionId>,
++) -> Result<Option<JoinRoomResponse>, ApiError> {
++    if mine.is_empty() {
++        return Ok(None);
++    }
++    let found = {
++        let rooms = state.rooms.lock().unwrap();
++        let Some(room) = rooms.get(&room_id) else {
++            return Ok(None);
++        };
++        room.seats
++            .iter()
++            .find(|seat| mine.contains(&seat.session_id) && seat.session_id != session.id)
++            .map(|seat| {
++                (
++                    seat.player_id,
++                    seat.session_id,
++                    matches!(room.status, RoomStatus::InGame(_)),
++                )
++            })
++    };
++    let Some((player_id, old_session, in_game)) = found else {
++        return Ok(None);
++    };
++    if in_game {
++        let mut games = state.games.lock().unwrap();
++        if let Some(info) = games.values_mut().find(|info| info.room_id == room_id) {
++            info.players.remove(&old_session);
++            info.players.insert(session.id, player_id);
++        }
++    }
++    let (mut view, snapshot) = {
++        let mut rooms = state.rooms.lock().unwrap();
++        let Some(room) = rooms.get_mut(&room_id) else {
++            return Ok(None);
++        };
++        if room.host_session == old_session {
++            room.host_session = session.id;
++        }
++        let Some(seat) = room
++            .seats
++            .iter_mut()
++            .find(|seat| seat.player_id == player_id)
++        else {
++            return Ok(None);
++        };
++        seat.session_id = session.id;
++        seat.nickname = session.nickname.clone();
++        seat.avatar_id = session.avatar_id.clone();
++        (room.view(), stored_room(room))
++    };
++    state
++        .store
++        .upsert_room(&snapshot)
++        .await
++        .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
++    if in_game {
++        enrich_room_vacancy(state, &mut view).await;
++    }
++    crate::leaderboard::stamp_room_ladder_ranks(state, &mut view);
++    Ok(Some(JoinRoomResponse {
++        room: view,
++        player_id,
++    }))
++}
++
+ pub async fn join_room(
+     State(state): State<Arc<AppState>>,
+     headers: HeaderMap,
+@@ -291,6 +395,7 @@ pub async fn join_room(
+ ) -> Result<Json<JoinRoomResponse>, ApiError> {
+     let preferred = body.and_then(|j| j.0.player_id);
+     let session = state.authenticate(&headers)?;
++    let mine = account_sessions(&state, &session);
+     let room_id = state
+         .resolve_room_id(&room_ref)
+         .ok_or(ApiError::NotFound("room"))?;
+@@ -310,6 +415,9 @@ pub async fn join_room(
+         crate::leaderboard::stamp_room_ladder_ranks(&state, &mut room);
+         return Ok(Json(JoinRoomResponse { room, player_id }));
+     }
++    if let Some(rebound) = rebind_same_account(&state, &session, room_id, &mine).await? {
++        return Ok(Json(rebound));
++    }
+     let needs_claim = {
+         let rooms = state.rooms.lock().unwrap();
+         rooms
+@@ -350,7 +458,9 @@ pub async fn join_room(
+             }));
+         }
+         if room.seats.len() as u8 >= room.max_players {
+-            return Err(ApiError::Conflict("the room is full".into()));
++            return Err(ApiError::Conflict(
++                "This table is full. Ask the host to open a seat, then use the same link.".into(),
++            ));
+         }
+ 
+         let seat_number = (0..room.max_players)
+@@ -407,6 +517,18 @@ async fn claim_seat_inner(
+     room_id: RoomId,
+     req: ClaimSeatRequest,
+ ) -> Result<ClaimSeatResponse, ApiError> {
++    let mine = account_sessions(state, session);
++    if let Some(rebound) = rebind_same_account(state, session, room_id, &mine).await? {
++        let game_id = rebound
++            .room
++            .game_id
++            .ok_or_else(|| ApiError::Conflict("you are already seated in this room".into()))?;
++        return Ok(ClaimSeatResponse {
++            room: rebound.room,
++            player_id: rebound.player_id,
++            game_id,
++        });
++    }
+     let (game_id, commands) = {
+         let rooms = state.rooms.lock().unwrap();
+         let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+@@ -836,6 +958,49 @@ pub async fn set_ready(
+     Ok(Json(with_ladder_ranks(&state, view)))
+ }
+ 
++/// Host opens one more lobby seat, up to 8. The join code does not change.
++pub async fn add_seat(
++    State(state): State<Arc<AppState>>,
++    headers: HeaderMap,
++    Path(room_ref): Path<String>,
++) -> Result<Json<RoomView>, ApiError> {
++    let session = state.authenticate(&headers)?;
++    let room_id = state
++        .resolve_room_id(&room_ref)
++        .ok_or(ApiError::NotFound("room"))?;
++
++    let (view, snapshot) = {
++        let mut rooms = state.rooms.lock().unwrap();
++        let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
++        if room.host_session != session.id {
++            return Err(ApiError::Forbidden("only the host can add a seat".into()));
++        }
++        if room.status != RoomStatus::Lobby {
++            return Err(ApiError::Conflict("the game has already started".into()));
++        }
++        if room.max_players >= MAX_PLAYERS {
++            return Err(ApiError::Conflict("the table already has 8 seats".into()));
++        }
++        let next = room.max_players + 1;
++        let reveal_trump = room.trump_cycle.is_none() && room.first_trump.is_none();
++        room.round_schedule
++            .resolve_pattern(next, reveal_trump)
++            .map_err(|e| {
++                ApiError::Conflict(format!("the card list does not fit {next} players: {e}"))
++            })?;
++        room.max_players = next;
++        (room.view(), stored_room(room))
++    };
++
++    state
++        .store
++        .upsert_room(&snapshot)
++        .await
++        .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
++
++    Ok(Json(with_ladder_ranks(&state, view)))
++}
++
+ pub async fn start_game(
+     State(state): State<Arc<AppState>>,
+     headers: HeaderMap,
+diff --git a/backend/crates/judgement-server/src/state.rs b/backend/crates/judgement-server/src/state.rs
+index f37c8e2..4e30dc5 100644
+--- a/backend/crates/judgement-server/src/state.rs
++++ b/backend/crates/judgement-server/src/state.rs
+@@ -19,7 +19,7 @@ use judgement_domain::{
+     EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit, MIN_PLAYERS,
+ };
+ use judgement_persistence::GameStore;
+-use judgement_protocol::{GameEventStatus, RoomPhase, RoomView, SeatView};
++use judgement_protocol::{GameEventStatus, LeaderboardPulse, RoomPhase, RoomView, SeatView};
+ 
+ use crate::actor::ActorMessage;
+ use crate::error::ApiError;
+@@ -91,6 +91,8 @@ pub struct Room {
+     pub dealer_total_restriction: bool,
+     /// Creator is not seated. First joiner becomes host.
+     pub open_start: bool,
++    /// Join room may show this table. The code still works when this is false.
++    pub listed: bool,
+ }
+ 
+ impl Room {
+@@ -204,11 +206,12 @@ pub struct AppState {
+     pub reconnect_grace: Duration,
+     /// Public Top 10. Refreshed in the background; reads never hit the database.
+     /// Shared with game actors so a seat cap tracks the same snapshot.
+-    pub leaderboard: std::sync::Arc<
+-        Mutex<std::sync::Arc<Vec<judgement_persistence::LeaderboardRow>>>,
+-    >,
++    pub leaderboard:
++        std::sync::Arc<Mutex<std::sync::Arc<Vec<judgement_persistence::LeaderboardRow>>>>,
+     /// Short memo for GET /me/stats so a profile open does not query every time.
+     pub stats_memo: Mutex<HashMap<uuid::Uuid, (Instant, judgement_persistence::UserStatsView)>>,
++    /// Ranked-game pulse from the same refresh as the board. Reads never query.
++    pub table_pulse: Mutex<Option<LeaderboardPulse>>,
+ }
+ 
+ impl AppState {
+@@ -233,6 +236,7 @@ impl AppState {
+             reconnect_grace: reconnect_grace_from_env(),
+             leaderboard: std::sync::Arc::new(Mutex::new(std::sync::Arc::new(Vec::new()))),
+             stats_memo: Mutex::default(),
++            table_pulse: Mutex::default(),
+         }
+     }
+ 
+@@ -334,6 +338,36 @@ impl AppState {
+     }
+ 
+     /// Resolve the bearer token from `Authorization: Bearer <token>`.
++    /// Every live session for this account. The session lock is not held
++    /// together with the rooms lock.
++    pub fn session_ids_for_user(
++        &self,
++        user_id: uuid::Uuid,
++    ) -> std::collections::HashSet<SessionId> {
++        self.sessions
++            .lock()
++            .unwrap()
++            .iter()
++            .filter(|(_, session)| session.user_id == Some(user_id))
++            .map(|(id, _)| *id)
++            .collect()
++    }
++
++    /// Which of these sessions belong to an account. Call after releasing
++    /// the rooms lock.
++    pub fn signed_in_among(&self, ids: &[SessionId]) -> std::collections::HashSet<SessionId> {
++        let sessions = self.sessions.lock().unwrap();
++        ids.iter()
++            .copied()
++            .filter(|id| {
++                sessions
++                    .get(id)
++                    .and_then(|session| session.user_id)
++                    .is_some()
++            })
++            .collect()
++    }
++
+     pub fn authenticate(&self, headers: &HeaderMap) -> Result<Session, ApiError> {
+         let token = headers
+             .get(axum::http::header::AUTHORIZATION)
+diff --git a/backend/crates/judgement-server/tests/coaching.rs b/backend/crates/judgement-server/tests/coaching.rs
+index a1485ea..2880167 100644
+--- a/backend/crates/judgement-server/tests/coaching.rs
++++ b/backend/crates/judgement-server/tests/coaching.rs
+@@ -67,6 +67,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
+             round_schedule: Default::default(),
+             dealer_total_restriction: false,
+             open_start: false,
++            listed: true,
+             phase: "in_game".into(),
+             game_id: None,
+             players: game_players
+diff --git a/backend/crates/judgement-server/tests/ladder_caps.rs b/backend/crates/judgement-server/tests/ladder_caps.rs
+index b99380d..aca3669 100644
+--- a/backend/crates/judgement-server/tests/ladder_caps.rs
++++ b/backend/crates/judgement-server/tests/ladder_caps.rs
+@@ -14,8 +14,8 @@ use judgement_protocol::{
+     JoinRoomResponse, ReadyRequest, RoomView, ServerMessage, StartGameRequest, StartGameResponse,
+     PROTOCOL_VERSION,
+ };
+-use judgement_server::state::AppState;
+ use judgement_server::build_router;
++use judgement_server::state::AppState;
+ use serde::Serialize;
+ use tokio::net::TcpListener;
+ use tokio_tungstenite::tungstenite::Message;
+@@ -84,13 +84,11 @@ async fn next_snapshot(
+ ) -> Option<PlayerGameView> {
+     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+     while tokio::time::Instant::now() < deadline {
+-        let message =
+-            tokio::time::timeout(Duration::from_millis(200), ws.next()).await;
++        let message = tokio::time::timeout(Duration::from_millis(200), ws.next()).await;
+         let Ok(Some(Ok(Message::Text(text)))) = message else {
+             continue;
+         };
+-        if let Ok(ServerMessage::StateSnapshot { view, .. }) = serde_json::from_str(text.as_ref())
+-        {
++        if let Ok(ServerMessage::StateSnapshot { view, .. }) = serde_json::from_str(text.as_ref()) {
+             return Some(view);
+         }
+     }
+@@ -173,12 +171,7 @@ async fn caps_follow_the_account_through_claim() {
+     let code = created.room.code.clone();
+     let gold_player = created.player_id.expect("host is seated");
+ 
+-    async fn join(
+-        client: &reqwest::Client,
+-        base: &str,
+-        code: &str,
+-        token: &str,
+-    ) -> PlayerId {
++    async fn join(client: &reqwest::Client, base: &str, code: &str, token: &str) -> PlayerId {
+         let joined: JoinRoomResponse = ok(client
+             .post(format!("{base}/api/v1/rooms/{code}/join"))
+             .bearer_auth(token)
+@@ -247,7 +240,9 @@ async fn caps_follow_the_account_through_claim() {
+     .await
+     .unwrap();
+ 
+-    let opening = next_snapshot(&mut guest_ws).await.expect("opening snapshot");
++    let opening = next_snapshot(&mut guest_ws)
++        .await
++        .expect("opening snapshot");
+     assert_eq!(opening.own_ladder_rank, None);
+     assert_eq!(
+         opening
+diff --git a/backend/crates/judgement-server/tests/round_schedule.rs b/backend/crates/judgement-server/tests/round_schedule.rs
+index 430da28..72b290d 100644
+--- a/backend/crates/judgement-server/tests/round_schedule.rs
++++ b/backend/crates/judgement-server/tests/round_schedule.rs
+@@ -202,6 +202,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
+                 },
+                 dealer_total_restriction: false,
+                 open_start: false,
++                listed: true,
+             },
+         );
+         codes.insert(code.clone(), room_id);
+diff --git a/frontend/judgement_flutter/firebase.json b/frontend/judgement_flutter/firebase.json
+index 311dc12..31ffe58 100644
+--- a/frontend/judgement_flutter/firebase.json
++++ b/frontend/judgement_flutter/firebase.json
+@@ -266,17 +266,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20261024161015-8ea9905",
++          "destination": "/index.html?_b=20261026100517-8bc20ca",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20261024161015-8ea9905&room=:code",
++          "destination": "/index.html?_b=20261026100517-8bc20ca&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20261024161015-8ea9905&event=:slug",
++          "destination": "/index.html?_b=20261026100517-8bc20ca&event=:slug",
+           "type": 302
+         }
+       ],
+@@ -554,17 +554,17 @@
+       "redirects": [
+         {
+           "source": "/",
+-          "destination": "/index.html?_b=20261024161015-8ea9905",
++          "destination": "/index.html?_b=20261026100517-8bc20ca",
+           "type": 302
+         },
+         {
+           "source": "/r/:code",
+-          "destination": "/index.html?_b=20261024161015-8ea9905&room=:code",
++          "destination": "/index.html?_b=20261026100517-8bc20ca&room=:code",
+           "type": 302
+         },
+         {
+           "source": "/e/:slug",
+-          "destination": "/index.html?_b=20261024161015-8ea9905&event=:slug",
++          "destination": "/index.html?_b=20261026100517-8bc20ca&event=:slug",
+           "type": 302
+         }
+       ],
+diff --git a/frontend/judgement_flutter/lib/auth/account_session.dart b/frontend/judgement_flutter/lib/auth/account_session.dart
+index 02fecd7..6cbd93b 100644
+--- a/frontend/judgement_flutter/lib/auth/account_session.dart
++++ b/frontend/judgement_flutter/lib/auth/account_session.dart
+@@ -1,7 +1,7 @@
+ /// Optional Google account kept beside guest play.
+ ///
+-/// The bearer lives in memory and in [storageKey]. Landing restores it after
+-/// the first frame. Create and Join do not wait on this.
++/// The bearer lives in memory and in [storageKey]. Join and Create wait until
++/// [restore] finishes, so a saved account is not treated as a guest.
+ library;
+ 
+ import 'dart:convert';
+@@ -27,7 +27,20 @@ class AccountSession extends ChangeNotifier {
+ 
+   bool get isSignedIn => token != null && token!.isNotEmpty;
+ 
+-  Future<void> restore() async {
++  Future<void>? _restoreInFlight;
++
++  /// Loads the saved account once. Overlapping callers share that load.
++  Future<void> restore() {
++    final existing = _restoreInFlight;
++    if (existing != null) return existing;
++    final run = _restore();
++    _restoreInFlight = run;
++    return run.whenComplete(() {
++      if (identical(_restoreInFlight, run)) _restoreInFlight = null;
++    });
++  }
++
++  Future<void> _restore() async {
+     try {
+       final prefs = await SharedPreferences.getInstance();
+       final raw = prefs.getString(accountStorageKey);
+diff --git a/frontend/judgement_flutter/lib/networking/api_client.dart b/frontend/judgement_flutter/lib/networking/api_client.dart
+index 2c62ae0..4f494a7 100644
+--- a/frontend/judgement_flutter/lib/networking/api_client.dart
++++ b/frontend/judgement_flutter/lib/networking/api_client.dart
+@@ -89,6 +89,7 @@ class ApiClient {
+     RoundSchedule? roundSchedule,
+     bool dealerTotalRestriction = false,
+     bool openStart = false,
++    bool listed = true,
+   }) async {
+     final json = await _post('/api/v1/rooms', {
+       'max_players': ?maxPlayers,
+@@ -98,6 +99,7 @@ class ApiClient {
+       'round_schedule': ?roundSchedule?.toJson(),
+       'dealer_total_restriction': dealerTotalRestriction,
+       if (openStart) 'open_start': true,
++      'listed': listed,
+     });
+     return (
+       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
+@@ -106,6 +108,14 @@ class ApiClient {
+     );
+   }
+ 
++  Future<List<OpenTable>> openTables() async {
++    final json = await _get('/api/v1/rooms/open');
++    final rows = json['tables'] as List<dynamic>? ?? const [];
++    return [
++      for (final row in rows) OpenTable.fromJson(row as Map<String, dynamic>),
++    ];
++  }
++
+   Future<({RoomView room, String playerId})> joinRoom(
+     String roomRef, {
+     String? playerId,
+@@ -165,6 +175,10 @@ class ApiClient {
+   Future<RoomView> leaveRoom(String roomRef) async =>
+       RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/leave', {}));
+ 
++  /// Host-only: open one more lobby seat. The join link stays the same.
++  Future<RoomView> addSeat(String roomRef) async =>
++      RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/seats', {}));
++
+   /// Host-only: remove a seated player from the lobby before start.
+   Future<RoomView> removePlayer(String roomRef, String playerId) async =>
+       RoomView.fromJson(
+@@ -395,15 +409,12 @@ class ApiClient {
+     return MeStats.fromJson(_decode(response));
+   }
+ 
+-  Future<List<LeaderboardEntry>> getLeaderboard() async {
++  Future<LeaderboardReport> getLeaderboard() async {
+     final response = await _http.get(
+       Uri.parse('$baseUrl/api/v1/leaderboard'),
+       headers: _headers,
+     );
+-    final json = _decode(response);
+-    return (json['players'] as List<dynamic>)
+-        .map((row) => LeaderboardEntry.fromJson(row as Map<String, dynamic>))
+-        .toList();
++    return LeaderboardReport.fromJson(_decode(response));
+   }
+ }
+ 
+@@ -505,8 +516,47 @@ class MeStats {
+   }
+ }
+ 
++class OpenTable {
++  const OpenTable({
++    required this.roomId,
++    required this.hostNickname,
++    required this.seated,
++    required this.maxPlayers,
++    required this.seatsOpen,
++    this.hostAvatarId,
++    this.withNames = const [],
++    this.yours = false,
++    this.inGame = false,
++  });
++
++  final String roomId;
++  final String hostNickname;
++  final String? hostAvatarId;
++  final int seated;
++  final int maxPlayers;
++  final int seatsOpen;
++  final List<String> withNames;
++  final bool yours;
++  final bool inGame;
++
++  factory OpenTable.fromJson(Map<String, dynamic> json) {
++    final names = json['with_names'] as List<dynamic>? ?? const [];
++    return OpenTable(
++      roomId: json['room_id'] as String,
++      hostNickname: json['host_nickname'] as String? ?? 'Player',
++      hostAvatarId: json['host_avatar_id'] as String?,
++      seated: json['seated'] as int? ?? 0,
++      maxPlayers: json['max_players'] as int? ?? 0,
++      seatsOpen: json['seats_open'] as int? ?? 0,
++      withNames: [for (final name in names) name as String],
++      yours: json['yours'] as bool? ?? false,
++      inGame: json['in_game'] as bool? ?? false,
++    );
++  }
++}
++
+ class LeaderboardEntry {
+-  LeaderboardEntry({
++  const LeaderboardEntry({
+     required this.rank,
+     required this.displayName,
+     required this.avatarId,
+@@ -541,3 +591,67 @@ class LeaderboardEntry {
+     );
+   }
+ }
++
++class LeaderboardPulse {
++  const LeaderboardPulse({
++    required this.gamesToday,
++    required this.gamesWeek,
++    required this.gamesAll,
++    required this.playersWeek,
++    this.gamesLastWeek = 0,
++    this.since,
++    this.weekLeaderName,
++    this.weekLeaderWins = 0,
++    this.lastWeekLeaderName,
++    this.lastWeekLeaderWins = 0,
++    this.openTables = 0,
++  });
++
++  final int gamesToday;
++  final int gamesWeek;
++  final int gamesLastWeek;
++  final int gamesAll;
++  final int playersWeek;
++  final DateTime? since;
++  final String? weekLeaderName;
++  final int weekLeaderWins;
++  final String? lastWeekLeaderName;
++  final int lastWeekLeaderWins;
++  final int openTables;
++
++  factory LeaderboardPulse.fromJson(Map<String, dynamic> json) {
++    final since = json['since'] as String?;
++    return LeaderboardPulse(
++      gamesToday: json['games_today'] as int? ?? 0,
++      gamesWeek: json['games_week'] as int? ?? 0,
++      gamesLastWeek: json['games_last_week'] as int? ?? 0,
++      gamesAll: json['games_all'] as int? ?? 0,
++      playersWeek: json['players_week'] as int? ?? 0,
++      since: since == null ? null : DateTime.tryParse(since),
++      weekLeaderName: json['week_leader_name'] as String?,
++      weekLeaderWins: json['week_leader_wins'] as int? ?? 0,
++      lastWeekLeaderName: json['last_week_leader_name'] as String?,
++      lastWeekLeaderWins: json['last_week_leader_wins'] as int? ?? 0,
++      openTables: json['open_tables'] as int? ?? 0,
++    );
++  }
++}
++
++class LeaderboardReport {
++  const LeaderboardReport({required this.players, this.pulse});
++
++  final List<LeaderboardEntry> players;
++  final LeaderboardPulse? pulse;
++
++  factory LeaderboardReport.fromJson(Map<String, dynamic> json) {
++    final pulse = json['pulse'];
++    return LeaderboardReport(
++      players: (json['players'] as List<dynamic>? ?? const [])
++          .map((row) => LeaderboardEntry.fromJson(row as Map<String, dynamic>))
++          .toList(),
++      pulse: pulse is Map<String, dynamic>
++          ? LeaderboardPulse.fromJson(pulse)
++          : null,
++    );
++  }
++}
+diff --git a/frontend/judgement_flutter/lib/screens/event_invite_screen.dart b/frontend/judgement_flutter/lib/screens/event_invite_screen.dart
+index 9083d23..c546b1a 100644
+--- a/frontend/judgement_flutter/lib/screens/event_invite_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/event_invite_screen.dart
+@@ -119,6 +119,8 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
+     if (!fresh || !mounted) return;
+     final nickname = _name.text.trim().isEmpty ? 'Player' : _name.text.trim();
+     setState(() => _busy = true);
++    await AccountSession.instance.restore();
++    if (!mounted) return;
+     final saveRecord = await promptToSaveRecord(context);
+     if (saveRecord == null || !mounted) {
+       if (mounted) setState(() => _busy = false);
+diff --git a/frontend/judgement_flutter/lib/screens/landing_screen.dart b/frontend/judgement_flutter/lib/screens/landing_screen.dart
+index 36867bc..e223bc3 100644
+--- a/frontend/judgement_flutter/lib/screens/landing_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/landing_screen.dart
+@@ -1,3 +1,5 @@
++import 'dart:async';
++
+ import 'package:flutter/material.dart';
+ 
+ import '../app/app.dart';
+@@ -15,6 +17,7 @@ import '../widgets/app_version_bar.dart';
+ import '../widgets/avatar_picker.dart';
+ import '../widgets/leaderboard_sheet.dart';
+ import '../widgets/legal_consent_checkbox.dart';
++import '../widgets/open_tables_section.dart';
+ import '../widgets/player_avatar.dart';
+ import '../widgets/profile_sheet.dart';
+ import '../widgets/sign_in_brands.dart';
+@@ -68,13 +71,12 @@ class _LandingScreenState extends State<LandingScreen> {
+       });
+     }
+     AccountSession.instance.addListener(_onAccount);
+-    WidgetsBinding.instance.addPostFrameCallback((_) {
+-      AccountSession.instance.restore();
+-    });
++    AccountSession.instance.restore();
+   }
+ 
+   @override
+   void dispose() {
++    _openTablesTimer?.cancel();
+     AccountSession.instance.removeListener(_onAccount);
+     _nickname.dispose();
+     _roomCode.dispose();
+@@ -96,6 +98,7 @@ class _LandingScreenState extends State<LandingScreen> {
+         _selectedAvatarId = avatar;
+       }
+     });
++    _syncOpenTables();
+   }
+ 
+   // Room options (create mode, ADR 0003).
+@@ -110,6 +113,9 @@ class _LandingScreenState extends State<LandingScreen> {
+   /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
+   bool _dealerTotalRestriction = false;
+   bool _setupOnly = false;
++  bool _listTable = true;
++  Timer? _openTablesTimer;
++  List<OpenTable> _openTables = const [];
+   List<ManualRoundStep> _manualSteps = RoundSchedule.defaultManualForPlayers(
+     6,
+   ).steps!;
+@@ -146,7 +152,7 @@ class _LandingScreenState extends State<LandingScreen> {
+     });
+   }
+ 
+-  Future<void> _submit() async {
++  Future<void> _submit({String? joinRef}) async {
+     final nickname = _nickname.text.trim();
+     if (nickname.isEmpty) {
+       _showError('Pick a nickname first');
+@@ -156,7 +162,8 @@ class _LandingScreenState extends State<LandingScreen> {
+       _showError('Please agree to the Terms of Use and Privacy Policy');
+       return;
+     }
+-    if (_joining && _roomCode.text.trim().isEmpty) {
++    final roomRef = joinRef ?? _roomCode.text.trim();
++    if (_joining && roomRef.isEmpty) {
+       _showError('Enter the room code');
+       return;
+     }
+@@ -172,6 +179,8 @@ class _LandingScreenState extends State<LandingScreen> {
+     if (!fresh || !mounted) return;
+ 
+     setState(() => _busy = true);
++    await AccountSession.instance.restore();
++    if (!mounted) return;
+     final saveRecord = await promptToSaveRecord(context);
+     if (saveRecord == null || !mounted) {
+       if (mounted) setState(() => _busy = false);
+@@ -195,7 +204,7 @@ class _LandingScreenState extends State<LandingScreen> {
+         final joined = await joinRoomWithReclaim(
+           context: context,
+           api: api,
+-          roomCode: _roomCode.text,
++          roomCode: roomRef,
+           nickname: nickname,
+           avatarId: _selectedAvatarId,
+           accountToken: usingAccount ? account.token : null,
+@@ -217,6 +226,7 @@ class _LandingScreenState extends State<LandingScreen> {
+           roundSchedule: schedule,
+           dealerTotalRestriction: _dealerTotalRestriction,
+           openStart: _setupOnly,
++          listed: _listTable,
+         );
+         room = created.room;
+         playerId = created.playerId;
+@@ -235,6 +245,7 @@ class _LandingScreenState extends State<LandingScreen> {
+           roundSchedule: schedule,
+           dealerTotalRestriction: _dealerTotalRestriction,
+           openStart: _setupOnly,
++          listed: _listTable,
+         );
+         room = created.room;
+         playerId = created.playerId;
+@@ -280,25 +291,39 @@ class _LandingScreenState extends State<LandingScreen> {
+                 (s) => s.playerId == seatedId && s.isHost,
+               );
+         controller.connect();
+-        Navigator.of(context).push(
+-          MaterialPageRoute(
+-            builder: (_) => TableScreen(controller: controller),
+-          ),
+-        );
++        _openTablesTimer?.cancel();
++        Navigator.of(context)
++            .push(
++              MaterialPageRoute(
++                builder: (_) => TableScreen(controller: controller),
++              ),
++            )
++            .then((_) {
++              if (mounted) _syncOpenTables();
++            });
+       } else {
+-        Navigator.of(context).push(
+-          MaterialPageRoute(
+-            builder: (_) => LobbyScreen(
+-              api: api,
+-              nickname: sessionNickname,
+-              initialRoom: room,
+-              myPlayerId: seatedId,
+-            ),
+-          ),
+-        );
++        _openTablesTimer?.cancel();
++        Navigator.of(context)
++            .push(
++              MaterialPageRoute(
++                builder: (_) => LobbyScreen(
++                  api: api,
++                  nickname: sessionNickname,
++                  initialRoom: room,
++                  myPlayerId: seatedId,
++                ),
++              ),
++            )
++            .then((_) {
++              if (mounted) _syncOpenTables();
++            });
+       }
+     } on ApiException catch (error) {
+-      if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
++      if (_joining && error.statusCode == 404) {
++        _showError(
++          'That table has finished. Join room shows who is waiting now.',
++        );
++      } else if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
+         _showCapacityFull(error.message);
+       } else {
+         _showError(error.message);
+@@ -310,6 +335,33 @@ class _LandingScreenState extends State<LandingScreen> {
+     }
+   }
+ 
++  void _syncOpenTables() {
++    _openTablesTimer?.cancel();
++    _openTablesTimer = null;
++    if (!_joining || !AccountSession.instance.isSignedIn) {
++      if (_openTables.isNotEmpty && mounted) {
++        setState(() => _openTables = const []);
++      }
++      return;
++    }
++    _loadOpenTables();
++    _openTablesTimer = Timer.periodic(const Duration(seconds: 5), (_) {
++      _loadOpenTables();
++    });
++  }
++
++  Future<void> _loadOpenTables() async {
++    if (!AccountSession.instance.isSignedIn) return;
++    final api = ApiClient()..token = AccountSession.instance.token;
++    try {
++      final tables = await api.openTables();
++      if (!mounted || !_joining) return;
++      setState(() => _openTables = tables);
++    } catch (_) {
++      // The code box still works when the list cannot be loaded.
++    }
++  }
++
+   void _showError(String message) {
+     if (!mounted) return;
+     ScaffoldMessenger.of(
+@@ -417,6 +469,15 @@ class _LandingScreenState extends State<LandingScreen> {
+           value: _setupOnly,
+           onChanged: (value) => setState(() => _setupOnly = value),
+         ),
++        SwitchListTile(
++          contentPadding: EdgeInsets.zero,
++          title: const Text('List this table'),
++          subtitle: const Text(
++            'People who are signed in can see it when they tap Join room. The code still works either way.',
++          ),
++          value: _listTable,
++          onChanged: (value) => setState(() => _listTable = value),
++        ),
+         const SizedBox(height: 12),
+         Text('Round schedule', style: labelStyle),
+         const SizedBox(height: 6),
+@@ -702,8 +763,10 @@ class _LandingScreenState extends State<LandingScreen> {
+                               ),
+                             ],
+                             selected: {_joining},
+-                            onSelectionChanged: (selection) =>
+-                                setState(() => _joining = selection.first),
++                            onSelectionChanged: (selection) {
++                              setState(() => _joining = selection.first);
++                              _syncOpenTables();
++                            },
+                           ),
+                         ],
+                         const SizedBox(height: 20),
+@@ -732,18 +795,30 @@ class _LandingScreenState extends State<LandingScreen> {
+                           onSelected: (id) =>
+                               setState(() => _selectedAvatarId = id),
+                         ),
+-                        if (_joining && !_fromLink) ...[
++                        if (_joining) ...[
+                           const SizedBox(height: 12),
+-                          TextField(
+-                            controller: _roomCode,
+-                            textCapitalization: TextCapitalization.characters,
+-                            decoration: const InputDecoration(
+-                              labelText: 'Room code',
+-                              hintText: 'e.g. XK7P2Q',
+-                              border: OutlineInputBorder(),
++                          ListenableBuilder(
++                            listenable: AccountSession.instance,
++                            builder: (context, _) => OpenTablesSection(
++                              signedIn: AccountSession.instance.isSignedIn,
++                              tables: _openTables,
++                              onJoin: (table) => _submit(joinRef: table.roomId),
+                             ),
+-                            onSubmitted: (_) => _submit(),
+                           ),
++                          if (!_fromLink) ...[
++                            const Text('Have a code?'),
++                            const SizedBox(height: 8),
++                            TextField(
++                              controller: _roomCode,
++                              textCapitalization: TextCapitalization.characters,
++                              decoration: const InputDecoration(
++                                labelText: 'Room code',
++                                hintText: 'e.g. XK7P2Q',
++                                border: OutlineInputBorder(),
++                              ),
++                              onSubmitted: (_) => _submit(),
++                            ),
++                          ],
+                         ] else if (!_joining)
+                           _roomOptions(),
+                         const SizedBox(height: 16),
+diff --git a/frontend/judgement_flutter/lib/screens/lobby_screen.dart b/frontend/judgement_flutter/lib/screens/lobby_screen.dart
+index a8d28d7..3435334 100644
+--- a/frontend/judgement_flutter/lib/screens/lobby_screen.dart
++++ b/frontend/judgement_flutter/lib/screens/lobby_screen.dart
+@@ -43,6 +43,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
+   late RoomView _room = widget.initialRoom;
+   Timer? _poll;
+   bool _busy = false;
++  bool _seatOpened = false;
+   bool _navigatedToGame = false;
+   bool _leaveDialogOpen = false;
+   bool _leaving = false;
+@@ -105,6 +106,23 @@ class _LobbyScreenState extends State<LobbyScreen> {
+     }
+   }
+ 
++  Future<void> _addSeat() async {
++    setState(() => _busy = true);
++    try {
++      final room = await widget.api.addSeat(_room.roomId);
++      if (mounted) {
++        setState(() {
++          _room = room;
++          _seatOpened = true;
++        });
++      }
++    } on ApiException catch (error) {
++      _showError(error.message);
++    } finally {
++      if (mounted) setState(() => _busy = false);
++    }
++  }
++
+   Future<void> _removePlayer(SeatView seat) async {
+     final confirmed = await showDialog<bool>(
+       context: context,
+@@ -394,10 +412,40 @@ class _LobbyScreenState extends State<LobbyScreen> {
+                       padding: const EdgeInsets.all(12),
+                       child: Column(
+                         children: [
+-                          Text(
+-                            'Players $filled / $total',
+-                            style: Theme.of(context).textTheme.titleMedium,
++                          Row(
++                            children: [
++                              Expanded(
++                                child: Text(
++                                  'Players $filled / $total',
++                                  style: Theme.of(
++                                    context,
++                                  ).textTheme.titleMedium,
++                                ),
++                              ),
++                              if (_amHost && _room.maxPlayers < 8)
++                                TextButton(
++                                  style: TextButton.styleFrom(
++                                    visualDensity: VisualDensity.compact,
++                                    padding: const EdgeInsets.symmetric(
++                                      horizontal: 8,
++                                    ),
++                                  ),
++                                  onPressed: _busy ? null : _addSeat,
++                                  child: const Text('Add a seat'),
++                                ),
++                            ],
+                           ),
++                          if (_seatOpened)
++                            const Padding(
++                              padding: EdgeInsets.only(bottom: 4),
++                              child: Text(
++                                'The same link still works.',
++                                style: TextStyle(
++                                  fontSize: 12,
++                                  color: Colors.white70,
++                                ),
++                              ),
++                            ),
+                           Text(
+                             [
+                               _room.turnTimeoutSeconds == null
+diff --git a/frontend/judgement_flutter/lib/util/room_rejoin.dart b/frontend/judgement_flutter/lib/util/room_rejoin.dart
+index 4806596..b8e1f7d 100644
+--- a/frontend/judgement_flutter/lib/util/room_rejoin.dart
++++ b/frontend/judgement_flutter/lib/util/room_rejoin.dart
+@@ -31,20 +31,18 @@ bool reclaimTokenReuseAllowed({
+   String? storedGameId,
+   String? roomGameId,
+ }) =>
+-    phase == 'in_game' &&
+-    (storedGameId == null || storedGameId == roomGameId);
++    phase == 'in_game' && (storedGameId == null || storedGameId == roomGameId);
+ 
+ /// Preferred `player_id` uses the same gate as token reuse.
+ bool reclaimPreferredAllowed({
+   required String phase,
+   String? storedGameId,
+   String? roomGameId,
+-}) =>
+-    reclaimTokenReuseAllowed(
+-      phase: phase,
+-      storedGameId: storedGameId,
+-      roomGameId: roomGameId,
+-    );
++}) => reclaimTokenReuseAllowed(
++  phase: phase,
++  storedGameId: storedGameId,
++  roomGameId: roomGameId,
++);
+ 
+ /// Typed join nick must match the reclaim blob nick (trim + case-insensitive).
+ bool reclaimNicknameMatches(String typed, String? stored) {
+@@ -61,12 +59,16 @@ bool shouldPersistReclaim(RoomView room) =>
+ bool shouldWriteReclaimBlob({
+   required bool hadStore,
+   required bool nickMatches,
+-}) =>
+-    !hadStore || nickMatches;
++}) => !hadStore || nickMatches;
+ 
+ /// Join a room, preferring reclaim of the caller's own vacant seat when in-game.
+ ///
++/// A signed-in join must not sit down as a guest. The win would not be saved.
++bool accountJoinForbidsGuest(String? accountToken) =>
++    accountToken != null && accountToken.isNotEmpty;
++
+ /// Precedence: account bearer, then mid-game reclaim, then a new guest.
++/// A join that already has an account stops if that account cannot be used.
+ /// Lobby joins without an account still mint a fresh guest session.
+ Future<RoomJoinResult> joinRoomWithReclaim({
+   required BuildContext context,
+@@ -83,12 +85,12 @@ Future<RoomJoinResult> joinRoomWithReclaim({
+   final nickMatches = reclaimNicknameMatches(nickname, stored?.nickname);
+ 
+   // Only use store identity when the typed nick matches (blocks host hijack).
+-  String? preferredId =
+-      (stored != null && nickMatches) ? stored.playerId : null;
+-  String? storedGameId =
+-      (stored != null && nickMatches) ? stored.gameId : null;
++  String? preferredId = (stored != null && nickMatches)
++      ? stored.playerId
++      : null;
++  String? storedGameId = (stored != null && nickMatches) ? stored.gameId : null;
+ 
+-  // Account bearer first. A dead token falls through to guest play.
++  // Account bearer first. A rejected account stops the join.
+   if (accountToken != null && accountToken.isNotEmpty) {
+     api.token = accountToken;
+     try {
+@@ -106,12 +108,17 @@ Future<RoomJoinResult> joinRoomWithReclaim({
+         nickMatches: false,
+       );
+     } on ApiException catch (e) {
+-      if (e.statusCode == 401 || e.code == 'UNAUTHORIZED') {
++      if ((e.statusCode == 401 || e.code == 'UNAUTHORIZED') &&
++          accountJoinForbidsGuest(accountToken)) {
+         api.token = null;
+         await AccountSession.instance.clearLocal();
+-      } else {
+-        rethrow;
++        throw ApiException(
++          401,
++          'UNAUTHORIZED',
++          'Sign in again so this game counts on your account.',
++        );
+       }
++      rethrow;
+     }
+   }
+ 
+@@ -208,7 +215,8 @@ Future<RoomJoinResult> _joinWithEstablishedSession({
+   }
+ 
+   // 3) In-game: preferred (nick-matched only) → picker → first vacant.
+-  final prefer = preferredId != null &&
++  final prefer =
++      preferredId != null &&
+       nickMatches &&
+       reclaimPreferredAllowed(
+         phase: peek.phase,
+@@ -314,15 +322,17 @@ void persistAfterJoin({
+   if (!shouldPersistReclaim(room)) return;
+   final token = api.token;
+   if (token == null) return;
+-  writeGameReclaim(GameReclaimBlob(
+-    token: token,
+-    sessionId: sessionId,
+-    roomCode: room.code,
+-    playerId: playerId,
+-    gameId: room.gameId,
+-    nickname: nickname,
+-    savedAt: DateTime.now().toUtc(),
+-  ));
++  writeGameReclaim(
++    GameReclaimBlob(
++      token: token,
++      sessionId: sessionId,
++      roomCode: room.code,
++      playerId: playerId,
++      gameId: room.gameId,
++      nickname: nickname,
++      savedAt: DateTime.now().toUtc(),
++    ),
++  );
+ }
+ 
+ void persistTableReclaim({
+@@ -336,13 +346,15 @@ void persistTableReclaim({
+   if (gameId == null) return;
+   final token = api.token;
+   if (token == null) return;
+-  writeGameReclaim(GameReclaimBlob(
+-    token: token,
+-    sessionId: sessionId,
+-    roomCode: roomCode,
+-    playerId: playerId,
+-    gameId: gameId,
+-    nickname: nickname,
+-    savedAt: DateTime.now().toUtc(),
+-  ));
++  writeGameReclaim(
++    GameReclaimBlob(
++      token: token,
++      sessionId: sessionId,
++      roomCode: roomCode,
++      playerId: playerId,
++      gameId: gameId,
++      nickname: nickname,
++      savedAt: DateTime.now().toUtc(),
++    ),
++  );
+ }
+diff --git a/frontend/judgement_flutter/lib/widgets/leaderboard_sheet.dart b/frontend/judgement_flutter/lib/widgets/leaderboard_sheet.dart
+index bed7f63..2197f52 100644
+--- a/frontend/judgement_flutter/lib/widgets/leaderboard_sheet.dart
++++ b/frontend/judgement_flutter/lib/widgets/leaderboard_sheet.dart
+@@ -1,12 +1,14 @@
+-/// Public Top 10. Empty and failure stay inside this sheet.
++/// Ranked players. The rules stay folded so the names can fill the phone.
+ library;
+ 
+ import 'package:flutter/material.dart';
+ 
++import '../auth/account_session.dart';
+ import '../networking/api_client.dart';
+ import 'player_avatar.dart';
++import 'profile_sheet.dart';
+ 
+-typedef LeaderboardLoad = Future<List<LeaderboardEntry>> Function();
++typedef LeaderboardLoad = Future<LeaderboardReport> Function();
+ 
+ LeaderboardLoad leaderboardLoad = () => ApiClient().getLeaderboard();
+ 
+@@ -18,66 +20,253 @@ class LeaderboardSheet extends StatefulWidget {
+ }
+ 
+ class _LeaderboardSheetState extends State<LeaderboardSheet> {
+-  late final Future<List<LeaderboardEntry>> _load = leaderboardLoad();
++  late final Future<LeaderboardReport> _load = leaderboardLoad();
++  late final Future<MeStats?> _place = _loadPlace();
++
++  Future<MeStats?> _loadPlace() async {
++    if (!AccountSession.instance.isSignedIn) return null;
++    try {
++      return await profileStatsLoad();
++    } catch (_) {
++      return null;
++    }
++  }
+ 
+   @override
+   Widget build(BuildContext context) {
+-    return SafeArea(
+-      child: Padding(
+-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+-        child: Column(
+-          mainAxisSize: MainAxisSize.min,
+-          crossAxisAlignment: CrossAxisAlignment.stretch,
+-          children: [
+-            Text('Top players', style: Theme.of(context).textTheme.titleLarge),
+-            const SizedBox(height: 4),
+-            Text(
+-              'Most wins, then win rate, then bid rate',
+-              style: Theme.of(context).textTheme.bodySmall,
+-            ),
+-            const SizedBox(height: 12),
+-            FutureBuilder<List<LeaderboardEntry>>(
+-              future: _load,
+-              builder: (context, snapshot) {
+-                if (snapshot.connectionState != ConnectionState.done) {
+-                  return const Padding(
+-                    padding: EdgeInsets.symmetric(vertical: 24),
+-                    child: Center(child: CircularProgressIndicator()),
+-                  );
+-                }
+-                if (snapshot.hasError) {
+-                  return const Padding(
+-                    padding: EdgeInsets.symmetric(vertical: 24),
+-                    child: Text(
+-                      'Couldn\'t load the board. You can still play.',
++    return LayoutBuilder(
++      builder: (context, constraints) {
++        return SizedBox(
++          height: constraints.maxHeight,
++          child: SafeArea(
++            child: Padding(
++              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
++              child: Column(
++                crossAxisAlignment: CrossAxisAlignment.stretch,
++                children: [
++                  Text(
++                    'Top players',
++                    style: Theme.of(context).textTheme.titleLarge,
++                  ),
++                  const SizedBox(height: 4),
++                  Text(
++                    'Most wins, then win rate, then bid rate',
++                    style: Theme.of(context).textTheme.bodySmall,
++                  ),
++                  const SizedBox(height: 12),
++                  Expanded(
++                    child: FutureBuilder<LeaderboardReport>(
++                      future: _load,
++                      builder: (context, snapshot) {
++                        if (snapshot.connectionState != ConnectionState.done) {
++                          return const Center(
++                            child: CircularProgressIndicator(),
++                          );
++                        }
++                        if (snapshot.hasError) {
++                          return const Align(
++                            alignment: Alignment.topLeft,
++                            child: Padding(
++                              padding: EdgeInsets.symmetric(vertical: 24),
++                              child: Text(
++                                'Couldn\'t load the board. You can still play.',
++                              ),
++                            ),
++                          );
++                        }
++                        final report =
++                            snapshot.data ??
++                            const LeaderboardReport(players: []);
++                        final rows = report.players;
++                        return Column(
++                          children: [
++                            _PulseBlock(pulse: report.pulse, place: _place),
++                            if (rows.isEmpty)
++                              const Expanded(
++                                child: Align(
++                                  alignment: Alignment.topLeft,
++                                  child: Padding(
++                                    padding: EdgeInsets.symmetric(vertical: 24),
++                                    child: Text('No ranked games yet.'),
++                                  ),
++                                ),
++                              )
++                            else
++                              Expanded(child: _BoardTable(rows: rows)),
++                          ],
++                        );
++                      },
+                     ),
+-                  );
+-                }
+-                final rows = snapshot.data ?? const <LeaderboardEntry>[];
+-                if (rows.isEmpty) {
+-                  return const Padding(
+-                    padding: EdgeInsets.symmetric(vertical: 24),
+-                    child: Text('No ranked games yet.'),
+-                  );
+-                }
+-                return Flexible(
+-                  child: Column(
+-                    children: [
+-                      Expanded(child: _BoardTable(rows: rows)),
+-                      const SizedBox(height: 12),
+-                      const _BoardKey(),
+-                    ],
+                   ),
+-                );
+-              },
++                  const _BoardKey(),
++                ],
++              ),
+             ),
++          ),
++        );
++      },
++    );
++  }
++}
++
++class _PulseBlock extends StatelessWidget {
++  const _PulseBlock({required this.pulse, required this.place});
++
++  final LeaderboardPulse? pulse;
++  final Future<MeStats?> place;
++
++  @override
++  Widget build(BuildContext context) {
++    final figures =
++        pulse ??
++        const LeaderboardPulse(
++          gamesToday: 0,
++          gamesWeek: 0,
++          gamesAll: 0,
++          playersWeek: 0,
++        );
++    final quiet = Theme.of(context).textTheme.bodySmall?.copyWith(
++      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75),
++      height: 1.35,
++    );
++    final leader = figures.weekLeaderName;
++    final wins = figures.weekLeaderWins;
++    final lastLeader = figures.lastWeekLeaderName;
++    final lastWins = figures.lastWeekLeaderWins;
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.stretch,
++      children: [
++        Row(
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            _PulseFigure(label: 'Today', value: figures.gamesToday),
++            _PulseFigure(label: 'Week', value: figures.gamesWeek),
++            _PulseFigure(label: 'Last week', value: figures.gamesLastWeek),
++            _PulseFigure(label: 'All', value: figures.gamesAll),
+           ],
+         ),
++        const SizedBox(height: 6),
++        Text(_pulseCaption(figures), style: quiet),
++        if (leader != null && wins > 0) ...[
++          const SizedBox(height: 2),
++          Text(
++            '$leader leads this week with $wins ${wins == 1 ? 'win' : 'wins'}.',
++            style: quiet,
++            maxLines: 2,
++            overflow: TextOverflow.ellipsis,
++          ),
++        ],
++        if (lastLeader != null && lastWins > 0) ...[
++          const SizedBox(height: 2),
++          Text(
++            '$lastLeader led last week with $lastWins ${lastWins == 1 ? 'win' : 'wins'}.',
++            style: quiet,
++            maxLines: 2,
++            overflow: TextOverflow.ellipsis,
++          ),
++        ],
++        if (figures.openTables > 0) ...[
++          const SizedBox(height: 2),
++          Text('A table is filling up.', style: quiet),
++        ],
++        FutureBuilder<MeStats?>(
++          future: place,
++          builder: (context, snapshot) {
++            final stats = snapshot.data;
++            if (stats == null) return const SizedBox.shrink();
++            final rank = stats.rank;
++            final line = rank == null
++                ? 'Finish a game with 3 or more players and your name can appear here.'
++                : 'You are ${_ordinal(rank)}.';
++            return Padding(
++              padding: const EdgeInsets.only(top: 2),
++              child: Text(line, style: quiet),
++            );
++          },
++        ),
++        const SizedBox(height: 8),
++      ],
++    );
++  }
++}
++
++class _PulseFigure extends StatelessWidget {
++  const _PulseFigure({required this.label, required this.value});
++
++  final String label;
++  final int value;
++
++  @override
++  Widget build(BuildContext context) {
++    return Expanded(
++      child: Column(
++        children: [
++          FittedBox(
++            fit: BoxFit.scaleDown,
++            child: Text(
++              '$value',
++              style: Theme.of(context).textTheme.titleLarge,
++            ),
++          ),
++          FittedBox(
++            fit: BoxFit.scaleDown,
++            child: Text(
++              label,
++              maxLines: 1,
++              softWrap: false,
++              style: Theme.of(context).textTheme.labelMedium,
++            ),
++          ),
++        ],
+       ),
+     );
+   }
+ }
+ 
++String _pulseCaption(LeaderboardPulse pulse) {
++  if (pulse.since == null) {
++    return 'Counting starts when the next ranked game finishes.';
++  }
++  final since =
++      'Ranked games since ${_formatIstDate(pulse.since!)}. Today and this week use India time.';
++  if (pulse.gamesWeek <= 0) return since;
++  final games = pulse.gamesWeek == 1 ? '1 game' : '${pulse.gamesWeek} games';
++  final players = pulse.playersWeek == 1
++      ? '1 player'
++      : '${pulse.playersWeek} players';
++  return '$since $games this week, from $players.';
++}
++
++String _formatIstDate(DateTime instant) {
++  final ist = instant.toUtc().add(const Duration(hours: 5, minutes: 30));
++  const months = [
++    'Jan',
++    'Feb',
++    'Mar',
++    'Apr',
++    'May',
++    'Jun',
++    'Jul',
++    'Aug',
++    'Sep',
++    'Oct',
++    'Nov',
++    'Dec',
++  ];
++  return '${ist.day} ${months[ist.month - 1]} ${ist.year}';
++}
++
++String _ordinal(int rank) {
++  final mod100 = rank % 100;
++  if (mod100 >= 11 && mod100 <= 13) return '${rank}th';
++  return switch (rank % 10) {
++    1 => '${rank}st',
++    2 => '${rank}nd',
++    3 => '${rank}rd',
++    _ => '${rank}th',
++  };
++}
++
+ class _BoardTable extends StatelessWidget {
+   final List<LeaderboardEntry> rows;
+ 
+@@ -180,26 +369,58 @@ class _BoardRow extends StatelessWidget {
+   }
+ }
+ 
+-class _BoardKey extends StatelessWidget {
++class _BoardKey extends StatefulWidget {
+   const _BoardKey();
+ 
++  @override
++  State<_BoardKey> createState() => _BoardKeyState();
++}
++
++class _BoardKeyState extends State<_BoardKey> {
++  bool _open = false;
++
+   @override
+   Widget build(BuildContext context) {
+     final style = Theme.of(context).textTheme.bodySmall?.copyWith(
+       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75),
+       height: 1.35,
+     );
+-    return Text(
+-      'Caps — gold is 1st, silver is 2nd, and bronze is 3rd. '
+-      'The same cap shows on that player\'s seat.\n'
+-      'Played — games that count, on a table with at least 3 players.\n'
+-      'Won — games finished in first place. A shared first counts for each player.\n'
+-      'Win% — wins divided by played, times 100.\n'
+-      'Bids — rounds where the bid matched the tricks taken. '
+-      '73% means 73 of every 100 rounds were exact.\n'
+-      'Order — most wins, then higher Win%, then higher Bids. '
+-      'Points per game break a remaining tie.',
+-      style: style,
++    return Column(
++      mainAxisSize: MainAxisSize.min,
++      crossAxisAlignment: CrossAxisAlignment.stretch,
++      children: [
++        if (_open)
++          ConstrainedBox(
++            constraints: const BoxConstraints(maxHeight: 160),
++            child: SingleChildScrollView(
++              child: Text(
++                'Caps — gold is 1st, silver is 2nd, and bronze is 3rd. '
++                'The same cap shows on that player\'s seat.\n'
++                'A ranked game is a finished table of at least 3 players with someone signed in.\n'
++                'Played — games that count, on a table with at least 3 players.\n'
++                'Won — games finished in first place. A shared first counts for each player.\n'
++                'Win% — wins divided by played, times 100.\n'
++                'Bids — rounds where the bid matched the tricks taken. '
++                '73% means 73 of every 100 rounds were exact.\n'
++                'Order — most wins, then higher Win%, then higher Bids. '
++                'Points per game break a remaining tie.',
++                style: style,
++              ),
++            ),
++          ),
++        Align(
++          alignment: Alignment.centerLeft,
++          child: TextButton(
++            style: TextButton.styleFrom(
++              visualDensity: VisualDensity.compact,
++              padding: EdgeInsets.zero,
++              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
++            ),
++            onPressed: () => setState(() => _open = !_open),
++            child: Text(_open ? 'Hide the rules' : 'How the board works'),
++          ),
++        ),
++      ],
+     );
+   }
+ }
+diff --git a/frontend/judgement_flutter/test/account_landing_test.dart b/frontend/judgement_flutter/test/account_landing_test.dart
+index 8c4db9a..9bc52c1 100644
+--- a/frontend/judgement_flutter/test/account_landing_test.dart
++++ b/frontend/judgement_flutter/test/account_landing_test.dart
+@@ -1,9 +1,12 @@
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:judgement_flutter/app/app.dart';
++import 'package:judgement_flutter/auth/account_session.dart';
+ import 'package:judgement_flutter/auth/google_sign_in_flow.dart';
+ import 'package:judgement_flutter/networking/api_client.dart';
+ import 'package:judgement_flutter/widgets/leaderboard_sheet.dart';
++import 'package:judgement_flutter/widgets/profile_sheet.dart';
++import 'package:shared_preferences/shared_preferences.dart';
+ 
+ Future<void> _acceptLegal(WidgetTester tester) async {
+   final checkbox = find.byType(Checkbox).first;
+@@ -13,6 +16,11 @@ Future<void> _acceptLegal(WidgetTester tester) async {
+ }
+ 
+ void main() {
++  setUp(() async {
++    SharedPreferences.setMockInitialValues({});
++    await AccountSession.instance.clearLocal();
++  });
++
+   tearDown(() {
+     debugSignInOverride = null;
+     debugEmailSignInOverride = null;
+@@ -69,7 +77,8 @@ void main() {
+     );
+     await tester.tap(find.widgetWithText(FilledButton, 'Create room'));
+     await tester.pump();
+-    await tester.pump();
++    await tester.pump(const Duration(milliseconds: 50));
++    await tester.pump(const Duration(milliseconds: 50));
+ 
+     expect(find.text('Save this game to your record?'), findsOneWidget);
+     expect(find.byTooltip('Sign in with Google'), findsWidgets);
+@@ -77,8 +86,9 @@ void main() {
+     expect(find.byTooltip('Sign in with Facebook'), findsNothing);
+     expect(find.byTooltip('Sign in with Telegram'), findsWidgets);
+     expect(find.text('Continue as guest'), findsOneWidget);
+-    await tester.tap(find.text('Continue as guest'));
++    await tester.tap(find.widgetWithText(TextButton, 'Continue as guest'));
+     await tester.pump();
++    await tester.pump(const Duration(milliseconds: 300));
+ 
+     expect(find.text('Save this game to your record?'), findsNothing);
+     await tester.pump(const Duration(seconds: 21));
+@@ -151,17 +161,19 @@ void main() {
+   testWidgets('top players list matches played and losses', (tester) async {
+     await tester.binding.setSurfaceSize(const Size(390, 800));
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+-    leaderboardLoad = () async => [
+-      LeaderboardEntry(
+-        rank: 1,
+-        displayName: 'Anurag Chaturvedi',
+-        avatarId: 'face_01',
+-        wins: 1,
+-        games: 3,
+-        exactPercent: 83,
+-        averageScore: 119,
+-      ),
+-    ];
++    leaderboardLoad = () async => const LeaderboardReport(
++      players: [
++        LeaderboardEntry(
++          rank: 1,
++          displayName: 'Anurag Chaturvedi',
++          avatarId: 'face_01',
++          wins: 1,
++          games: 3,
++          exactPercent: 83,
++          averageScore: 119,
++        ),
++      ],
++    );
+ 
+     await tester.pumpWidget(
+       const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+@@ -173,6 +185,9 @@ void main() {
+     expect(find.text('Won'), findsOneWidget);
+     expect(find.text('Win%'), findsOneWidget);
+     expect(find.text('Bids'), findsOneWidget);
++    expect(find.textContaining('wins divided by played'), findsNothing);
++    await tester.tap(find.text('How the board works'));
++    await tester.pumpAndSettle();
+     expect(find.textContaining('wins divided by played'), findsOneWidget);
+     expect(find.textContaining('then higher Win%'), findsOneWidget);
+     expect(find.text('1. Anurag Chaturvedi'), findsOneWidget);
+@@ -182,42 +197,58 @@ void main() {
+     expect(find.text('1'), findsOneWidget);
+     expect(find.text('33%'), findsOneWidget);
+     expect(find.text('83%'), findsOneWidget);
+-    final key = tester.getRect(find.textContaining('wins divided by played'));
+-    expect(key.top, greaterThan(0));
+-    expect(key.bottom, lessThanOrEqualTo(800));
+     expect(tester.takeException(), isNull);
+   });
+ 
+   testWidgets('top players key stays on a short phone', (tester) async {
+-    await tester.binding.setSurfaceSize(const Size(390, 640));
+-    addTearDown(() => tester.binding.setSurfaceSize(null));
+-    leaderboardLoad = () async => [
+-      for (var i = 0; i < 10; i++)
+-        LeaderboardEntry(
+-          rank: i + 1,
+-          displayName: 'Player $i',
+-          avatarId: 'face_01',
+-          wins: 10 - i,
+-          games: 20,
+-          exactPercent: 70,
+-          averageScore: 90,
+-        ),
+-    ];
++    tester.view.devicePixelRatio = 1;
++    tester.view.physicalSize = const Size(390, 844);
++    addTearDown(() {
++      tester.view.resetPhysicalSize();
++      tester.view.resetDevicePixelRatio();
++    });
++    leaderboardLoad = () async => LeaderboardReport(
++      players: [
++        for (var i = 0; i < 10; i++)
++          LeaderboardEntry(
++            rank: i + 1,
++            displayName: 'Player $i',
++            avatarId: 'face_01',
++            wins: 10 - i,
++            games: 20,
++            exactPercent: 70,
++            averageScore: 90,
++          ),
++      ],
++    );
+ 
+     await tester.pumpWidget(
+       const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+     );
+     await tester.pumpAndSettle();
+ 
+-    expect(find.byTooltip('1st overall'), findsOneWidget);
+-    expect(find.byTooltip('2nd overall'), findsOneWidget);
+-    expect(find.byTooltip('3rd overall'), findsOneWidget);
+-    expect(find.byTooltip('4th overall'), findsNothing);
++    expect(find.textContaining('Points per game'), findsNothing);
++    final key = tester.getRect(find.text('How the board works'));
++    expect(key.bottom, lessThanOrEqualTo(844));
++    expect(key.bottom, greaterThan(844 - 80));
+     final name = tester.getRect(find.text('Name'));
+     final first = tester.getRect(find.text('1. Player 0'));
+     expect(first.top, greaterThan(name.bottom));
+-    final key = tester.getRect(find.textContaining('Points per game'));
+-    expect(key.bottom, lessThanOrEqualTo(640));
++    final fifth = tester.getRect(find.text('5. Player 4'));
++    expect(fifth.bottom, lessThan(key.top));
++    expect(find.byTooltip('1st overall'), findsOneWidget);
++    await tester.scrollUntilVisible(
++      find.byTooltip('3rd overall'),
++      60,
++      scrollable: find.byType(Scrollable),
++    );
++    expect(find.byTooltip('3rd overall'), findsOneWidget);
++    await tester.scrollUntilVisible(
++      find.text('4. Player 3'),
++      60,
++      scrollable: find.byType(Scrollable),
++    );
++    expect(find.byTooltip('4th overall'), findsNothing);
+     await tester.scrollUntilVisible(
+       find.text('10. Player 9'),
+       200,
+@@ -226,4 +257,173 @@ void main() {
+     expect(find.text('10. Player 9'), findsOneWidget);
+     expect(tester.takeException(), isNull);
+   });
++
++  testWidgets('games played sit above the list on a phone', (tester) async {
++    tester.view.devicePixelRatio = 1;
++    tester.view.physicalSize = const Size(390, 700);
++    addTearDown(() {
++      tester.view.resetPhysicalSize();
++      tester.view.resetDevicePixelRatio();
++    });
++    leaderboardLoad = () async => LeaderboardReport(
++      players: const [
++        LeaderboardEntry(
++          rank: 1,
++          displayName: 'Ankit Sunil',
++          avatarId: 'face_01',
++          wins: 3,
++          games: 4,
++          exactPercent: 70,
++          averageScore: 80,
++        ),
++      ],
++      pulse: LeaderboardPulse(
++        gamesToday: 2,
++        gamesWeek: 14,
++        gamesAll: 40,
++        playersWeek: 9,
++        since: DateTime.utc(2026, 10, 18, 18, 30),
++        weekLeaderName: 'Ankit',
++        weekLeaderWins: 3,
++        gamesLastWeek: 18,
++        lastWeekLeaderName: 'Beena',
++        lastWeekLeaderWins: 5,
++        openTables: 1,
++      ),
++    );
++
++    await tester.pumpWidget(
++      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
++    );
++    await tester.pumpAndSettle();
++
++    expect(find.text('Today'), findsOneWidget);
++    expect(find.text('Week'), findsOneWidget);
++    expect(find.text('Last week'), findsOneWidget);
++    expect(find.text('All'), findsOneWidget);
++    expect(find.text('18'), findsOneWidget);
++    expect(find.text('Beena led last week with 5 wins.'), findsOneWidget);
++    final today = tester.getRect(find.text('Today'));
++    final week = tester.getRect(find.text('Week'));
++    final last = tester.getRect(find.text('Last week'));
++    final all = tester.getRect(find.text('All'));
++    expect(today.top, week.top);
++    expect(week.top, last.top);
++    expect(last.top, all.top);
++    expect(all.right, lessThanOrEqualTo(390));
++    expect(
++      find.textContaining('Ranked games since 19 Oct 2026'),
++      findsOneWidget,
++    );
++    expect(
++      find.textContaining('14 games this week, from 9 players'),
++      findsOneWidget,
++    );
++    expect(find.text('Ankit leads this week with 3 wins.'), findsOneWidget);
++    expect(find.text('A table is filling up.'), findsOneWidget);
++    expect(find.textContaining('someone signed in'), findsNothing);
++    await tester.tap(find.text('How the board works'));
++    await tester.pumpAndSettle();
++    expect(find.textContaining('someone signed in'), findsOneWidget);
++    expect(find.text('Finish a game with 3 or more players'), findsNothing);
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets('an empty board still shows when counting starts', (
++    tester,
++  ) async {
++    leaderboardLoad = () async => const LeaderboardReport(players: []);
++
++    await tester.pumpWidget(
++      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
++    );
++    await tester.pumpAndSettle();
++
++    expect(find.text('No ranked games yet.'), findsOneWidget);
++    expect(
++      find.text('Counting starts when the next ranked game finishes.'),
++      findsOneWidget,
++    );
++    expect(find.text('A table is filling up.'), findsNothing);
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets('a signed-in player sees their place even if the profile fails', (
++    tester,
++  ) async {
++    final saved = profileStatsLoad;
++    addTearDown(() {
++      profileStatsLoad = saved;
++      AccountSession.instance.token = null;
++    });
++    AccountSession.instance.token = 'signed-in';
++    profileStatsLoad = () async => MeStats(
++      displayName: 'Ankit',
++      avatarId: 'fox',
++      gamesPlayed: 2,
++      wins: 1,
++      losses: 1,
++      averageScore: 10,
++      exactPercent: 50,
++      rank: 4,
++    );
++    leaderboardLoad = () async => const LeaderboardReport(
++      players: [
++        LeaderboardEntry(
++          rank: 1,
++          displayName: 'Beena',
++          avatarId: 'face_01',
++          wins: 5,
++          games: 6,
++          exactPercent: 40,
++          averageScore: 20,
++        ),
++      ],
++      pulse: LeaderboardPulse(
++        gamesToday: 1,
++        gamesWeek: 1,
++        gamesAll: 1,
++        playersWeek: 1,
++      ),
++    );
++
++    await tester.pumpWidget(
++      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
++    );
++    await tester.pumpAndSettle();
++    expect(find.text('You are 4th.'), findsOneWidget);
++    expect(find.text('1. Beena'), findsOneWidget);
++
++    await tester.pumpWidget(const SizedBox.shrink());
++    profileStatsLoad = () async => MeStats(
++      displayName: 'Ankit',
++      avatarId: 'fox',
++      gamesPlayed: 0,
++      wins: 0,
++      losses: 0,
++      averageScore: 0,
++      exactPercent: 0,
++    );
++    await tester.pumpWidget(
++      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
++    );
++    await tester.pumpAndSettle();
++    expect(
++      find.text(
++        'Finish a game with 3 or more players and your name can appear here.',
++      ),
++      findsOneWidget,
++    );
++
++    await tester.pumpWidget(const SizedBox.shrink());
++    profileStatsLoad = () async => throw Exception('profile down');
++    await tester.pumpWidget(
++      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
++    );
++    await tester.pumpAndSettle();
++    expect(find.text('Today'), findsOneWidget);
++    expect(find.text('1. Beena'), findsOneWidget);
++    expect(find.textContaining('You are'), findsNothing);
++    expect(tester.takeException(), isNull);
++  });
+ }
+diff --git a/frontend/judgement_flutter/test/room_rejoin_test.dart b/frontend/judgement_flutter/test/room_rejoin_test.dart
+index a028bab..fb906c8 100644
+--- a/frontend/judgement_flutter/test/room_rejoin_test.dart
++++ b/frontend/judgement_flutter/test/room_rejoin_test.dart
+@@ -86,6 +86,17 @@ void main() {
+     });
+   });
+ 
++  group('accountJoinForbidsGuest', () {
++    test('a signed-in join must not sit down as a guest', () {
++      expect(accountJoinForbidsGuest('account-token'), isTrue);
++    });
++
++    test('a join with no account can still be a guest', () {
++      expect(accountJoinForbidsGuest(null), isFalse);
++      expect(accountJoinForbidsGuest(''), isFalse);
++    });
++  });
++
+   group('shouldWriteReclaimBlob', () {
+     test('no prior store → write (first identity on browser)', () {
+       expect(
+@@ -95,10 +106,7 @@ void main() {
+     });
+ 
+     test('nick match → write (refresh own reclaim)', () {
+-      expect(
+-        shouldWriteReclaimBlob(hadStore: true, nickMatches: true),
+-        isTrue,
+-      );
++      expect(shouldWriteReclaimBlob(hadStore: true, nickMatches: true), isTrue);
+     });
+ 
+     test('nick mismatch with existing store → do not overwrite host blob', () {

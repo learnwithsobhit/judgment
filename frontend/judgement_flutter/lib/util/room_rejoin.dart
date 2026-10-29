@@ -31,20 +31,18 @@ bool reclaimTokenReuseAllowed({
   String? storedGameId,
   String? roomGameId,
 }) =>
-    phase == 'in_game' &&
-    (storedGameId == null || storedGameId == roomGameId);
+    phase == 'in_game' && (storedGameId == null || storedGameId == roomGameId);
 
 /// Preferred `player_id` uses the same gate as token reuse.
 bool reclaimPreferredAllowed({
   required String phase,
   String? storedGameId,
   String? roomGameId,
-}) =>
-    reclaimTokenReuseAllowed(
-      phase: phase,
-      storedGameId: storedGameId,
-      roomGameId: roomGameId,
-    );
+}) => reclaimTokenReuseAllowed(
+  phase: phase,
+  storedGameId: storedGameId,
+  roomGameId: roomGameId,
+);
 
 /// Typed join nick must match the reclaim blob nick (trim + case-insensitive).
 bool reclaimNicknameMatches(String typed, String? stored) {
@@ -61,12 +59,16 @@ bool shouldPersistReclaim(RoomView room) =>
 bool shouldWriteReclaimBlob({
   required bool hadStore,
   required bool nickMatches,
-}) =>
-    !hadStore || nickMatches;
+}) => !hadStore || nickMatches;
+
+/// A signed-in join must not sit down as a guest. The win would not be saved.
+bool accountJoinForbidsGuest(String? accountToken) =>
+    accountToken != null && accountToken.isNotEmpty;
 
 /// Join a room, preferring reclaim of the caller's own vacant seat when in-game.
 ///
 /// Precedence: account bearer, then mid-game reclaim, then a new guest.
+/// A join that already has an account stops if that account cannot be used.
 /// Lobby joins without an account still mint a fresh guest session.
 Future<RoomJoinResult> joinRoomWithReclaim({
   required BuildContext context,
@@ -83,12 +85,12 @@ Future<RoomJoinResult> joinRoomWithReclaim({
   final nickMatches = reclaimNicknameMatches(nickname, stored?.nickname);
 
   // Only use store identity when the typed nick matches (blocks host hijack).
-  String? preferredId =
-      (stored != null && nickMatches) ? stored.playerId : null;
-  String? storedGameId =
-      (stored != null && nickMatches) ? stored.gameId : null;
+  String? preferredId = (stored != null && nickMatches)
+      ? stored.playerId
+      : null;
+  String? storedGameId = (stored != null && nickMatches) ? stored.gameId : null;
 
-  // Account bearer first. A dead token falls through to guest play.
+  // Account bearer first. A rejected account stops the join.
   if (accountToken != null && accountToken.isNotEmpty) {
     api.token = accountToken;
     try {
@@ -106,12 +108,17 @@ Future<RoomJoinResult> joinRoomWithReclaim({
         nickMatches: false,
       );
     } on ApiException catch (e) {
-      if (e.statusCode == 401 || e.code == 'UNAUTHORIZED') {
+      if ((e.statusCode == 401 || e.code == 'UNAUTHORIZED') &&
+          accountJoinForbidsGuest(accountToken)) {
         api.token = null;
         await AccountSession.instance.clearLocal();
-      } else {
-        rethrow;
+        throw ApiException(
+          401,
+          'UNAUTHORIZED',
+          'Sign in again so this game counts on your account.',
+        );
       }
+      rethrow;
     }
   }
 
@@ -208,7 +215,8 @@ Future<RoomJoinResult> _joinWithEstablishedSession({
   }
 
   // 3) In-game: preferred (nick-matched only) → picker → first vacant.
-  final prefer = preferredId != null &&
+  final prefer =
+      preferredId != null &&
       nickMatches &&
       reclaimPreferredAllowed(
         phase: peek.phase,
@@ -314,15 +322,17 @@ void persistAfterJoin({
   if (!shouldPersistReclaim(room)) return;
   final token = api.token;
   if (token == null) return;
-  writeGameReclaim(GameReclaimBlob(
-    token: token,
-    sessionId: sessionId,
-    roomCode: room.code,
-    playerId: playerId,
-    gameId: room.gameId,
-    nickname: nickname,
-    savedAt: DateTime.now().toUtc(),
-  ));
+  writeGameReclaim(
+    GameReclaimBlob(
+      token: token,
+      sessionId: sessionId,
+      roomCode: room.code,
+      playerId: playerId,
+      gameId: room.gameId,
+      nickname: nickname,
+      savedAt: DateTime.now().toUtc(),
+    ),
+  );
 }
 
 void persistTableReclaim({
@@ -336,13 +346,15 @@ void persistTableReclaim({
   if (gameId == null) return;
   final token = api.token;
   if (token == null) return;
-  writeGameReclaim(GameReclaimBlob(
-    token: token,
-    sessionId: sessionId,
-    roomCode: roomCode,
-    playerId: playerId,
-    gameId: gameId,
-    nickname: nickname,
-    savedAt: DateTime.now().toUtc(),
-  ));
+  writeGameReclaim(
+    GameReclaimBlob(
+      token: token,
+      sessionId: sessionId,
+      roomCode: roomCode,
+      playerId: playerId,
+      gameId: gameId,
+      nickname: nickname,
+      savedAt: DateTime.now().toUtc(),
+    ),
+  );
 }

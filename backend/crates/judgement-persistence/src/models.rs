@@ -194,6 +194,21 @@ pub struct LeaderboardRow {
     pub average_score: i32,
 }
 
+/// Ranked-game totals from `user_game_results`. Open seats are not part of this.
+#[derive(Debug, Clone, Default)]
+pub struct MatchPulse {
+    pub games_all: i64,
+    pub games_today: i64,
+    pub games_week: i64,
+    pub games_last_week: i64,
+    pub players_week: i64,
+    pub since: Option<DateTime<Utc>>,
+    pub week_leader_name: Option<String>,
+    pub week_leader_wins: i64,
+    pub last_week_leader_name: Option<String>,
+    pub last_week_leader_wins: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct UserStatsView {
     pub user_id: uuid::Uuid,

@@ -192,6 +192,9 @@ pub struct SeatView {
     /// 1, 2, or 3 on the overall board. Omitted for guests and everyone else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ladder_rank: Option<u8>,
+    /// True when this seat's session is bound to an account. Never send user_id.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signed_in: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -555,6 +558,31 @@ pub struct LeaderboardEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaderboardPulse {
+    pub games_today: i64,
+    pub games_week: i64,
+    #[serde(default)]
+    pub games_last_week: i64,
+    pub games_all: i64,
+    pub players_week: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub week_leader_name: Option<String>,
+    #[serde(default)]
+    pub week_leader_wins: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_week_leader_name: Option<String>,
+    #[serde(default)]
+    pub last_week_leader_wins: i64,
+    #[serde(default)]
+    pub open_tables: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaderboardResponse {
     pub players: Vec<LeaderboardEntry>,
+    /// Absent on an older server. A client that does not know it ignores the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pulse: Option<LeaderboardPulse>,
 }

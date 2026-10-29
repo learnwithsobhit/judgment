@@ -281,8 +281,11 @@ pub async fn get_leaderboard(
     State(state): State<Arc<AppState>>,
     Query(query): Query<LimitQuery>,
 ) -> Json<LeaderboardResponse> {
-    let limit = query.limit.unwrap_or(10).clamp(1, 10) as usize;
     let rows = state.leaderboard.lock().unwrap().clone();
+    let limit = match query.limit {
+        Some(n) => n.clamp(1, 10_000) as usize,
+        None => rows.len(),
+    };
     let players = rows
         .iter()
         .take(limit)
@@ -297,7 +300,8 @@ pub async fn get_leaderboard(
             average_score: row.average_score,
         })
         .collect();
-    Json(LeaderboardResponse { players })
+    let pulse = state.table_pulse.lock().unwrap().clone();
+    Json(LeaderboardResponse { players, pulse })
 }
 
 fn stats_response(view: &judgement_persistence::UserStatsView) -> MeStatsResponse {
@@ -442,9 +446,9 @@ fn audience_matches(aud: &serde_json::Value, client_id: &str) -> bool {
     match aud {
         serde_json::Value::String(value) => value == client_id,
         serde_json::Value::Number(value) => value.to_string() == client_id,
-        serde_json::Value::Array(values) => {
-            values.iter().any(|value| audience_matches(value, client_id))
-        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| audience_matches(value, client_id)),
         _ => false,
     }
 }

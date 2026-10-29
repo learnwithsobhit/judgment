@@ -19,7 +19,7 @@ use judgement_domain::{
     EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit, MIN_PLAYERS,
 };
 use judgement_persistence::GameStore;
-use judgement_protocol::{GameEventStatus, RoomPhase, RoomView, SeatView};
+use judgement_protocol::{GameEventStatus, LeaderboardPulse, RoomPhase, RoomView, SeatView};
 
 use crate::actor::ActorMessage;
 use crate::error::ApiError;
@@ -115,6 +115,7 @@ impl Room {
                 avatar_id: s.avatar_id.clone(),
                 vacant: false,
                 ladder_rank: None,
+                signed_in: false,
             })
             .collect();
         seats.sort_by_key(|s| s.seat);
@@ -204,11 +205,12 @@ pub struct AppState {
     pub reconnect_grace: Duration,
     /// Public Top 10. Refreshed in the background; reads never hit the database.
     /// Shared with game actors so a seat cap tracks the same snapshot.
-    pub leaderboard: std::sync::Arc<
-        Mutex<std::sync::Arc<Vec<judgement_persistence::LeaderboardRow>>>,
-    >,
+    pub leaderboard:
+        std::sync::Arc<Mutex<std::sync::Arc<Vec<judgement_persistence::LeaderboardRow>>>>,
     /// Short memo for GET /me/stats so a profile open does not query every time.
     pub stats_memo: Mutex<HashMap<uuid::Uuid, (Instant, judgement_persistence::UserStatsView)>>,
+    /// Ranked-game pulse from the same refresh as the board. Reads never query.
+    pub table_pulse: Mutex<Option<LeaderboardPulse>>,
 }
 
 impl AppState {
@@ -233,6 +235,7 @@ impl AppState {
             reconnect_grace: reconnect_grace_from_env(),
             leaderboard: std::sync::Arc::new(Mutex::new(std::sync::Arc::new(Vec::new()))),
             stats_memo: Mutex::default(),
+            table_pulse: Mutex::default(),
         }
     }
 

@@ -43,6 +43,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   late RoomView _room = widget.initialRoom;
   Timer? _poll;
   bool _busy = false;
+  bool _seatOpened = false;
   bool _navigatedToGame = false;
   bool _leaveDialogOpen = false;
   bool _leaving = false;
@@ -102,6 +103,23 @@ class _LobbyScreenState extends State<LobbyScreen> {
       }
     } catch (_) {
       // Transient polling errors are ignored; the next tick retries.
+    }
+  }
+
+  Future<void> _addSeat() async {
+    setState(() => _busy = true);
+    try {
+      final room = await widget.api.addSeat(_room.roomId);
+      if (mounted) {
+        setState(() {
+          _room = room;
+          _seatOpened = true;
+        });
+      }
+    } on ApiException catch (error) {
+      _showError(error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -394,9 +412,50 @@ class _LobbyScreenState extends State<LobbyScreen> {
                       padding: const EdgeInsets.all(12),
                       child: Column(
                         children: [
-                          Text(
-                            'Players $filled / $total',
-                            style: Theme.of(context).textTheme.titleMedium,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Players $filled / $total',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                              ),
+                              if (_amHost && _room.maxPlayers < 8)
+                                TextButton(
+                                  style: TextButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
+                                  ),
+                                  onPressed: _busy ? null : _addSeat,
+                                  child: const Text('Add a seat'),
+                                ),
+                            ],
+                          ),
+                          if (_seatOpened)
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                'The same link still works.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ),
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 6),
+                            child: Text(
+                              'A check means the seat is signed in. '
+                              'Guest seats do not count on Top players.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white70,
+                              ),
+                            ),
                           ),
                           Text(
                             [
@@ -542,12 +601,19 @@ class _LobbyScreenState extends State<LobbyScreen> {
               radius: 18,
               highlight: isMe,
               boardRank: seat.ladderRank,
+              signedIn: seat.signedIn,
             ),
       title: Text(
         seat == null
             ? 'Empty seat'
             : '${seat.nickname}${isMe ? ' (you)' : ''}${seat.isHost ? ' · host' : ''}',
       ),
+      subtitle: seat != null && !seat.signedIn
+          ? const Text(
+              'Guest',
+              style: TextStyle(fontSize: 12, color: Colors.white54),
+            )
+          : null,
       trailing: seat == null
           ? null
           : Row(

@@ -1025,6 +1025,7 @@ class _TableArea extends StatelessWidget {
                 radius: 12,
                 highlight: isMyTurn,
                 boardRank: view.ownLadderRank,
+                signedIn: view.ownSignedIn,
                 flashMood: controller.avatarFlashes[controller.myPlayerId],
                 onLongPress: () => controller.sendAvatarFlash('cheer'),
               ),
@@ -1155,6 +1156,7 @@ class _OpponentSeat extends StatelessWidget {
                 highlight: isTurn || isLeader,
                 muted: disconnected,
                 boardRank: opponent.ladderRank,
+                signedIn: opponent.signedIn,
                 flashMood: controller.avatarFlashes[opponent.playerId],
                 onLongPress: () =>
                     controller.sendReaction('👏', target: opponent.playerId),

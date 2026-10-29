@@ -15,6 +15,9 @@ class PlayerAvatar extends StatefulWidget {
   /// 1, 2, or 3 on the overall board. Anyone else has no cap.
   final int? boardRank;
 
+  /// Account on this seat. Not online/offline — guests stay without a badge.
+  final bool signedIn;
+
   const PlayerAvatar({
     super.key,
     required this.avatarId,
@@ -25,6 +28,7 @@ class PlayerAvatar extends StatefulWidget {
     this.flashMood,
     this.onLongPress,
     this.boardRank,
+    this.signedIn = false,
   });
 
   @override
@@ -111,6 +115,7 @@ class _PlayerAvatarState extends State<PlayerAvatar>
       ),
     );
     final rank = _capRank(widget.boardRank);
+    final badgeSize = (widget.radius * 0.72).clamp(12.0, 18.0);
     final child = ScaleTransition(
       scale: _scale,
       child: Stack(
@@ -126,6 +131,35 @@ class _PlayerAvatarState extends State<PlayerAvatar>
               child: Align(
                 alignment: Alignment.topCenter,
                 child: _RankCap(rank: rank, radius: widget.radius),
+              ),
+            ),
+          if (widget.signedIn)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Tooltip(
+                message: 'Signed in',
+                child: Semantics(
+                  label: 'Signed in',
+                  child: Container(
+                    width: badgeSize,
+                    height: badgeSize,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF5C6BC0),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF1A120C),
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.check,
+                      size: badgeSize * 0.7,
+                      color: Colors.white,
+                      semanticLabel: 'Signed in',
+                    ),
+                  ),
+                ),
               ),
             ),
         ],

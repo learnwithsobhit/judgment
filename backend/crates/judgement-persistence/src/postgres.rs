@@ -1,6 +1,7 @@
 //! sqlx-backed PostgreSQL implementation.
 
 use async_trait::async_trait;
+use chrono::Utc;
 use judgement_domain::{
     ActionId, EventId, GameId, GameRules, PlayerId, RankedPlayer, RoomId, RsvpId, SessionId, Suit,
 };
@@ -1075,7 +1076,7 @@ impl GameStore for PostgresStore {
             LIMIT $1
             "#,
         )
-        .bind(limit)
+        .bind(if limit > 0 { limit } else { i64::MAX })
         .fetch_all(&self.pool)
         .await?;
         Ok(rows
@@ -1096,6 +1097,110 @@ impl GameStore for PostgresStore {
                 }
             })
             .collect())
+    }
+
+    async fn load_match_pulse(&self) -> Result<MatchPulse, PersistError> {
+        let (today, week, last_week) = crate::stats::india_bounds(Utc::now());
+        let mut tx = self.pool.begin().await?;
+        // Timeout dies with this transaction, so the pooled connection stays usable.
+        sqlx::query("SET LOCAL statement_timeout = '2s'")
+            .execute(&mut *tx)
+            .await?;
+        let row = sqlx::query(
+            r#"
+            WITH counted AS (
+                SELECT game_id, user_id, finished_at, finish_rank,
+                       exact_bid_rounds, rounds_played, total_score
+                FROM user_game_results
+                WHERE counted
+            ),
+            bounds AS (
+                SELECT
+                    COUNT(DISTINCT game_id) AS games_all,
+                    COUNT(DISTINCT game_id) FILTER (WHERE finished_at >= $1) AS games_today,
+                    COUNT(DISTINCT game_id) FILTER (WHERE finished_at >= $2) AS games_week,
+                    COUNT(DISTINCT game_id) FILTER (
+                        WHERE finished_at >= $3 AND finished_at < $2
+                    ) AS games_last_week,
+                    COUNT(DISTINCT user_id) FILTER (WHERE finished_at >= $2) AS players_week,
+                    MIN(finished_at) AS since
+                FROM counted
+            ),
+            week_user AS (
+                SELECT user_id,
+                       COUNT(DISTINCT game_id)::int AS games,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS wins,
+                       COALESCE(SUM(exact_bid_rounds), 0)::int AS exact,
+                       COALESCE(SUM(rounds_played), 0)::int AS rounds,
+                       COALESCE(SUM(total_score), 0)::bigint AS points
+                FROM counted
+                WHERE finished_at >= $2
+                GROUP BY user_id
+            ),
+            leader AS (
+                SELECT u.display_name, w.wins
+                FROM week_user w
+                JOIN users u ON u.user_id = w.user_id
+                WHERE w.wins > 0
+                ORDER BY w.wins DESC,
+                         COALESCE(w.wins::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
+                         COALESCE(w.exact::bigint * 1000000 / NULLIF(w.rounds, 0), 0) DESC,
+                         COALESCE(w.points / NULLIF(w.games, 0), 0) DESC
+                LIMIT 1
+            ),
+            last_user AS (
+                SELECT user_id,
+                       COUNT(DISTINCT game_id)::int AS games,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS wins,
+                       COALESCE(SUM(exact_bid_rounds), 0)::int AS exact,
+                       COALESCE(SUM(rounds_played), 0)::int AS rounds,
+                       COALESCE(SUM(total_score), 0)::bigint AS points
+                FROM counted
+                WHERE finished_at >= $3 AND finished_at < $2
+                GROUP BY user_id
+            ),
+            last_leader AS (
+                SELECT u.display_name, w.wins
+                FROM last_user w
+                JOIN users u ON u.user_id = w.user_id
+                WHERE w.wins > 0
+                ORDER BY w.wins DESC,
+                         COALESCE(w.wins::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
+                         COALESCE(w.exact::bigint * 1000000 / NULLIF(w.rounds, 0), 0) DESC,
+                         COALESCE(w.points / NULLIF(w.games, 0), 0) DESC
+                LIMIT 1
+            )
+            SELECT b.games_all, b.games_today, b.games_week, b.games_last_week,
+                   b.players_week, b.since,
+                   l.display_name AS week_leader_name,
+                   l.wins AS week_leader_wins,
+                   ll.display_name AS last_week_leader_name,
+                   ll.wins AS last_week_leader_wins
+            FROM bounds b
+            LEFT JOIN leader l ON true
+            LEFT JOIN last_leader ll ON true
+            "#,
+        )
+        .bind(today)
+        .bind(week)
+        .bind(last_week)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        let wins: Option<i32> = row.get("week_leader_wins");
+        let last_wins: Option<i32> = row.get("last_week_leader_wins");
+        Ok(MatchPulse {
+            games_all: row.get("games_all"),
+            games_today: row.get("games_today"),
+            games_week: row.get("games_week"),
+            games_last_week: row.get("games_last_week"),
+            players_week: row.get("players_week"),
+            since: row.get("since"),
+            week_leader_name: row.get("week_leader_name"),
+            week_leader_wins: i64::from(wins.unwrap_or(0)),
+            last_week_leader_name: row.get("last_week_leader_name"),
+            last_week_leader_wins: i64::from(last_wins.unwrap_or(0)),
+        })
     }
 
     async fn load_user_stats(&self, user_id: Uuid) -> Result<Option<UserStatsView>, PersistError> {

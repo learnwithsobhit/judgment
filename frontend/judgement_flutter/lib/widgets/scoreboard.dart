@@ -32,6 +32,7 @@ class Scoreboard extends StatelessWidget {
         name: '${controller.myNickname} (you)',
         avatarId: view.ownAvatarId,
         boardRank: view.ownLadderRank,
+        signedIn: view.ownSignedIn,
         bid: bidsByPlayer[controller.myPlayerId] ?? view.ownBid,
         tricksWon: view.ownTricksWon,
         total: _totalFor(view, controller.myPlayerId),
@@ -43,6 +44,7 @@ class Scoreboard extends StatelessWidget {
           name: o.nickname,
           avatarId: o.avatarId,
           boardRank: o.ladderRank,
+          signedIn: o.signedIn,
           bid: o.bid,
           tricksWon: o.tricksWon,
           total: _totalFor(view, o.playerId),
@@ -185,6 +187,7 @@ class Scoreboard extends StatelessWidget {
           radius: 12,
           highlight: isLeader,
           boardRank: row.boardRank,
+          signedIn: row.signedIn,
         ),
         const SizedBox(width: 6),
         if (dealerId == row.playerId)
@@ -237,6 +240,7 @@ class _PlayerRow {
   final String name;
   final String? avatarId;
   final int? boardRank;
+  final bool signedIn;
   final int? bid;
   final int tricksWon;
   final int? total;
@@ -247,6 +251,7 @@ class _PlayerRow {
     required this.name,
     required this.avatarId,
     required this.boardRank,
+    required this.signedIn,
     required this.bid,
     required this.tricksWon,
     required this.total,

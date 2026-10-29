@@ -165,6 +165,10 @@ class ApiClient {
   Future<RoomView> leaveRoom(String roomRef) async =>
       RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/leave', {}));
 
+  /// Host-only: open one more lobby seat. The join link stays the same.
+  Future<RoomView> addSeat(String roomRef) async =>
+      RoomView.fromJson(await _post('/api/v1/rooms/$roomRef/seats', {}));
+
   /// Host-only: remove a seated player from the lobby before start.
   Future<RoomView> removePlayer(String roomRef, String playerId) async =>
       RoomView.fromJson(
@@ -395,15 +399,12 @@ class ApiClient {
     return MeStats.fromJson(_decode(response));
   }
 
-  Future<List<LeaderboardEntry>> getLeaderboard() async {
+  Future<LeaderboardReport> getLeaderboard() async {
     final response = await _http.get(
       Uri.parse('$baseUrl/api/v1/leaderboard'),
       headers: _headers,
     );
-    final json = _decode(response);
-    return (json['players'] as List<dynamic>)
-        .map((row) => LeaderboardEntry.fromJson(row as Map<String, dynamic>))
-        .toList();
+    return LeaderboardReport.fromJson(_decode(response));
   }
 }
 
@@ -506,7 +507,7 @@ class MeStats {
 }
 
 class LeaderboardEntry {
-  LeaderboardEntry({
+  const LeaderboardEntry({
     required this.rank,
     required this.displayName,
     required this.avatarId,
@@ -526,8 +527,13 @@ class LeaderboardEntry {
 
   int get losses => games < wins ? 0 : games - wins;
 
-  /// Wins per 100 ranked games.
-  int get winPercent => games <= 0 ? 0 : (wins * 100) ~/ games;
+  /// Win rate to one decimal, truncated the same way the board orders players.
+  /// 7 wins from 39 games is 17.9%, not the whole number 17%.
+  String get winRateLabel {
+    if (games <= 0) return '0.0%';
+    final tenths = (wins * 1000) ~/ games;
+    return '${tenths ~/ 10}.${tenths % 10}%';
+  }
 
   factory LeaderboardEntry.fromJson(Map<String, dynamic> json) {
     return LeaderboardEntry(
@@ -538,6 +544,70 @@ class LeaderboardEntry {
       games: json['games'] as int? ?? 0,
       exactPercent: json['exact_percent'] as int? ?? 0,
       averageScore: json['average_score'] as int? ?? 0,
+    );
+  }
+}
+
+class LeaderboardPulse {
+  const LeaderboardPulse({
+    required this.gamesToday,
+    required this.gamesWeek,
+    required this.gamesAll,
+    required this.playersWeek,
+    this.gamesLastWeek = 0,
+    this.since,
+    this.weekLeaderName,
+    this.weekLeaderWins = 0,
+    this.lastWeekLeaderName,
+    this.lastWeekLeaderWins = 0,
+    this.openTables = 0,
+  });
+
+  final int gamesToday;
+  final int gamesWeek;
+  final int gamesLastWeek;
+  final int gamesAll;
+  final int playersWeek;
+  final DateTime? since;
+  final String? weekLeaderName;
+  final int weekLeaderWins;
+  final String? lastWeekLeaderName;
+  final int lastWeekLeaderWins;
+  final int openTables;
+
+  factory LeaderboardPulse.fromJson(Map<String, dynamic> json) {
+    final since = json['since'] as String?;
+    return LeaderboardPulse(
+      gamesToday: json['games_today'] as int? ?? 0,
+      gamesWeek: json['games_week'] as int? ?? 0,
+      gamesLastWeek: json['games_last_week'] as int? ?? 0,
+      gamesAll: json['games_all'] as int? ?? 0,
+      playersWeek: json['players_week'] as int? ?? 0,
+      since: since == null ? null : DateTime.tryParse(since),
+      weekLeaderName: json['week_leader_name'] as String?,
+      weekLeaderWins: json['week_leader_wins'] as int? ?? 0,
+      lastWeekLeaderName: json['last_week_leader_name'] as String?,
+      lastWeekLeaderWins: json['last_week_leader_wins'] as int? ?? 0,
+      openTables: json['open_tables'] as int? ?? 0,
+    );
+  }
+}
+
+class LeaderboardReport {
+  const LeaderboardReport({required this.players, this.pulse});
+
+  final List<LeaderboardEntry> players;
+  final LeaderboardPulse? pulse;
+
+  factory LeaderboardReport.fromJson(Map<String, dynamic> json) {
+    final pulse = json['pulse'];
+    return LeaderboardReport(
+      players: (json['players'] as List<dynamic>? ?? const [])
+          .map((row) => LeaderboardEntry.fromJson(row as Map<String, dynamic>))
+          .toList(),
+      pulse: pulse is Map<String, dynamic>
+          ? LeaderboardPulse.fromJson(pulse)
+          : null,
     );
   }
 }

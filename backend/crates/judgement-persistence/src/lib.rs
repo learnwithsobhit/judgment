@@ -132,6 +132,10 @@ pub trait GameStore: Send + Sync {
         &self,
         user_id: uuid::Uuid,
     ) -> Result<Option<UserStatsView>, PersistError>;
+
+    /// Distinct ranked games for today, this week, and all time.
+    /// Called from the background board refresh, never from a game commit.
+    async fn load_match_pulse(&self) -> Result<MatchPulse, PersistError>;
 }
 
 /// Round / game completion events also warrant keeping an explicit historical

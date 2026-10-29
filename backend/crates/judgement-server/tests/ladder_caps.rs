@@ -14,8 +14,8 @@ use judgement_protocol::{
     JoinRoomResponse, ReadyRequest, RoomView, ServerMessage, StartGameRequest, StartGameResponse,
     PROTOCOL_VERSION,
 };
-use judgement_server::state::AppState;
 use judgement_server::build_router;
+use judgement_server::state::AppState;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
@@ -84,13 +84,11 @@ async fn next_snapshot(
 ) -> Option<PlayerGameView> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while tokio::time::Instant::now() < deadline {
-        let message =
-            tokio::time::timeout(Duration::from_millis(200), ws.next()).await;
+        let message = tokio::time::timeout(Duration::from_millis(200), ws.next()).await;
         let Ok(Some(Ok(Message::Text(text)))) = message else {
             continue;
         };
-        if let Ok(ServerMessage::StateSnapshot { view, .. }) = serde_json::from_str(text.as_ref())
-        {
+        if let Ok(ServerMessage::StateSnapshot { view, .. }) = serde_json::from_str(text.as_ref()) {
             return Some(view);
         }
     }
@@ -173,12 +171,7 @@ async fn caps_follow_the_account_through_claim() {
     let code = created.room.code.clone();
     let gold_player = created.player_id.expect("host is seated");
 
-    async fn join(
-        client: &reqwest::Client,
-        base: &str,
-        code: &str,
-        token: &str,
-    ) -> PlayerId {
+    async fn join(client: &reqwest::Client, base: &str, code: &str, token: &str) -> PlayerId {
         let joined: JoinRoomResponse = ok(client
             .post(format!("{base}/api/v1/rooms/{code}/join"))
             .bearer_auth(token)
@@ -247,8 +240,11 @@ async fn caps_follow_the_account_through_claim() {
     .await
     .unwrap();
 
-    let opening = next_snapshot(&mut guest_ws).await.expect("opening snapshot");
+    let opening = next_snapshot(&mut guest_ws)
+        .await
+        .expect("opening snapshot");
     assert_eq!(opening.own_ladder_rank, None);
+    assert!(!opening.own_signed_in);
     assert_eq!(
         opening
             .opponents
@@ -257,6 +253,13 @@ async fn caps_follow_the_account_through_claim() {
             .and_then(|opponent| opponent.ladder_rank),
         Some(1)
     );
+    assert!(
+        opening
+            .opponents
+            .iter()
+            .find(|opponent| opponent.player_id == gold_player)
+            .is_some_and(|opponent| opponent.signed_in)
+    );
     assert_eq!(
         opening
             .opponents
@@ -264,6 +267,13 @@ async fn caps_follow_the_account_through_claim() {
             .find(|opponent| opponent.player_id == fourth_player)
             .and_then(|opponent| opponent.ladder_rank),
         None
+    );
+    assert!(
+        opening
+            .opponents
+            .iter()
+            .find(|opponent| opponent.player_id == fourth_player)
+            .is_some_and(|opponent| opponent.signed_in)
     );
 
     let leave = ClientEnvelope {

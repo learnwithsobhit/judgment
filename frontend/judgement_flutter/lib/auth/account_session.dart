@@ -1,7 +1,7 @@
 /// Optional Google account kept beside guest play.
 ///
-/// The bearer lives in memory and in [storageKey]. Landing restores it after
-/// the first frame. Create and Join do not wait on this.
+/// The bearer lives in memory and in [storageKey]. Join and Create wait until
+/// [restore] finishes, so a saved account is not treated as a guest.
 library;
 
 import 'dart:convert';
@@ -27,19 +27,40 @@ class AccountSession extends ChangeNotifier {
 
   bool get isSignedIn => token != null && token!.isNotEmpty;
 
-  Future<void> restore() async {
+  Future<void>? _restoreInFlight;
+
+  /// Bumps when [apply] or [clearLocal] wins over an in-flight restore.
+  int _generation = 0;
+
+  /// Loads the saved account once. Overlapping callers share that load.
+  Future<void> restore() {
+    final existing = _restoreInFlight;
+    if (existing != null) return existing;
+    final run = _restore();
+    _restoreInFlight = run;
+    return run.whenComplete(() {
+      if (identical(_restoreInFlight, run)) _restoreInFlight = null;
+    });
+  }
+
+  Future<void> _restore() async {
+    final generation = _generation;
+    String? storedToken;
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(accountStorageKey);
       if (raw == null || raw.isEmpty) return;
       final map = jsonDecode(raw) as Map<String, dynamic>;
-      final storedToken = map['token'] as String?;
+      storedToken = map['token'] as String?;
       if (storedToken == null || storedToken.isEmpty) {
-        await clearLocal();
+        if (_generation == generation) await clearLocal();
         return;
       }
       final api = ApiClient()..token = storedToken;
       final me = await api.getMe();
+      // A newer sign-in or logout already replaced this restore.
+      if (_generation != generation) return;
+      if (token != null && token != storedToken) return;
       _remember(
         token: storedToken,
         sessionId: me.sessionId,
@@ -50,12 +71,21 @@ class AccountSession extends ChangeNotifier {
       );
       await _persist();
       notifyListeners();
+    } on ApiException catch (error) {
+      if (_generation != generation) return;
+      // Only a dead token clears the account. Network blips keep the session.
+      if (error.statusCode == 401 || error.code == 'UNAUTHORIZED') {
+        if (token == null || token == storedToken) {
+          await clearLocal();
+        }
+      }
     } catch (_) {
-      await clearLocal();
+      // Prefs/network/parse failures must not sign the player out.
     }
   }
 
   Future<void> apply(AuthSession session) async {
+    _generation++;
     _remember(
       token: session.token,
       sessionId: session.sessionId,
@@ -81,6 +111,7 @@ class AccountSession extends ChangeNotifier {
   }
 
   Future<void> clearLocal() async {
+    _generation++;
     token = null;
     sessionId = null;
     userId = null;

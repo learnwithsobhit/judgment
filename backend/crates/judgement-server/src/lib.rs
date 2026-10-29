@@ -66,6 +66,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(routes::remove_player),
         )
         .route("/api/v1/rooms/{room_ref}/ready", post(routes::set_ready))
+        .route("/api/v1/rooms/{room_ref}/seats", post(routes::add_seat))
         .route("/api/v1/rooms/{room_ref}/start", post(routes::start_game))
         .route("/api/v1/events", post(events::create_event))
         .route("/api/v1/events/{slug}", get(events::get_event))

@@ -23,6 +23,9 @@ pub struct OpponentView {
     /// 1, 2, or 3 on the overall board. The engine leaves this empty; the server fills it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ladder_rank: Option<u8>,
+    /// True when this seat's session is bound to an account. Server fills it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signed_in: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +105,9 @@ pub struct PlayerGameView {
     /// Viewer's overall board place, 1–3. The engine leaves this empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_ladder_rank: Option<u8>,
+    /// True when the viewer's session is bound to an account. Server fills it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own_signed_in: bool,
     pub opponents: Vec<OpponentView>,
     pub current_trick: Vec<PlayedCard>,
     /// Present after a trick completes until the next card is led.
@@ -168,6 +174,7 @@ pub(crate) fn project_for(
             connection_status: p.connection_status,
             avatar_id: p.avatar_id.clone(),
             ladder_rank: None,
+            signed_in: false,
         })
         .collect();
 
@@ -221,6 +228,7 @@ pub(crate) fn project_for(
         own_tricks_won,
         own_avatar_id: own_player.avatar_id.clone(),
         own_ladder_rank: None,
+        own_signed_in: false,
         opponents,
         current_trick,
         last_completed_trick,

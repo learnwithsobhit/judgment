@@ -1799,16 +1799,18 @@ impl GameActor {
 
     fn apply_ladder_ranks(&self, viewer: PlayerId, view: &mut PlayerGameView) {
         let board = self.leaderboard.lock().unwrap().clone();
-        let rank_of = |player_id: PlayerId| {
-            self.seat_users
-                .get(&player_id)
-                .copied()
-                .flatten()
-                .and_then(|user_id| crate::leaderboard::ladder_rank(user_id, &board))
+        let account_of = |player_id: PlayerId| {
+            self.seat_users.get(&player_id).copied().flatten()
         };
-        view.own_ladder_rank = rank_of(viewer);
+        let own_account = account_of(viewer);
+        view.own_signed_in = own_account.is_some();
+        view.own_ladder_rank =
+            own_account.and_then(|user_id| crate::leaderboard::ladder_rank(user_id, &board));
         for opponent in &mut view.opponents {
-            opponent.ladder_rank = rank_of(opponent.player_id);
+            let account = account_of(opponent.player_id);
+            opponent.signed_in = account.is_some();
+            opponent.ladder_rank =
+                account.and_then(|user_id| crate::leaderboard::ladder_rank(user_id, &board));
         }
     }
 

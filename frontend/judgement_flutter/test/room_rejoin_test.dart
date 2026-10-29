@@ -86,6 +86,17 @@ void main() {
     });
   });
 
+  group('accountJoinForbidsGuest', () {
+    test('a signed-in join must not sit down as a guest', () {
+      expect(accountJoinForbidsGuest('account-token'), isTrue);
+    });
+
+    test('a join with no account can still be a guest', () {
+      expect(accountJoinForbidsGuest(null), isFalse);
+      expect(accountJoinForbidsGuest(''), isFalse);
+    });
+  });
+
   group('shouldWriteReclaimBlob', () {
     test('no prior store → write (first identity on browser)', () {
       expect(
@@ -95,10 +106,7 @@ void main() {
     });
 
     test('nick match → write (refresh own reclaim)', () {
-      expect(
-        shouldWriteReclaimBlob(hadStore: true, nickMatches: true),
-        isTrue,
-      );
+      expect(shouldWriteReclaimBlob(hadStore: true, nickMatches: true), isTrue);
     });
 
     test('nick mismatch with existing store → do not overwrite host blob', () {

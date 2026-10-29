@@ -119,14 +119,13 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
     if (!fresh || !mounted) return;
     final nickname = _name.text.trim().isEmpty ? 'Player' : _name.text.trim();
     setState(() => _busy = true);
-    final saveRecord = await promptToSaveRecord(context);
-    if (saveRecord == null || !mounted) {
-      if (mounted) setState(() => _busy = false);
-      return;
-    }
-    final account = AccountSession.instance;
-    final usingAccount = saveRecord && account.isSignedIn;
     try {
+      await AccountSession.instance.restore();
+      if (!mounted) return;
+      final saveRecord = await promptToSaveRecord(context);
+      if (saveRecord == null || !mounted) return;
+      final account = AccountSession.instance;
+      final usingAccount = saveRecord && account.isSignedIn;
       await TableMediaSession.prepareBeforeNetwork();
       final joined = await joinRoomWithReclaim(
         context: context,
@@ -149,7 +148,13 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
         ),
       );
     } on ApiException catch (e) {
-      _toast(e.message);
+      if ((e.statusCode == 401 || e.code == 'UNAUTHORIZED') &&
+          AccountSession.instance.isSignedIn) {
+        await AccountSession.instance.clearLocal();
+        _toast('Sign in again so this game counts on your account.');
+      } else {
+        _toast(e.message);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

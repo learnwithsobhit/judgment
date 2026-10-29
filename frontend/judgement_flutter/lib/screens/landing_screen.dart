@@ -68,9 +68,7 @@ class _LandingScreenState extends State<LandingScreen> {
       });
     }
     AccountSession.instance.addListener(_onAccount);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      AccountSession.instance.restore();
-    });
+    AccountSession.instance.restore();
   }
 
   @override
@@ -172,18 +170,17 @@ class _LandingScreenState extends State<LandingScreen> {
     if (!fresh || !mounted) return;
 
     setState(() => _busy = true);
-    final saveRecord = await promptToSaveRecord(context);
-    if (saveRecord == null || !mounted) {
-      if (mounted) setState(() => _busy = false);
-      return;
-    }
-    final api = ApiClient();
-    final account = AccountSession.instance;
-    final usingAccount = saveRecord && account.isSignedIn;
-    if (usingAccount) {
-      api.token = account.token;
-    }
     try {
+      await AccountSession.instance.restore();
+      if (!mounted) return;
+      final saveRecord = await promptToSaveRecord(context);
+      if (saveRecord == null || !mounted) return;
+      final api = ApiClient();
+      final account = AccountSession.instance;
+      final usingAccount = saveRecord && account.isSignedIn;
+      if (usingAccount) {
+        api.token = account.token;
+      }
       // Sound + mic under this tap, fully settled before network (fixes iOS hang).
       await TableMediaSession.prepareBeforeNetwork();
 
@@ -298,7 +295,11 @@ class _LandingScreenState extends State<LandingScreen> {
         );
       }
     } on ApiException catch (error) {
-      if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
+      if ((error.statusCode == 401 || error.code == 'UNAUTHORIZED') &&
+          AccountSession.instance.isSignedIn) {
+        await AccountSession.instance.clearLocal();
+        _showError('Sign in again so this game counts on your account.');
+      } else if (error.code == 'CAPACITY_FULL' || error.statusCode == 503) {
         _showCapacityFull(error.message);
       } else {
         _showError(error.message);

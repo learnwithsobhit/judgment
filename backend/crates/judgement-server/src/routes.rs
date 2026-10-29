@@ -350,7 +350,9 @@ pub async fn join_room(
             }));
         }
         if room.seats.len() as u8 >= room.max_players {
-            return Err(ApiError::Conflict("the room is full".into()));
+            return Err(ApiError::Conflict(
+                "This table is full. Ask the host to open a seat, then use the same link.".into(),
+            ));
         }
 
         let seat_number = (0..room.max_players)
@@ -824,6 +826,49 @@ pub async fn set_ready(
             .find(|s| s.session_id == session.id)
             .ok_or_else(|| ApiError::Forbidden("you are not seated in this room".into()))?;
         seat.ready = body.ready;
+        (room.view(), stored_room(room))
+    };
+
+    state
+        .store
+        .upsert_room(&snapshot)
+        .await
+        .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
+
+    Ok(Json(with_ladder_ranks(&state, view)))
+}
+
+/// Host opens one more lobby seat, up to 8. The join code does not change.
+pub async fn add_seat(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(room_ref): Path<String>,
+) -> Result<Json<RoomView>, ApiError> {
+    let session = state.authenticate(&headers)?;
+    let room_id = state
+        .resolve_room_id(&room_ref)
+        .ok_or(ApiError::NotFound("room"))?;
+
+    let (view, snapshot) = {
+        let mut rooms = state.rooms.lock().unwrap();
+        let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
+        if room.host_session != session.id {
+            return Err(ApiError::Forbidden("only the host can add a seat".into()));
+        }
+        if room.status != RoomStatus::Lobby {
+            return Err(ApiError::Conflict("the game has already started".into()));
+        }
+        if room.max_players >= MAX_PLAYERS {
+            return Err(ApiError::Conflict("the table already has 8 seats".into()));
+        }
+        let next = room.max_players + 1;
+        let reveal_trump = room.trump_cycle.is_none() && room.first_trump.is_none();
+        room.round_schedule
+            .resolve_pattern(next, reveal_trump)
+            .map_err(|e| {
+                ApiError::Conflict(format!("the card list does not fit {next} players: {e}"))
+            })?;
+        room.max_players = next;
         (room.view(), stored_room(room))
     };
 

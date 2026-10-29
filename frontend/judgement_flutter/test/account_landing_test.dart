@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:judgement_flutter/app/app.dart';
+import 'package:judgement_flutter/auth/account_session.dart';
 import 'package:judgement_flutter/auth/google_sign_in_flow.dart';
 import 'package:judgement_flutter/networking/api_client.dart';
 import 'package:judgement_flutter/widgets/leaderboard_sheet.dart';
+import 'package:judgement_flutter/widgets/profile_sheet.dart';
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> _acceptLegal(WidgetTester tester) async {
   final checkbox = find.byType(Checkbox).first;
@@ -13,6 +17,34 @@ Future<void> _acceptLegal(WidgetTester tester) async {
 }
 
 void main() {
+  test('win rate keeps a decimal so a higher rate stays above', () {
+    const gagan = LeaderboardEntry(
+      rank: 3,
+      displayName: 'Gagan Chaturvedi',
+      avatarId: 'face_01',
+      wins: 7,
+      games: 39,
+      exactPercent: 70,
+      averageScore: 0,
+    );
+    const ankit = LeaderboardEntry(
+      rank: 4,
+      displayName: 'Ankit Sunil Chaturvedi',
+      avatarId: 'face_01',
+      wins: 7,
+      games: 40,
+      exactPercent: 75,
+      averageScore: 0,
+    );
+    expect(gagan.winRateLabel, '17.9%');
+    expect(ankit.winRateLabel, '17.5%');
+  });
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    await AccountSession.instance.clearLocal();
+  });
+
   tearDown(() {
     debugSignInOverride = null;
     debugEmailSignInOverride = null;
@@ -151,17 +183,19 @@ void main() {
   testWidgets('top players list matches played and losses', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    leaderboardLoad = () async => [
-      LeaderboardEntry(
-        rank: 1,
-        displayName: 'Anurag Chaturvedi',
-        avatarId: 'face_01',
-        wins: 1,
-        games: 3,
-        exactPercent: 83,
-        averageScore: 119,
-      ),
-    ];
+    leaderboardLoad = () async => const LeaderboardReport(
+      players: [
+        LeaderboardEntry(
+          rank: 1,
+          displayName: 'Anurag Chaturvedi',
+          avatarId: 'face_01',
+          wins: 1,
+          games: 3,
+          exactPercent: 83,
+          averageScore: 119,
+        ),
+      ],
+    );
 
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
@@ -173,6 +207,9 @@ void main() {
     expect(find.text('Won'), findsOneWidget);
     expect(find.text('Win%'), findsOneWidget);
     expect(find.text('Bids'), findsOneWidget);
+    expect(find.textContaining('wins divided by played'), findsNothing);
+    await tester.tap(find.text('How the board works'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('wins divided by played'), findsOneWidget);
     expect(find.textContaining('then higher Win%'), findsOneWidget);
     expect(find.text('1. Anurag Chaturvedi'), findsOneWidget);
@@ -180,50 +217,235 @@ void main() {
     expect(find.textContaining('gold is 1st'), findsOneWidget);
     expect(find.text('3'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
-    expect(find.text('33%'), findsOneWidget);
+    expect(find.text('33.3%'), findsOneWidget);
     expect(find.text('83%'), findsOneWidget);
-    final key = tester.getRect(find.textContaining('wins divided by played'));
-    expect(key.top, greaterThan(0));
-    expect(key.bottom, lessThanOrEqualTo(800));
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('top players key stays on a short phone', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(390, 640));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    leaderboardLoad = () async => [
-      for (var i = 0; i < 10; i++)
-        LeaderboardEntry(
-          rank: i + 1,
-          displayName: 'Player $i',
-          avatarId: 'face_01',
-          wins: 10 - i,
-          games: 20,
-          exactPercent: 70,
-          averageScore: 90,
-        ),
-    ];
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    leaderboardLoad = () async => LeaderboardReport(
+      players: [
+        for (var i = 0; i < 10; i++)
+          LeaderboardEntry(
+            rank: i + 1,
+            displayName: 'Player $i',
+            avatarId: 'face_01',
+            wins: 10 - i,
+            games: 20,
+            exactPercent: 70,
+            averageScore: 90,
+          ),
+      ],
+    );
 
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
     );
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('1st overall'), findsOneWidget);
-    expect(find.byTooltip('2nd overall'), findsOneWidget);
-    expect(find.byTooltip('3rd overall'), findsOneWidget);
-    expect(find.byTooltip('4th overall'), findsNothing);
+    expect(find.textContaining('Points per game'), findsNothing);
+    final key = tester.getRect(find.text('How the board works'));
+    expect(key.bottom, lessThanOrEqualTo(844));
+    expect(key.bottom, greaterThan(844 - 80));
     final name = tester.getRect(find.text('Name'));
     final first = tester.getRect(find.text('1. Player 0'));
     expect(first.top, greaterThan(name.bottom));
-    final key = tester.getRect(find.textContaining('Points per game'));
-    expect(key.bottom, lessThanOrEqualTo(640));
+    final fifth = tester.getRect(find.text('5. Player 4'));
+    expect(fifth.bottom, lessThan(key.top));
+    expect(find.byTooltip('1st overall'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byTooltip('3rd overall'),
+      60,
+      scrollable: find.byType(Scrollable),
+    );
+    expect(find.byTooltip('3rd overall'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('4. Player 3'),
+      60,
+      scrollable: find.byType(Scrollable),
+    );
+    expect(find.byTooltip('4th overall'), findsNothing);
     await tester.scrollUntilVisible(
       find.text('10. Player 9'),
       200,
       scrollable: find.byType(Scrollable),
     );
     expect(find.text('10. Player 9'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('games played sit above the list on a phone', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 700);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    leaderboardLoad = () async => LeaderboardReport(
+      players: const [
+        LeaderboardEntry(
+          rank: 1,
+          displayName: 'Ankit Sunil',
+          avatarId: 'face_01',
+          wins: 3,
+          games: 4,
+          exactPercent: 70,
+          averageScore: 80,
+        ),
+      ],
+      pulse: LeaderboardPulse(
+        gamesToday: 2,
+        gamesWeek: 14,
+        gamesAll: 40,
+        playersWeek: 9,
+        since: DateTime.utc(2026, 10, 18, 18, 30),
+        weekLeaderName: 'Ankit',
+        weekLeaderWins: 3,
+        gamesLastWeek: 18,
+        lastWeekLeaderName: 'Beena',
+        lastWeekLeaderWins: 5,
+        openTables: 1,
+      ),
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Today'), findsOneWidget);
+    expect(find.text('Week'), findsOneWidget);
+    expect(find.text('Last week'), findsOneWidget);
+    expect(find.text('All'), findsOneWidget);
+    expect(find.text('18'), findsOneWidget);
+    expect(find.text('Beena led last week with 5 wins.'), findsOneWidget);
+    final today = tester.getRect(find.text('Today'));
+    final week = tester.getRect(find.text('Week'));
+    final last = tester.getRect(find.text('Last week'));
+    final all = tester.getRect(find.text('All'));
+    expect(today.top, week.top);
+    expect(week.top, last.top);
+    expect(last.top, all.top);
+    expect(all.right, lessThanOrEqualTo(390));
+    expect(
+      find.textContaining('Ranked games since 19 Oct 2026'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('14 games this week, from 9 players'),
+      findsOneWidget,
+    );
+    expect(find.text('Ankit leads this week with 3 wins.'), findsOneWidget);
+    expect(find.text('A table is filling up.'), findsOneWidget);
+    expect(find.textContaining('someone signed in'), findsNothing);
+    await tester.tap(find.text('How the board works'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('someone signed in'), findsOneWidget);
+    expect(find.text('Finish a game with 3 or more players'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an empty board still shows when counting starts', (
+    tester,
+  ) async {
+    leaderboardLoad = () async => const LeaderboardReport(players: []);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('No ranked games yet.'), findsOneWidget);
+    expect(
+      find.text('Counting starts when the next ranked game finishes.'),
+      findsOneWidget,
+    );
+    expect(find.text('A table is filling up.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a signed-in player sees their place even if the profile fails', (
+    tester,
+  ) async {
+    final saved = profileStatsLoad;
+    addTearDown(() {
+      profileStatsLoad = saved;
+      AccountSession.instance.token = null;
+    });
+    AccountSession.instance.token = 'signed-in';
+    profileStatsLoad = () async => MeStats(
+      displayName: 'Ankit',
+      avatarId: 'fox',
+      gamesPlayed: 2,
+      wins: 1,
+      losses: 1,
+      averageScore: 10,
+      exactPercent: 50,
+      rank: 4,
+    );
+    leaderboardLoad = () async => const LeaderboardReport(
+      players: [
+        LeaderboardEntry(
+          rank: 1,
+          displayName: 'Beena',
+          avatarId: 'face_01',
+          wins: 5,
+          games: 6,
+          exactPercent: 40,
+          averageScore: 20,
+        ),
+      ],
+      pulse: LeaderboardPulse(
+        gamesToday: 1,
+        gamesWeek: 1,
+        gamesAll: 1,
+        playersWeek: 1,
+      ),
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('You are 4th.'), findsOneWidget);
+    expect(find.text('1. Beena'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    profileStatsLoad = () async => MeStats(
+      displayName: 'Ankit',
+      avatarId: 'fox',
+      gamesPlayed: 0,
+      wins: 0,
+      losses: 0,
+      averageScore: 0,
+      exactPercent: 0,
+    );
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Finish a game with 3 or more players and your name can appear here.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    profileStatsLoad = () async => throw Exception('profile down');
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Today'), findsOneWidget);
+    expect(find.text('1. Beena'), findsOneWidget);
+    expect(find.textContaining('You are'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }
