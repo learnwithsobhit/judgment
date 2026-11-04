@@ -8,9 +8,10 @@ import 'player_avatar.dart';
 /// Compact "latest finished ranked game" card on the home screen.
 ///
 /// Shows the most recent counted game's signed-in seats: winner on a gold row,
-/// up to three runners-up, and a meta line. Tap opens the leaderboard sheet.
-/// Renders nothing when [report] is null or has no latest game, so the landing
-/// layout stays unchanged before the first ranked game finishes.
+/// up to three runners-up as a vertical list (same as Live now), and a meta
+/// line. Tap opens the leaderboard sheet. Renders nothing when [report] is
+/// null or has no latest game, so the landing layout stays unchanged before
+/// the first ranked game finishes.
 class LatestGameCard extends StatelessWidget {
   const LatestGameCard({super.key, required this.report});
 
@@ -68,8 +69,8 @@ class LatestGameCard extends StatelessWidget {
             const SizedBox(height: 10),
             _WinnerRow(winners: winners, sharedFirst: sharedFirst),
             if (runners.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _RunnersRow(runners: runners),
+              const SizedBox(height: 6),
+              _RunnersList(runners: runners),
             ],
             const SizedBox(height: 10),
             _MetaLine(game: game, sharedFirst: sharedFirst),
@@ -139,8 +140,18 @@ class LatestGameCard extends StatelessWidget {
 String _formatIstDate(DateTime instant) {
   final ist = instant.toUtc().add(const Duration(hours: 5, minutes: 30));
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${ist.day} ${months[ist.month - 1]}';
 }
@@ -225,6 +236,8 @@ class _WinnerRow extends StatelessWidget {
           ),
           Text(
             first.scoreLabel,
+            maxLines: 1,
+            softWrap: false,
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w800,
@@ -238,82 +251,97 @@ class _WinnerRow extends StatelessWidget {
   }
 }
 
-class _RunnersRow extends StatelessWidget {
-  const _RunnersRow({required this.runners});
+class _RunnersList extends StatelessWidget {
+  const _RunnersList({required this.runners});
 
   final List<_RowSeat> runners;
 
+  static const _visibleCount = 3;
+
   @override
   Widget build(BuildContext context) {
-    const visibleCount = 3;
-    final shown = runners.take(visibleCount).toList();
+    final shown = runners.take(_visibleCount).toList();
     final overflow = runners.length - shown.length;
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final seat in shown) ...[
-          Expanded(child: _RunnerChip(seat: seat)),
-          const SizedBox(width: 8),
-        ],
+        for (final seat in shown) _RunnerLine(seat: seat),
         if (overflow > 0)
-          Text(
-            '+$overflow',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white.withValues(alpha: 0.55),
+          Padding(
+            padding: const EdgeInsets.only(left: 32, top: 2),
+            child: Text(
+              '+$overflow',
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withValues(alpha: 0.55),
+              ),
             ),
-            maxLines: 1,
-          )
-        else if (shown.isNotEmpty)
-          const Spacer(),
+          ),
       ],
     );
   }
 }
 
-class _RunnerChip extends StatelessWidget {
-  const _RunnerChip({required this.seat});
+class _RunnerLine extends StatelessWidget {
+  const _RunnerLine({required this.seat});
 
   final _RowSeat seat;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        PlayerAvatar(
-          avatarId: seat.avatarId,
-          nickname: seat.name,
-          radius: 13,
-          signedIn: seat.signedIn,
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                seat.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.white.withValues(alpha: 0.7),
-                ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 22,
+            child: Text(
+              '#${seat.rank}',
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Colors.white.withValues(alpha: 0.45),
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
-              Text(
-                seat.scoreLabel,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ],
+          const SizedBox(width: 8),
+          PlayerAvatar(
+            avatarId: seat.avatarId,
+            nickname: seat.name,
+            radius: 13,
+            signedIn: seat.signedIn,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              seat.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white.withValues(alpha: 0.88),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            seat.scoreLabel,
+            maxLines: 1,
+            softWrap: false,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
