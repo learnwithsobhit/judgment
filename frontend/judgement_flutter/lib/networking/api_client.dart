@@ -406,6 +406,163 @@ class ApiClient {
     );
     return LeaderboardReport.fromJson(_decode(response));
   }
+
+  Future<List<ActiveGame>> getActiveGames() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/active-games'),
+      headers: _headers,
+    );
+    final json = _decode(response);
+    return (json['games'] as List<dynamic>? ?? const [])
+        .map((row) => ActiveGame.fromJson(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<FairPlayGameView> getFairPlay(String gameId) async {
+    final json = await _get('/api/v1/games/$gameId/fair-play');
+    return FairPlayGameView.fromJson(json);
+  }
+
+  Future<FairPlayGameView> submitFairPlay(
+    String gameId,
+    List<({String userId, int points})> ratings,
+  ) async {
+    final json = await _post('/api/v1/games/$gameId/fair-play', {
+      'ratings': [
+        for (final r in ratings) {'user_id': r.userId, 'points': r.points},
+      ],
+    });
+    return FairPlayGameView.fromJson(json);
+  }
+
+  Future<FairPlayLeaderboardReport> getFairPlayLeaderboard() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/fair-play/leaderboard'),
+      headers: _headers,
+    );
+    return FairPlayLeaderboardReport.fromJson(_decode(response));
+  }
+}
+
+class FairPlayRatee {
+  FairPlayRatee({
+    required this.userId,
+    required this.displayName,
+    this.avatarId,
+  });
+
+  final String userId;
+  final String displayName;
+  final String? avatarId;
+
+  factory FairPlayRatee.fromJson(Map<String, dynamic> json) {
+    return FairPlayRatee(
+      userId: json['user_id'] as String,
+      displayName: json['display_name'] as String,
+      avatarId: json['avatar_id'] as String?,
+    );
+  }
+}
+
+class FairPlayTotal {
+  FairPlayTotal({
+    required this.userId,
+    required this.displayName,
+    required this.points,
+    required this.ratings,
+    this.avatarId,
+  });
+
+  final String userId;
+  final String displayName;
+  final String? avatarId;
+  final int points;
+  final int ratings;
+
+  factory FairPlayTotal.fromJson(Map<String, dynamic> json) {
+    return FairPlayTotal(
+      userId: json['user_id'] as String,
+      displayName: json['display_name'] as String,
+      avatarId: json['avatar_id'] as String?,
+      points: json['points'] as int,
+      ratings: json['ratings'] as int,
+    );
+  }
+}
+
+class FairPlayGameView {
+  FairPlayGameView({
+    required this.canVote,
+    required this.alreadySubmitted,
+    required this.ratees,
+    this.totals,
+  });
+
+  final bool canVote;
+  final bool alreadySubmitted;
+  final List<FairPlayRatee> ratees;
+  final List<FairPlayTotal>? totals;
+
+  factory FairPlayGameView.fromJson(Map<String, dynamic> json) {
+    return FairPlayGameView(
+      canVote: json['can_vote'] as bool? ?? false,
+      alreadySubmitted: json['already_submitted'] as bool? ?? false,
+      ratees: (json['ratees'] as List? ?? const [])
+          .map((e) => FairPlayRatee.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      totals: (json['totals'] as List?)
+          ?.map((e) => FairPlayTotal.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class FairPlayLeaderboardEntry {
+  FairPlayLeaderboardEntry({
+    required this.rank,
+    required this.displayName,
+    required this.pointsReceived,
+    required this.ratingsReceived,
+    required this.gamesRated,
+    required this.average,
+    this.avatarId,
+  });
+
+  final int rank;
+  final String displayName;
+  final String? avatarId;
+  final int pointsReceived;
+  final int ratingsReceived;
+  final int gamesRated;
+  final double average;
+
+  factory FairPlayLeaderboardEntry.fromJson(Map<String, dynamic> json) {
+    return FairPlayLeaderboardEntry(
+      rank: json['rank'] as int,
+      displayName: json['display_name'] as String,
+      avatarId: json['avatar_id'] as String?,
+      pointsReceived: json['points_received'] as int? ?? 0,
+      ratingsReceived: json['ratings_received'] as int? ?? 0,
+      gamesRated: json['games_rated'] as int? ?? 0,
+      average: (json['average'] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
+class FairPlayLeaderboardReport {
+  const FairPlayLeaderboardReport({required this.players});
+
+  final List<FairPlayLeaderboardEntry> players;
+
+  factory FairPlayLeaderboardReport.fromJson(Map<String, dynamic> json) {
+    return FairPlayLeaderboardReport(
+      players: (json['players'] as List? ?? const [])
+          .map(
+            (e) => FairPlayLeaderboardEntry.fromJson(e as Map<String, dynamic>),
+          )
+          .toList(),
+    );
+  }
 }
 
 class PublicUser {
@@ -515,6 +672,12 @@ class LeaderboardEntry {
     required this.games,
     required this.exactPercent,
     required this.averageScore,
+    this.gold = 0,
+    this.silver = 0,
+    this.bronze = 0,
+    this.medalPoints = 0,
+    this.exact = 0,
+    this.rounds = 0,
   });
 
   final int rank;
@@ -524,26 +687,51 @@ class LeaderboardEntry {
   final int games;
   final int exactPercent;
   final int averageScore;
+  final int gold;
+  final int silver;
+  final int bronze;
+  final int medalPoints;
+  final int exact;
+  final int rounds;
 
   int get losses => games < wins ? 0 : games - wins;
 
-  /// Win rate to one decimal, truncated the same way the board orders players.
-  /// 7 wins from 39 games is 17.9%, not the whole number 17%.
-  String get winRateLabel {
-    if (games <= 0) return '0.0%';
-    final tenths = (wins * 1000) ~/ games;
+  /// Golds divided by counted games, to one decimal.
+  /// 2 golds from 13 games is 15.3%, not 15%.
+  String get goldRateLabel => _rateLabel(gold, games);
+
+  /// Exact bids divided by rounds, to one decimal.
+  String get bidRateLabel {
+    if (rounds > 0) return _rateLabel(exact, rounds);
+    if (exactPercent <= 0) return '0.0%';
+    return '$exactPercent.0%';
+  }
+
+  /// Kept for older tests; gold count is the same as wins on this board.
+  String get winRateLabel => _rateLabel(wins, games);
+
+  static String _rateLabel(int numer, int denom) {
+    if (denom <= 0) return '0.0%';
+    final tenths = (numer * 1000) ~/ denom;
     return '${tenths ~/ 10}.${tenths % 10}%';
   }
 
   factory LeaderboardEntry.fromJson(Map<String, dynamic> json) {
+    final wins = json['wins'] as int? ?? 0;
     return LeaderboardEntry(
       rank: json['rank'] as int? ?? 0,
       displayName: json['display_name'] as String? ?? 'Player',
       avatarId: json['avatar_id'] as String? ?? 'fox',
-      wins: json['wins'] as int? ?? 0,
+      wins: wins,
       games: json['games'] as int? ?? 0,
       exactPercent: json['exact_percent'] as int? ?? 0,
       averageScore: json['average_score'] as int? ?? 0,
+      gold: json['gold'] as int? ?? wins,
+      silver: json['silver'] as int? ?? 0,
+      bronze: json['bronze'] as int? ?? 0,
+      medalPoints: json['medal_points'] as int? ?? 0,
+      exact: json['exact'] as int? ?? 0,
+      rounds: json['rounds'] as int? ?? 0,
     );
   }
 }
@@ -558,8 +746,10 @@ class LeaderboardPulse {
     this.since,
     this.weekLeaderName,
     this.weekLeaderWins = 0,
+    this.weekLeaderPoints = 0,
     this.lastWeekLeaderName,
     this.lastWeekLeaderWins = 0,
+    this.lastWeekLeaderPoints = 0,
     this.openTables = 0,
   });
 
@@ -571,8 +761,10 @@ class LeaderboardPulse {
   final DateTime? since;
   final String? weekLeaderName;
   final int weekLeaderWins;
+  final int weekLeaderPoints;
   final String? lastWeekLeaderName;
   final int lastWeekLeaderWins;
+  final int lastWeekLeaderPoints;
   final int openTables;
 
   factory LeaderboardPulse.fromJson(Map<String, dynamic> json) {
@@ -586,27 +778,158 @@ class LeaderboardPulse {
       since: since == null ? null : DateTime.tryParse(since),
       weekLeaderName: json['week_leader_name'] as String?,
       weekLeaderWins: json['week_leader_wins'] as int? ?? 0,
+      weekLeaderPoints: json['week_leader_points'] as int? ?? 0,
       lastWeekLeaderName: json['last_week_leader_name'] as String?,
       lastWeekLeaderWins: json['last_week_leader_wins'] as int? ?? 0,
+      lastWeekLeaderPoints: json['last_week_leader_points'] as int? ?? 0,
       openTables: json['open_tables'] as int? ?? 0,
     );
   }
 }
 
+class ActiveGameSeat {
+  const ActiveGameSeat({
+    required this.displayName,
+    this.avatarId,
+    required this.totalScore,
+  });
+
+  final String displayName;
+  final String? avatarId;
+  final int totalScore;
+
+  factory ActiveGameSeat.fromJson(Map<String, dynamic> json) {
+    return ActiveGameSeat(
+      displayName: json['display_name'] as String? ?? 'Player',
+      avatarId: json['avatar_id'] as String?,
+      totalScore: json['total_score'] as int? ?? 0,
+    );
+  }
+}
+
+class ActiveGame {
+  const ActiveGame({
+    required this.gameId,
+    required this.updatedAt,
+    required this.roundIndex,
+    required this.totalRounds,
+    required this.phase,
+    required this.seats,
+  });
+
+  final String gameId;
+  final DateTime updatedAt;
+  final int roundIndex;
+  final int totalRounds;
+  final String phase;
+  final List<ActiveGameSeat> seats;
+
+  String get phaseLabel => switch (phase) {
+    'bidding' => 'Bidding',
+    'playing' => 'Playing',
+    'scoring' => 'Scoring',
+    'dealing' => 'Dealing',
+    _ => phase,
+  };
+
+  factory ActiveGame.fromJson(Map<String, dynamic> json) {
+    final when = json['updated_at'] as String?;
+    return ActiveGame(
+      gameId: json['game_id'] as String? ?? '',
+      updatedAt: when == null
+          ? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
+          : (DateTime.tryParse(when) ??
+                DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)),
+      roundIndex: json['round_index'] as int? ?? 1,
+      totalRounds: json['total_rounds'] as int? ?? 1,
+      phase: json['phase'] as String? ?? 'playing',
+      seats: (json['seats'] as List<dynamic>? ?? const [])
+          .map((row) => ActiveGameSeat.fromJson(row as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class LatestGameSeat {
+  const LatestGameSeat({
+    required this.userId,
+    required this.displayName,
+    this.avatarId,
+    required this.finishRank,
+    required this.totalScore,
+    required this.exactBidRounds,
+  });
+
+  final String userId;
+  final String displayName;
+  final String? avatarId;
+  final int finishRank;
+  final int totalScore;
+  final int exactBidRounds;
+
+  factory LatestGameSeat.fromJson(Map<String, dynamic> json) {
+    return LatestGameSeat(
+      userId: json['user_id'] as String? ?? '',
+      displayName: json['display_name'] as String? ?? 'Player',
+      avatarId: json['avatar_id'] as String?,
+      finishRank: json['finish_rank'] as int? ?? 0,
+      totalScore: json['total_score'] as int? ?? 0,
+      exactBidRounds: json['exact_bid_rounds'] as int? ?? 0,
+    );
+  }
+}
+
+class LatestGame {
+  const LatestGame({
+    required this.gameId,
+    required this.finishedAt,
+    required this.tableSize,
+    required this.roundsPlayed,
+    required this.seats,
+  });
+
+  final String gameId;
+  final DateTime finishedAt;
+  final int tableSize;
+  final int roundsPlayed;
+  final List<LatestGameSeat> seats;
+
+  factory LatestGame.fromJson(Map<String, dynamic> json) {
+    final when = json['finished_at'] as String?;
+    return LatestGame(
+      gameId: json['game_id'] as String? ?? '',
+      finishedAt: when == null
+          ? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
+          : (DateTime.tryParse(when) ??
+                DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)),
+      tableSize: json['table_size'] as int? ?? 0,
+      roundsPlayed: json['rounds_played'] as int? ?? 0,
+      seats: (json['seats'] as List<dynamic>? ?? const [])
+          .map((row) => LatestGameSeat.fromJson(row as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
 class LeaderboardReport {
-  const LeaderboardReport({required this.players, this.pulse});
+  const LeaderboardReport({required this.players, this.pulse, this.latestGame});
 
   final List<LeaderboardEntry> players;
   final LeaderboardPulse? pulse;
+  final LatestGame? latestGame;
 
   factory LeaderboardReport.fromJson(Map<String, dynamic> json) {
     final pulse = json['pulse'];
+    final latest = json['latest_game'];
     return LeaderboardReport(
       players: (json['players'] as List<dynamic>? ?? const [])
           .map((row) => LeaderboardEntry.fromJson(row as Map<String, dynamic>))
           .toList(),
       pulse: pulse is Map<String, dynamic>
           ? LeaderboardPulse.fromJson(pulse)
+          : null,
+      latestGame: latest is Map<String, dynamic>
+          ? LatestGame.fromJson(latest)
           : null,
     );
   }

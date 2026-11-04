@@ -5,12 +5,16 @@
 //! still "nothing observed by clients until durable".
 
 pub mod error;
+pub mod fair_play;
 pub mod memory;
 pub mod models;
 pub mod postgres;
 pub mod stats;
 
 pub use error::PersistError;
+pub use fair_play::{
+    FairPlayGameTotal, FairPlayLeaderboardRow, FairPlayRating, FairPlayRosterSeat,
+};
 pub use memory::MemoryStore;
 pub use models::*;
 pub use postgres::PostgresStore;
@@ -136,6 +140,45 @@ pub trait GameStore: Send + Sync {
     /// Distinct ranked games for today, this week, and all time.
     /// Called from the background board refresh, never from a game commit.
     async fn load_match_pulse(&self) -> Result<MatchPulse, PersistError>;
+
+    /// Most recent counted game and its signed-in seats. `None` when none exist.
+    /// Called from the background board refresh, never from a game commit.
+    async fn load_latest_game(&self) -> Result<Option<LatestGame>, PersistError>;
+
+    /// Durable signed-in roster for fair play after `delete_game`.
+    async fn write_fair_play_roster(
+        &self,
+        seats: &[FairPlayRosterSeat],
+    ) -> Result<(), PersistError>;
+
+    async fn load_fair_play_roster(
+        &self,
+        game_id: uuid::Uuid,
+    ) -> Result<Vec<FairPlayRosterSeat>, PersistError>;
+
+    async fn fair_play_already_submitted(
+        &self,
+        game_id: uuid::Uuid,
+        voter_user_id: uuid::Uuid,
+    ) -> Result<bool, PersistError>;
+
+    /// One submission per voter. Updates lifetime stats. Returns game totals.
+    async fn submit_fair_play(
+        &self,
+        game_id: uuid::Uuid,
+        voter_user_id: uuid::Uuid,
+        ratings: &[FairPlayRating],
+    ) -> Result<Vec<FairPlayGameTotal>, PersistError>;
+
+    async fn load_fair_play_game_totals(
+        &self,
+        game_id: uuid::Uuid,
+    ) -> Result<Vec<FairPlayGameTotal>, PersistError>;
+
+    async fn load_fair_play_leaderboard(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<FairPlayLeaderboardRow>, PersistError>;
 }
 
 /// Round / game completion events also warrant keeping an explicit historical

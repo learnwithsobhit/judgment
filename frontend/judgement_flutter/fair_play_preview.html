@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fair play — UI preview</title>
+  <style>
+    :root {
+      --felt: #1b5e20;
+      --felt-dark: #0d3311;
+      --gold: #ffc857;
+      --white: #fff;
+      --muted: rgba(255, 255, 255, 0.7);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #111;
+      color: var(--white);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 32px;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 32px 16px 48px;
+    }
+    h1 {
+      width: 100%;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 500;
+      color: #aaa;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    .phone {
+      width: 360px;
+      height: 740px;
+      border-radius: 28px;
+      overflow: hidden;
+      border: 1px solid #333;
+      background: linear-gradient(180deg, var(--felt) 0%, var(--felt-dark) 100%);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    }
+    .label {
+      text-align: center;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    .col { display: flex; flex-direction: column; align-items: center; }
+    .appbar {
+      padding: 18px 20px 10px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 8px 20px 16px;
+      min-height: 0;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+      margin-bottom: 16px;
+    }
+    .title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 16px;
+    }
+    .list { flex: 1; overflow: auto; }
+    .ratee { margin-bottom: 16px; }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #2e7d32;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+    .name { flex: 1; font-weight: 600; font-size: 15px; }
+    .hand { opacity: 0.55; font-size: 14px; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .chip {
+      min-width: 28px;
+      height: 28px;
+      padding: 0 6px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(0, 0, 0, 0.15);
+      color: #eee;
+      font-size: 12px;
+      display: grid;
+      place-items: center;
+    }
+    .chip.on {
+      background: #66bb6a;
+      border-color: #a5d6a7;
+      color: #0d3311;
+      font-weight: 700;
+    }
+    .tile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .score {
+      margin-left: auto;
+      color: var(--gold);
+      font-weight: 800;
+      font-size: 18px;
+    }
+    .actions { padding-top: 12px; }
+    .filled {
+      width: 100%;
+      height: 44px;
+      border: 0;
+      border-radius: 22px;
+      background: #e8f5e9;
+      color: #1b5e20;
+      font-weight: 700;
+      font-size: 15px;
+      cursor: default;
+    }
+    .filled:disabled {
+      opacity: 0.45;
+    }
+    .textbtn {
+      width: 100%;
+      margin-top: 6px;
+      height: 40px;
+      border: 0;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 14px;
+    }
+    .skip-msg {
+      color: var(--white);
+      font-size: 16px;
+      line-height: 1.45;
+      margin-top: 8px;
+    }
+    .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+  <h1>Fair play award — screen preview (matches Flutter layout)</h1>
+
+  <div class="col">
+    <div class="label">1 · Vote (after celebration)</div>
+    <div class="phone">
+      <div class="appbar">Fair play</div>
+      <div class="body">
+        <div class="hint">Rate how fairly each player competed. Scores are private — only totals are shown.</div>
+        <div class="list">
+          <div class="ratee">
+            <div class="row">
+              <div class="avatar">B</div>
+              <div class="name">Bob</div>
+              <div class="hand">🤝</div>
+            </div>
+            <div class="chips">
+              <span class="chip">0</span><span class="chip">1</span><span class="chip">2</span>
+              <span class="chip">3</span><span class="chip">4</span><span class="chip">5</span>
+              <span class="chip">6</span><span class="chip">7</span><span class="chip">8</span>
+              <span class="chip">9</span><span class="chip on">10</span>
+            </div>
+          </div>
+          <div class="ratee">
+            <div class="row">
+              <div class="avatar" style="background:#1565c0">C</div>
+              <div class="name">Cara</div>
+              <div class="hand">🤝</div>
+            </div>
+            <div class="chips">
+              <span class="chip">0</span><span class="chip">1</span><span class="chip">2</span>
+              <span class="chip">3</span><span class="chip">4</span><span class="chip">5</span>
+              <span class="chip">6</span><span class="chip">7</span><span class="chip on">8</span>
+              <span class="chip">9</span><span class="chip">10</span>
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="filled">Submit</button>
+          <button class="textbtn">Skip for now</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">2 · Totals (after submit)</div>
+    <div class="phone">
+      <div class="appbar">Fair play</div>
+      <div class="body">
+        <div class="title">This game's fair play totals</div>
+        <div class="sub">Individual scores stay private.</div>
+        <div class="list">
+          <div class="tile">
+            <div class="avatar">B</div>
+            <div class="name">Bob</div>
+            <div class="score">10</div>
+          </div>
+          <div class="tile">
+            <div class="avatar" style="background:#1565c0">C</div>
+            <div class="name">Cara</div>
+            <div class="score">8</div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="filled">View results</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">3 · Not eligible (solo / closed)</div>
+    <div class="phone">
+      <div class="appbar">Fair play</div>
+      <div class="body">
+        <div class="skip-msg">Fair play needs at least one other signed-in player at the table.</div>
+        <div class="spacer"></div>
+        <div class="actions">
+          <button class="filled">View results</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

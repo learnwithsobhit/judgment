@@ -402,4 +402,80 @@ async fn leaderboard_reads_the_snapshot_without_a_database_hit_on_the_request() 
         .await
         .unwrap();
     assert!(body["players"].as_array().unwrap().is_empty());
+    assert!(body.get("latest_game").is_none() || body["latest_game"].is_null());
+}
+
+#[tokio::test]
+async fn leaderboard_includes_the_latest_counted_game() {
+    use chrono::{TimeZone, Utc};
+    use judgement_persistence::{stats::PulseFinish, StoredUser};
+    use uuid::Uuid;
+
+    let store = MemoryStore::new();
+    let game_id = Uuid::new_v4();
+    let ankit = Uuid::new_v4();
+    let beena = Uuid::new_v4();
+    let now = Utc::now();
+    for (id, name) in [(ankit, "Ankit"), (beena, "Beena")] {
+        store
+            .upsert_user(&StoredUser {
+                user_id: id,
+                display_name: name.into(),
+                avatar_id: Some("face_01".into()),
+                legal_version: Some("2026-08-03".into()),
+                created_at: now,
+                updated_at: now,
+                last_seen_at: now,
+            })
+            .await
+            .unwrap();
+    }
+    let finished = Utc.with_ymd_and_hms(2026, 10, 30, 15, 0, 0).unwrap();
+    store.seed_counted_finishes(vec![
+        PulseFinish {
+            game_id,
+            user_id: beena,
+            finished_at: finished,
+            finish_rank: 1,
+            exact_bid_rounds: 4,
+            rounds_played: 8,
+            total_score: 142,
+        },
+        PulseFinish {
+            game_id,
+            user_id: ankit,
+            finished_at: finished,
+            finish_rank: 2,
+            exact_bid_rounds: 3,
+            rounds_played: 8,
+            total_score: 128,
+        },
+    ]);
+
+    let state = Arc::new(AppState::new(Arc::new(store)));
+    refresh_leaderboard(&state).await;
+    let app = build_router(state);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let body: Value = reqwest::get(format!("http://{addr}/api/v1/leaderboard"))
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let latest = body["latest_game"].as_object().expect("latest_game");
+    assert_eq!(latest["game_id"].as_str().unwrap(), game_id.to_string());
+    assert_eq!(latest["rounds_played"], 8);
+    let seats = latest["seats"].as_array().unwrap();
+    assert_eq!(seats.len(), 2);
+    assert_eq!(seats[0]["display_name"], "Beena");
+    assert_eq!(seats[0]["finish_rank"], 1);
+    assert_eq!(seats[0]["total_score"], 142);
+    assert_eq!(seats[1]["display_name"], "Ankit");
+    assert_eq!(seats[1]["finish_rank"], 2);
 }

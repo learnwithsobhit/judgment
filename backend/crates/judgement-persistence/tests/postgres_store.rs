@@ -11,7 +11,7 @@ use judgement_domain::{
 use judgement_engine::GameEngine;
 use judgement_persistence::{
     CommandCommit, GameStore, NewGame, NewGamePlayer, PostgresStore, StoredRoom, StoredRoomPlayer,
-    StoredSession,
+    StoredSession, StoredUser,
 };
 
 fn migrations_dir() -> std::path::PathBuf {
@@ -155,4 +155,73 @@ async fn postgres_persists_and_restores_a_game() {
     assert!(history.event_count >= 2);
 
     let _ = session_id;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL pointing at a running Postgres"]
+async fn postgres_loads_the_newest_counted_game() {
+    use uuid::Uuid;
+
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let store = PostgresStore::connect(&url).await.unwrap();
+    store.migrate(migrations_dir()).await.unwrap();
+    let pool = sqlx::PgPool::connect(&url).await.unwrap();
+
+    let older = Uuid::new_v4();
+    let newer = Uuid::new_v4();
+    let ankit = Uuid::new_v4();
+    let beena = Uuid::new_v4();
+    let cara = Uuid::new_v4();
+    let now = Utc::now();
+    for (id, name) in [(ankit, "Ankit"), (beena, "Beena"), (cara, "Cara")] {
+        store
+            .upsert_user(&StoredUser {
+                user_id: id,
+                display_name: name.into(),
+                avatar_id: Some("face_01".into()),
+                legal_version: Some("2026-08-03".into()),
+                created_at: now,
+                updated_at: now,
+                last_seen_at: now,
+            })
+            .await
+            .unwrap();
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_game_results (
+            game_id, user_id, finished_at, table_size, rounds_played,
+            finish_rank, total_score, exact_bid_rounds, tricks_missed, counted
+        ) VALUES
+            ($1, $2, $3, 3, 8, 1, 90, 2, 1, true),
+            ($4, $5, $6, 4, 8, 2, 128, 3, 2, true),
+            ($4, $7, $6, 4, 8, 1, 142, 4, 1, true)
+        "#,
+    )
+    .bind(older)
+    .bind(cara)
+    .bind(now - chrono::Duration::hours(5))
+    .bind(newer)
+    .bind(ankit)
+    .bind(now)
+    .bind(beena)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let latest = store
+        .load_latest_game()
+        .await
+        .unwrap()
+        .expect("latest game");
+    assert_eq!(latest.game_id, newer);
+    assert_eq!(latest.rounds_played, 8);
+    assert_eq!(latest.table_size, 4);
+    assert_eq!(latest.seats.len(), 2);
+    assert_eq!(latest.seats[0].display_name, "Beena");
+    assert_eq!(latest.seats[0].finish_rank, 1);
+    assert_eq!(latest.seats[0].total_score, 142);
+    assert_eq!(latest.seats[1].display_name, "Ankit");
+    assert_eq!(latest.seats[1].finish_rank, 2);
 }

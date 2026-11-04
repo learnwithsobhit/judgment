@@ -1074,6 +1074,7 @@ async fn start_game_inner(
         on_finished: Some(make_finished_hook(state.clone())),
         leaderboard: state.leaderboard.clone(),
         seat_users,
+        active_games: state.active_games.clone(),
     });
     state
         .metrics

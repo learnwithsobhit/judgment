@@ -12,9 +12,13 @@ use judgement_engine::GameEvent;
 use uuid::Uuid;
 
 use crate::error::PersistError;
+use crate::fair_play::{
+    fair_play_board_key, fair_play_enabled, FairPlayGameTotal, FairPlayLeaderboardRow,
+    FairPlayRating, FairPlayRosterSeat, FairPlayStatsRow,
+};
 use crate::models::*;
 use crate::stats::{
-    apply_finish, average_score, exact_percent, ladder_key, match_pulse, stats_enabled,
+    apply_finish, match_pulse, medals_from_finishes, stats_enabled, to_leaderboard_row,
     PulseFinish, SeatFinish, UserStatsRow,
 };
 use crate::GameStore;
@@ -39,6 +43,11 @@ struct MemoryInner {
     recorded: HashSet<(Uuid, Uuid)>,
     /// Counted finishes kept so a local run can answer the same pulse as Postgres.
     pulse: Vec<PulseFinish>,
+    fair_play_rosters: HashMap<Uuid, Vec<FairPlayRosterSeat>>,
+    fair_play_submissions: HashSet<(Uuid, Uuid)>,
+    /// (game_id, voter, target) → points
+    fair_play_ballots: HashMap<(Uuid, Uuid, Uuid), i16>,
+    fair_play_stats: HashMap<Uuid, FairPlayStatsRow>,
 }
 
 type SessionKey = uuid::Uuid;
@@ -75,6 +84,12 @@ type InternalStateBlob = judgement_engine::InternalGameState;
 impl MemoryStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Seed counted finishes so tests can exercise `load_latest_game`
+    /// without playing a full table.
+    pub fn seed_counted_finishes(&self, finishes: Vec<PulseFinish>) {
+        self.inner.lock().unwrap().pulse.extend(finishes);
     }
 }
 
@@ -213,6 +228,9 @@ impl GameStore for MemoryStore {
             if let Some(result) = &commit.game_result {
                 record_finishes(&mut inner, commit, &players, result);
             }
+        }
+        if fair_play_enabled() && commit.game_result.is_some() {
+            record_fair_play_roster_memory(&mut inner, commit, &players);
         }
         Ok(())
     }
@@ -475,31 +493,7 @@ impl GameStore for MemoryStore {
 
     async fn load_leaderboard(&self, limit: i64) -> Result<Vec<LeaderboardRow>, PersistError> {
         let inner = self.inner.lock().unwrap();
-        let mut rows: Vec<_> = inner
-            .stats
-            .iter()
-            .filter(|(_, row)| row.ranked_games > 0)
-            .filter_map(|(id, row)| {
-                let user = inner.users.get(id)?;
-                Some((ladder_key(row), user, row))
-            })
-            .collect();
-        rows.sort_by(|a, b| b.0.cmp(&a.0));
-        if limit > 0 {
-            rows.truncate(limit as usize);
-        }
-        Ok(rows
-            .into_iter()
-            .map(|(_, user, row)| LeaderboardRow {
-                user_id: user.user_id,
-                display_name: user.display_name.clone(),
-                avatar_id: user.avatar_id.clone(),
-                wins: row.ranked_wins,
-                games: row.ranked_games,
-                exact_percent: exact_percent(row.ranked_exact, row.ranked_rounds),
-                average_score: average_score(row.ranked_points, row.ranked_games),
-            })
-            .collect())
+        Ok(memory_board(&inner, limit))
     }
 
     async fn load_user_stats(&self, user_id: Uuid) -> Result<Option<UserStatsView>, PersistError> {
@@ -508,17 +502,10 @@ impl GameStore for MemoryStore {
             return Ok(None);
         };
         let row = inner.stats.get(&user_id).cloned().unwrap_or_default();
-        let rank = if row.ranked_games == 0 {
-            None
-        } else {
-            let mine = ladder_key(&row);
-            let better = inner
-                .stats
-                .values()
-                .filter(|other| other.ranked_games > 0 && ladder_key(other) > mine)
-                .count();
-            Some(better as i32 + 1)
-        };
+        let rank = memory_board(&inner, 0)
+            .iter()
+            .position(|entry| entry.user_id == user_id)
+            .map(|index| index as i32 + 1);
         Ok(Some(UserStatsView {
             user_id,
             display_name: user.display_name.clone(),
@@ -542,6 +529,254 @@ impl GameStore for MemoryStore {
             .collect();
         Ok(match_pulse(&inner.pulse, Utc::now(), &names))
     }
+
+    async fn load_latest_game(&self) -> Result<Option<LatestGame>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let Some(latest) = inner
+            .pulse
+            .iter()
+            .max_by_key(|finish| (finish.finished_at, finish.game_id))
+        else {
+            return Ok(None);
+        };
+        let game_id = latest.game_id;
+        let finished_at = latest.finished_at;
+        let rounds_played = latest.rounds_played;
+        let mut seats: Vec<LatestGameSeat> = inner
+            .pulse
+            .iter()
+            .filter(|finish| finish.game_id == game_id)
+            .map(|finish| {
+                let user = inner.users.get(&finish.user_id);
+                LatestGameSeat {
+                    user_id: finish.user_id,
+                    display_name: user
+                        .map(|u| u.display_name.clone())
+                        .unwrap_or_else(|| "Player".into()),
+                    avatar_id: user.and_then(|u| u.avatar_id.clone()),
+                    finish_rank: finish.finish_rank,
+                    total_score: finish.total_score,
+                    exact_bid_rounds: finish.exact_bid_rounds,
+                }
+            })
+            .collect();
+        seats.sort_by(|a, b| {
+            a.finish_rank
+                .cmp(&b.finish_rank)
+                .then(b.total_score.cmp(&a.total_score))
+                .then(a.display_name.cmp(&b.display_name))
+        });
+        Ok(Some(LatestGame {
+            game_id,
+            finished_at,
+            table_size: seats.len() as i32,
+            rounds_played,
+            seats,
+        }))
+    }
+
+    async fn write_fair_play_roster(
+        &self,
+        seats: &[FairPlayRosterSeat],
+    ) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        for seat in seats {
+            let list = inner.fair_play_rosters.entry(seat.game_id).or_default();
+            if !list.iter().any(|s| s.user_id == seat.user_id) {
+                list.push(seat.clone());
+            }
+        }
+        Ok(())
+    }
+
+    async fn load_fair_play_roster(
+        &self,
+        game_id: Uuid,
+    ) -> Result<Vec<FairPlayRosterSeat>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .fair_play_rosters
+            .get(&game_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn fair_play_already_submitted(
+        &self,
+        game_id: Uuid,
+        voter_user_id: Uuid,
+    ) -> Result<bool, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .fair_play_submissions
+            .contains(&(game_id, voter_user_id)))
+    }
+
+    async fn submit_fair_play(
+        &self,
+        game_id: Uuid,
+        voter_user_id: Uuid,
+        ratings: &[FairPlayRating],
+    ) -> Result<Vec<FairPlayGameTotal>, PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.fair_play_submissions.insert((game_id, voter_user_id)) {
+            return Err(PersistError::Conflict("already submitted".into()));
+        }
+        for rating in ratings {
+            inner.fair_play_ballots.insert(
+                (game_id, voter_user_id, rating.target_user_id),
+                rating.points,
+            );
+            let prior = inner
+                .fair_play_ballots
+                .keys()
+                .filter(|(g, _, t)| *g == game_id && *t == rating.target_user_id)
+                .count();
+            let row = inner
+                .fair_play_stats
+                .entry(rating.target_user_id)
+                .or_default();
+            row.points_received += i32::from(rating.points);
+            row.ratings_received += 1;
+            if prior == 1 {
+                row.games_rated += 1;
+            }
+        }
+        Ok(game_totals_locked(&inner, game_id))
+    }
+
+    async fn load_fair_play_game_totals(
+        &self,
+        game_id: Uuid,
+    ) -> Result<Vec<FairPlayGameTotal>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(game_totals_locked(&inner, game_id))
+    }
+
+    async fn load_fair_play_leaderboard(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<FairPlayLeaderboardRow>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let mut rows: Vec<_> = inner
+            .fair_play_stats
+            .iter()
+            .filter(|(_, row)| row.ratings_received > 0)
+            .map(|(user_id, row)| {
+                let user = inner.users.get(user_id);
+                (
+                    fair_play_board_key(row),
+                    FairPlayLeaderboardRow {
+                        user_id: *user_id,
+                        display_name: user
+                            .map(|u| u.display_name.clone())
+                            .unwrap_or_else(|| "Player".into()),
+                        avatar_id: user.and_then(|u| u.avatar_id.clone()),
+                        points_received: row.points_received,
+                        ratings_received: row.ratings_received,
+                        games_rated: row.games_rated,
+                    },
+                )
+            })
+            .collect();
+        rows.sort_by(|a, b| b.0.cmp(&a.0));
+        let limit = if limit > 0 {
+            limit as usize
+        } else {
+            rows.len()
+        };
+        Ok(rows.into_iter().take(limit).map(|(_, row)| row).collect())
+    }
+}
+
+fn game_totals_locked(inner: &MemoryInner, game_id: Uuid) -> Vec<FairPlayGameTotal> {
+    let mut out = Vec::new();
+    let Some(roster) = inner.fair_play_rosters.get(&game_id) else {
+        return out;
+    };
+    for seat in roster {
+        let mut points = 0;
+        let mut ratings = 0;
+        for ((g, _, target), pts) in &inner.fair_play_ballots {
+            if *g == game_id && *target == seat.user_id {
+                points += i32::from(*pts);
+                ratings += 1;
+            }
+        }
+        out.push(FairPlayGameTotal {
+            user_id: seat.user_id,
+            display_name: seat.display_name.clone(),
+            avatar_id: seat.avatar_id.clone(),
+            points,
+            ratings,
+        });
+    }
+    out.sort_by(|a, b| {
+        b.points
+            .cmp(&a.points)
+            .then(b.ratings.cmp(&a.ratings))
+            .then(a.display_name.cmp(&b.display_name))
+    });
+    out
+}
+
+fn record_fair_play_roster_memory(
+    inner: &mut MemoryInner,
+    commit: &CommandCommit,
+    players: &[NewGamePlayer],
+) {
+    let finished_at = Utc::now();
+    let mut seats = Vec::new();
+    for player in players {
+        let Some(user_id) = player.user_id else {
+            continue;
+        };
+        let avatar_id = commit
+            .state
+            .players
+            .iter()
+            .find(|p| p.id == player.player_id)
+            .and_then(|p| p.avatar_id.clone());
+        seats.push(FairPlayRosterSeat {
+            game_id: commit.game_id.0,
+            user_id,
+            player_id: player.player_id.0,
+            display_name: player.nickname.clone(),
+            avatar_id,
+            finished_at,
+        });
+    }
+    if !seats.is_empty() {
+        inner
+            .fair_play_rosters
+            .entry(commit.game_id.0)
+            .or_default()
+            .extend(seats);
+    }
+}
+
+fn memory_board(inner: &MemoryInner, limit: i64) -> Vec<LeaderboardRow> {
+    let names = inner
+        .users
+        .iter()
+        .map(|(id, user)| (*id, user.display_name.clone()))
+        .collect();
+    let medals = medals_from_finishes(&inner.pulse, &names);
+    let mut rows: Vec<_> = medals
+        .into_iter()
+        .filter(|(user_id, _)| inner.users.contains_key(user_id))
+        .map(|(user_id, rec)| {
+            let avatar_id = inner.users.get(&user_id).and_then(|u| u.avatar_id.clone());
+            (user_id, avatar_id, rec)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.2.key().cmp(&a.2.key()));
+    if limit > 0 {
+        rows.truncate(limit as usize);
+    }
+    rows.into_iter()
+        .map(|(user_id, avatar_id, rec)| to_leaderboard_row(user_id, avatar_id, &rec))
+        .collect()
 }
 
 fn record_finishes(

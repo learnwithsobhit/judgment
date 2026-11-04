@@ -1,11 +1,16 @@
 //! Pure stat increments. Stores apply these only after an idempotent insert.
 
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Datelike, Days, FixedOffset, Utc};
 use uuid::Uuid;
 
-use crate::MatchPulse;
+use crate::{LeaderboardRow, MatchPulse};
+
+pub const GOLD_POINTS: i64 = 500;
+pub const SILVER_POINTS: i64 = 100;
+pub const BRONZE_POINTS: i64 = 20;
 
 #[derive(Debug, Clone)]
 pub struct SeatFinish {
@@ -60,28 +65,116 @@ pub fn apply_finish(row: &mut UserStatsRow, seat: &SeatFinish, rounds: i32, coun
     }
 }
 
-/// Higher sorts first: wins, then win rate, then exact-bid rate, then points per game.
-///
-/// Win rate and bid rate are exact ratios scaled by 1_000_000, so a 31.6% player
-/// ranks above a 31.1% player even when the card rounds both to 31%. The Postgres
-/// `ORDER BY` in `load_leaderboard` and the rank count must use this same order.
-pub fn ladder_key(row: &UserStatsRow) -> (i32, i64, i64, i64) {
-    let win_rate = if row.ranked_games == 0 {
+/// One signed-in player's counted finishes. Guests and 2-player tables are absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MedalRecord {
+    pub gold: i32,
+    pub silver: i32,
+    pub bronze: i32,
+    pub games: i32,
+    pub exact: i32,
+    pub rounds: i32,
+    pub score_points: i64,
+    pub display_name: String,
+}
+
+impl MedalRecord {
+    pub fn add(&mut self, finish_rank: i32, exact: i32, rounds: i32, score: i32) {
+        self.games += 1;
+        match finish_rank {
+            1 => self.gold += 1,
+            2 => self.silver += 1,
+            3 => self.bronze += 1,
+            _ => {}
+        }
+        self.exact = self.exact.saturating_add(exact);
+        self.rounds = self.rounds.saturating_add(rounds);
+        self.score_points += i64::from(score);
+    }
+
+    pub fn points(&self) -> i64 {
+        medal_points(self.gold, self.silver, self.bronze)
+    }
+
+    pub fn has_podium(&self) -> bool {
+        self.gold > 0 || self.silver > 0 || self.bronze > 0
+    }
+
+    /// Higher sorts first: points, gold, silver, bronze, gold%, bid%, then name A–Z.
+    ///
+    /// Gold% and bid% are exact ratios scaled by 1_000_000, so 15.3% stays above
+    /// 15.2% even when the card rounds both to 15.3%. Postgres `ORDER BY` in
+    /// `load_leaderboard` and the week-leader pick must use this same order.
+    pub fn key(&self) -> (i64, i32, i32, i32, i64, i64, Reverse<&str>) {
+        (
+            self.points(),
+            self.gold,
+            self.silver,
+            self.bronze,
+            rate(self.gold, self.games),
+            rate(self.exact, self.rounds),
+            Reverse(self.display_name.as_str()),
+        )
+    }
+}
+
+pub fn medal_points(gold: i32, silver: i32, bronze: i32) -> i64 {
+    i64::from(gold) * GOLD_POINTS
+        + i64::from(silver) * SILVER_POINTS
+        + i64::from(bronze) * BRONZE_POINTS
+}
+
+pub fn rate(numer: i32, denom: i32) -> i64 {
+    if denom <= 0 {
         0
     } else {
-        i64::from(row.ranked_wins) * 1_000_000 / i64::from(row.ranked_games)
-    };
-    let strike = if row.ranked_rounds == 0 {
-        0
-    } else {
-        i64::from(row.ranked_exact) * 1_000_000 / i64::from(row.ranked_rounds)
-    };
-    let average = if row.ranked_games == 0 {
-        0
-    } else {
-        row.ranked_points / i64::from(row.ranked_games)
-    };
-    (row.ranked_wins, win_rate, strike, average)
+        i64::from(numer) * 1_000_000 / i64::from(denom)
+    }
+}
+
+/// Fold counted finishes into one record per signed-in player.
+pub fn medals_from_finishes(
+    finishes: &[PulseFinish],
+    names: &HashMap<Uuid, String>,
+) -> HashMap<Uuid, MedalRecord> {
+    let mut by_user: HashMap<Uuid, MedalRecord> = HashMap::new();
+    for finish in finishes {
+        let rec = by_user.entry(finish.user_id).or_default();
+        rec.add(
+            finish.finish_rank,
+            finish.exact_bid_rounds,
+            finish.rounds_played,
+            finish.total_score,
+        );
+    }
+    for (user_id, rec) in &mut by_user {
+        if let Some(name) = names.get(user_id) {
+            rec.display_name = name.clone();
+        }
+    }
+    by_user
+}
+
+pub fn to_leaderboard_row(
+    user_id: Uuid,
+    avatar_id: Option<String>,
+    rec: &MedalRecord,
+) -> LeaderboardRow {
+    LeaderboardRow {
+        user_id,
+        display_name: rec.display_name.clone(),
+        avatar_id,
+        wins: rec.gold,
+        games: rec.games,
+        exact_percent: exact_percent(rec.exact, rec.rounds),
+        average_score: average_score(rec.score_points, rec.games),
+        gold: rec.gold,
+        silver: rec.silver,
+        bronze: rec.bronze,
+        medal_points: rec.points(),
+        exact: rec.exact,
+        rounds: rec.rounds,
+    }
 }
 
 pub fn exact_percent(exact: i32, rounds: i32) -> i32 {
@@ -147,20 +240,37 @@ pub fn india_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>, DateTi
 
 struct WeekTotals {
     games: HashSet<Uuid>,
-    wins: HashSet<Uuid>,
+    gold: i32,
+    silver: i32,
+    bronze: i32,
     exact: i32,
     rounds: i32,
-    points: i64,
 }
 
 impl Default for WeekTotals {
     fn default() -> Self {
         Self {
             games: HashSet::new(),
-            wins: HashSet::new(),
+            gold: 0,
+            silver: 0,
+            bronze: 0,
             exact: 0,
             rounds: 0,
-            points: 0,
+        }
+    }
+}
+
+impl WeekTotals {
+    fn to_medal(&self, display_name: String) -> MedalRecord {
+        MedalRecord {
+            gold: self.gold,
+            silver: self.silver,
+            bronze: self.bronze,
+            games: self.games.len() as i32,
+            exact: self.exact,
+            rounds: self.rounds,
+            score_points: 0,
+            display_name,
         }
     }
 }
@@ -199,8 +309,8 @@ pub fn match_pulse(
         }
     }
 
-    let (week_leader_name, week_leader_wins) = pick_leader(&by_user, names);
-    let (last_week_leader_name, last_week_leader_wins) = pick_leader(&last_by_user, names);
+    let week_leader = pick_leader(&by_user, names);
+    let last_leader = pick_leader(&last_by_user, names);
 
     MatchPulse {
         games_all: all.len() as i64,
@@ -209,56 +319,57 @@ pub fn match_pulse(
         games_last_week: last_week_games.len() as i64,
         players_week: week_players.len() as i64,
         since,
-        week_leader_name,
-        week_leader_wins,
-        last_week_leader_name,
-        last_week_leader_wins,
+        week_leader_name: week_leader.name,
+        week_leader_wins: week_leader.gold,
+        week_leader_points: week_leader.points,
+        last_week_leader_name: last_leader.name,
+        last_week_leader_wins: last_leader.gold,
+        last_week_leader_points: last_leader.points,
     }
 }
 
 fn record_week(by_user: &mut HashMap<Uuid, WeekTotals>, finish: &PulseFinish) {
     let totals = by_user.entry(finish.user_id).or_default();
     totals.games.insert(finish.game_id);
-    if finish.finish_rank == 1 {
-        totals.wins.insert(finish.game_id);
+    match finish.finish_rank {
+        1 => totals.gold += 1,
+        2 => totals.silver += 1,
+        3 => totals.bronze += 1,
+        _ => {}
     }
     totals.exact = totals.exact.saturating_add(finish.exact_bid_rounds);
     totals.rounds = totals.rounds.saturating_add(finish.rounds_played);
-    totals.points = totals.points.saturating_add(i64::from(finish.total_score));
 }
 
-fn pick_leader(
-    by_user: &HashMap<Uuid, WeekTotals>,
-    names: &HashMap<Uuid, String>,
-) -> (Option<String>, i64) {
-    let mut leader: Option<(String, i64, UserStatsRow)> = None;
+struct WeekLeader {
+    name: Option<String>,
+    gold: i64,
+    points: i64,
+}
+
+fn pick_leader(by_user: &HashMap<Uuid, WeekTotals>, names: &HashMap<Uuid, String>) -> WeekLeader {
+    let mut leader: Option<(MedalRecord, i64)> = None;
     for (user_id, totals) in by_user {
-        if totals.wins.is_empty() {
-            continue;
-        }
         let Some(name) = names.get(user_id).filter(|name| !name.is_empty()) else {
             continue;
         };
-        let row = UserStatsRow {
-            ranked_wins: totals.wins.len() as i32,
-            ranked_games: totals.games.len() as i32,
-            ranked_exact: totals.exact,
-            ranked_rounds: totals.rounds,
-            ranked_points: totals.points,
-            ..UserStatsRow::default()
-        };
+        let row = totals.to_medal(name.clone());
+        if !row.has_podium() {
+            continue;
+        }
         let replace = match &leader {
             None => true,
-            Some((_, _, current)) => ladder_key(&row) > ladder_key(current),
+            Some((current, _)) => row.key() > current.key(),
         };
         if replace {
-            leader = Some((name.clone(), totals.wins.len() as i64, row));
+            leader = Some((row, i64::from(totals.gold)));
         }
     }
-    (
-        leader.as_ref().map(|(name, _, _)| name.clone()),
-        leader.as_ref().map(|(_, wins, _)| *wins).unwrap_or(0),
-    )
+    WeekLeader {
+        name: leader.as_ref().map(|(row, _)| row.display_name.clone()),
+        gold: leader.as_ref().map(|(_, gold)| *gold).unwrap_or(0),
+        points: leader.as_ref().map(|(row, _)| row.points()).unwrap_or(0),
+    }
 }
 
 #[cfg(test)]
@@ -307,23 +418,87 @@ mod tests {
         assert_eq!(row.ranked_games, 0);
     }
 
-    fn key(wins: i32, games: i32, exact: i32, rounds: i32, points: i64) -> (i32, i64, i64, i64) {
-        ladder_key(&UserStatsRow {
-            ranked_wins: wins,
-            ranked_games: games,
-            ranked_exact: exact,
-            ranked_rounds: rounds,
-            ranked_points: points,
-            ..UserStatsRow::default()
-        })
+    fn medals(
+        gold: i32,
+        silver: i32,
+        bronze: i32,
+        games: i32,
+        exact: i32,
+        rounds: i32,
+        name: &str,
+    ) -> MedalRecord {
+        MedalRecord {
+            gold,
+            silver,
+            bronze,
+            games,
+            exact,
+            rounds,
+            score_points: 0,
+            display_name: name.into(),
+        }
     }
 
     #[test]
-    fn ladder_prefers_wins_then_win_rate_then_bids() {
-        assert!(key(3, 10, 0, 10, 0) > key(2, 2, 10, 10, 0));
-        assert!(key(7, 22, 0, 10, 0) > key(7, 30, 100, 100, 0));
-        assert!(key(4, 10, 8, 10, 0) > key(4, 10, 5, 10, 1_000));
-        assert!(key(4, 10, 5, 10, 800) > key(4, 10, 5, 10, 400));
+    fn one_gold_beats_four_silvers() {
+        let gold = medals(1, 0, 0, 1, 0, 1, "A");
+        let silvers = medals(0, 4, 0, 4, 0, 4, "B");
+        assert_eq!(gold.points(), 500);
+        assert_eq!(silvers.points(), 400);
+        assert!(gold.key() > silvers.key());
+    }
+
+    #[test]
+    fn equal_points_prefers_more_gold() {
+        let one_gold = medals(1, 0, 0, 1, 0, 1, "A");
+        let five_silver = medals(0, 5, 0, 5, 0, 5, "B");
+        assert_eq!(one_gold.points(), five_silver.points());
+        assert!(one_gold.key() > five_silver.key());
+    }
+
+    #[test]
+    fn same_medals_break_on_gold_rate_then_bid_rate() {
+        let higher_gold_rate = medals(2, 0, 0, 13, 0, 13, "A");
+        let lower_gold_rate = medals(2, 0, 0, 14, 10, 14, "B");
+        assert!(higher_gold_rate.key() > lower_gold_rate.key());
+
+        let higher_bids = medals(2, 1, 1, 10, 8, 10, "Ada");
+        let lower_bids = medals(2, 1, 1, 10, 5, 10, "Bea");
+        assert!(higher_bids.key() > lower_bids.key());
+    }
+
+    #[test]
+    fn equal_records_sort_by_name() {
+        let ankit = medals(1, 0, 0, 1, 1, 1, "Ankit");
+        let beena = medals(1, 0, 0, 1, 1, 1, "Beena");
+        assert!(ankit.key() > beena.key());
+    }
+
+    #[test]
+    fn board_rank_follows_gold_rate_when_medals_match() {
+        let ada = Uuid::new_v4();
+        let bea = Uuid::new_v4();
+        let now = at(2026, 10, 20, 12, 0);
+        let mut rows = Vec::new();
+        for i in 0..10 {
+            let game = Uuid::from_u128(i as u128 + 1);
+            rows.push(seat(game, ada, now, if i < 2 { 1 } else { 4 }, 1, 8, 10));
+        }
+        for i in 0..20 {
+            let game = Uuid::from_u128(i as u128 + 100);
+            rows.push(seat(game, bea, now, if i < 2 { 1 } else { 4 }, 1, 8, 10));
+        }
+        let mut names = HashMap::new();
+        names.insert(ada, "Ada".to_string());
+        names.insert(bea, "Bea".to_string());
+        let medals = medals_from_finishes(&rows, &names);
+        let mut board: Vec<_> = medals.into_values().collect();
+        board.sort_by(|a, b| b.key().cmp(&a.key()));
+        assert_eq!(board[0].display_name, "Ada");
+        assert_eq!(board[1].display_name, "Bea");
+        assert_eq!(board[0].gold, 2);
+        assert_eq!(board[1].gold, 2);
+        assert!(board[0].games < board[1].games);
     }
 
     fn at(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
@@ -409,8 +584,10 @@ mod tests {
         assert_eq!(pulse.since, Some(sunday_night));
         assert_eq!(pulse.week_leader_name.as_deref(), Some("Ankit"));
         assert_eq!(pulse.week_leader_wins, 3);
+        assert_eq!(pulse.week_leader_points, 1_500);
         assert_eq!(pulse.last_week_leader_name.as_deref(), Some("Beena"));
         assert_eq!(pulse.last_week_leader_wins, 1);
+        assert_eq!(pulse.last_week_leader_points, 500);
     }
 
     #[test]
@@ -431,6 +608,37 @@ mod tests {
         assert_eq!(pulse.games_all, 1);
         assert_eq!(pulse.week_leader_name.as_deref(), Some("Beena"));
         assert_eq!(pulse.week_leader_wins, 1);
+        assert_eq!(pulse.week_leader_points, 500);
+    }
+
+    #[test]
+    fn a_bronze_only_week_still_has_a_leader() {
+        let now = at(2026, 10, 21, 6, 30);
+        let game = Uuid::new_v4();
+        let when = at(2026, 10, 20, 4, 0);
+        let cara = Uuid::new_v4();
+        let rows = [seat(game, cara, when, 3, 1, 8, 10)];
+        let mut names = HashMap::new();
+        names.insert(cara, "Cara".to_string());
+        let pulse = match_pulse(&rows, now, &names);
+        assert_eq!(pulse.week_leader_name.as_deref(), Some("Cara"));
+        assert_eq!(pulse.week_leader_wins, 0);
+        assert_eq!(pulse.week_leader_points, 20);
+    }
+
+    #[test]
+    fn a_week_with_no_podium_has_no_leader() {
+        let now = at(2026, 10, 21, 6, 30);
+        let game = Uuid::new_v4();
+        let when = at(2026, 10, 20, 4, 0);
+        let cara = Uuid::new_v4();
+        let rows = [seat(game, cara, when, 4, 1, 8, 10)];
+        let mut names = HashMap::new();
+        names.insert(cara, "Cara".to_string());
+        let pulse = match_pulse(&rows, now, &names);
+        assert_eq!(pulse.games_week, 1);
+        assert!(pulse.week_leader_name.is_none());
+        assert_eq!(pulse.week_leader_points, 0);
     }
 
     #[test]

@@ -298,10 +298,21 @@ pub async fn get_leaderboard(
             games: row.games,
             exact_percent: row.exact_percent,
             average_score: row.average_score,
+            gold: row.gold,
+            silver: row.silver,
+            bronze: row.bronze,
+            medal_points: row.medal_points,
+            exact: row.exact,
+            rounds: row.rounds,
         })
         .collect();
     let pulse = state.table_pulse.lock().unwrap().clone();
-    Json(LeaderboardResponse { players, pulse })
+    let latest_game = state.latest_game.lock().unwrap().clone();
+    Json(LeaderboardResponse {
+        players,
+        pulse,
+        latest_game,
+    })
 }
 
 fn stats_response(view: &judgement_persistence::UserStatsView) -> MeStatsResponse {

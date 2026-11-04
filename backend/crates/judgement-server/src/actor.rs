@@ -14,8 +14,8 @@ use judgement_engine::{GameEngine, GameEvent, GamePhase, PlayerGameView};
 use judgement_persistence::LeaderboardRow;
 use judgement_persistence::{GameStore, PersistError, StoredPlayerPace};
 use judgement_protocol::{
-    ClientCommand, ClientEnvelope, PaceOpen, PlayerPace, RejectReason, ServerMessage, TimerEvent,
-    PROTOCOL_VERSION,
+    ActiveGame, ClientCommand, ClientEnvelope, PaceOpen, PlayerPace, RejectReason, ServerMessage,
+    TimerEvent, PROTOCOL_VERSION,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -150,6 +150,8 @@ pub struct SpawnActor {
     pub leaderboard: Arc<Mutex<Arc<Vec<LeaderboardRow>>>>,
     /// Account behind each seat. Updated when a vacant seat is claimed.
     pub seat_users: HashMap<PlayerId, Option<uuid::Uuid>>,
+    /// Home-screen card. Written after accepted commands; cleared on finish.
+    pub active_games: Arc<Mutex<HashMap<GameId, ActiveGame>>>,
 }
 
 pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
@@ -199,6 +201,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         on_finished: config.on_finished,
         leaderboard: config.leaderboard,
         seat_users: config.seat_users,
+        active_games: config.active_games,
     };
     tokio::spawn(actor.run());
     tx
@@ -257,10 +260,12 @@ struct GameActor {
     on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
     leaderboard: Arc<Mutex<Arc<Vec<LeaderboardRow>>>>,
     seat_users: HashMap<PlayerId, Option<uuid::Uuid>>,
+    active_games: Arc<Mutex<HashMap<GameId, ActiveGame>>>,
 }
 
 impl GameActor {
     async fn run(mut self) {
+        self.publish_active_game();
         self.sync_pace_clock();
         self.schedule_deadline();
         self.schedule_round_reveal_advance();
@@ -754,6 +759,7 @@ impl GameActor {
         };
         self.ended = true;
         self.paused = true;
+        self.clear_active_game();
         self.settle_open_pace(false);
         self.grace_ids.clear();
         self.vacancy_ids.clear();
@@ -1799,9 +1805,7 @@ impl GameActor {
 
     fn apply_ladder_ranks(&self, viewer: PlayerId, view: &mut PlayerGameView) {
         let board = self.leaderboard.lock().unwrap().clone();
-        let account_of = |player_id: PlayerId| {
-            self.seat_users.get(&player_id).copied().flatten()
-        };
+        let account_of = |player_id: PlayerId| self.seat_users.get(&player_id).copied().flatten();
         let own_account = account_of(viewer);
         view.own_signed_in = own_account.is_some();
         view.own_ladder_rank =
@@ -1824,10 +1828,28 @@ impl GameActor {
     }
 
     fn broadcast_snapshots(&mut self) {
+        self.publish_active_game();
         let players: Vec<_> = self.clients.keys().copied().collect();
         for player_id in players {
             self.send_snapshot(player_id);
         }
+    }
+
+    fn publish_active_game(&self) {
+        let engine_state = self.engine.state();
+        if matches!(engine_state.phase, GamePhase::Finished) {
+            self.clear_active_game();
+            return;
+        }
+        let board = crate::active_games::board_from_state(engine_state, Utc::now());
+        self.active_games
+            .lock()
+            .unwrap()
+            .insert(self.game_id, board);
+    }
+
+    fn clear_active_game(&self) {
+        self.active_games.lock().unwrap().remove(&self.game_id);
     }
 
     fn flush_dirty_snapshots(&mut self) {

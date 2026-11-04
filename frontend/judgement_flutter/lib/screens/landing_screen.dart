@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
@@ -13,6 +15,8 @@ import '../util/room_rejoin.dart';
 import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
 import '../widgets/avatar_picker.dart';
+import '../widgets/latest_game_card.dart';
+import '../widgets/live_games_card.dart';
 import '../widgets/leaderboard_sheet.dart';
 import '../widgets/legal_consent_checkbox.dart';
 import '../widgets/player_avatar.dart';
@@ -41,12 +45,16 @@ class LandingScreen extends StatefulWidget {
   State<LandingScreen> createState() => _LandingScreenState();
 }
 
-class _LandingScreenState extends State<LandingScreen> {
+class _LandingScreenState extends State<LandingScreen> with RouteAware {
   final _nickname = TextEditingController();
   final _roomCode = TextEditingController();
   late bool _joining; // false = create, true = join
   bool _busy = false;
   bool _legalAccepted = false;
+  LeaderboardReport? _latestReport;
+  List<ActiveGame> _liveGames = const [];
+  Timer? _liveTimer;
+  bool _watchingRoute = false;
   String _selectedAvatarId = defaultAvatarId;
   bool get _fromLink => widget.initialJoinCode != null;
 
@@ -69,10 +77,68 @@ class _LandingScreenState extends State<LandingScreen> {
     }
     AccountSession.instance.addListener(_onAccount);
     AccountSession.instance.restore();
+    _loadLatestGame();
+    _loadLiveGames();
+    _startLivePoll();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_watchingRoute) return;
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      homeRouteObserver.subscribe(this, route);
+      _watchingRoute = true;
+    }
+  }
+
+  @override
+  void didPushNext() {
+    _stopLivePoll();
+  }
+
+  @override
+  void didPopNext() {
+    _loadLiveGames();
+    _startLivePoll();
+  }
+
+  void _startLivePoll() {
+    if (_liveTimer != null) return;
+    _liveTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _loadLiveGames(),
+    );
+  }
+
+  void _stopLivePoll() {
+    _liveTimer?.cancel();
+    _liveTimer = null;
+  }
+
+  Future<void> _loadLiveGames() async {
+    try {
+      final games = await activeGamesLoad();
+      if (!mounted) return;
+      setState(() => _liveGames = games);
+    } catch (_) {}
+  }
+
+  Future<void> _loadLatestGame() async {
+    try {
+      final report = await leaderboardLoad();
+      if (!mounted) return;
+      setState(() => _latestReport = report);
+    } catch (_) {}
   }
 
   @override
   void dispose() {
+    if (_watchingRoute) {
+      homeRouteObserver.unsubscribe(this);
+    }
+    _stopLivePoll();
     AccountSession.instance.removeListener(_onAccount);
     _nickname.dispose();
     _roomCode.dispose();
@@ -827,6 +893,15 @@ class _LandingScreenState extends State<LandingScreen> {
                             );
                           },
                         ),
+                        if (_liveGames.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          LiveGamesCard(games: _liveGames),
+                        ],
+                        if (_latestReport?.latestGame != null) ...[
+                          const SizedBox(height: 12),
+                          LatestGameCard(report: _latestReport),
+                          const SizedBox(height: 4),
+                        ],
                         Align(
                           alignment: Alignment.center,
                           child: TextButton(

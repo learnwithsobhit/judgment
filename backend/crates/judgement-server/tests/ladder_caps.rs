@@ -58,6 +58,12 @@ fn row(user_id: uuid::Uuid, name: &str, wins: i32) -> LeaderboardRow {
         games: 10,
         exact_percent: 50,
         average_score: 20,
+        gold: wins,
+        silver: 0,
+        bronze: 0,
+        medal_points: i64::from(wins) * 500,
+        exact: 0,
+        rounds: 0,
     }
 }
 
@@ -253,13 +259,11 @@ async fn caps_follow_the_account_through_claim() {
             .and_then(|opponent| opponent.ladder_rank),
         Some(1)
     );
-    assert!(
-        opening
-            .opponents
-            .iter()
-            .find(|opponent| opponent.player_id == gold_player)
-            .is_some_and(|opponent| opponent.signed_in)
-    );
+    assert!(opening
+        .opponents
+        .iter()
+        .find(|opponent| opponent.player_id == gold_player)
+        .is_some_and(|opponent| opponent.signed_in));
     assert_eq!(
         opening
             .opponents
@@ -268,13 +272,11 @@ async fn caps_follow_the_account_through_claim() {
             .and_then(|opponent| opponent.ladder_rank),
         None
     );
-    assert!(
-        opening
-            .opponents
-            .iter()
-            .find(|opponent| opponent.player_id == fourth_player)
-            .is_some_and(|opponent| opponent.signed_in)
-    );
+    assert!(opening
+        .opponents
+        .iter()
+        .find(|opponent| opponent.player_id == fourth_player)
+        .is_some_and(|opponent| opponent.signed_in));
 
     let leave = ClientEnvelope {
         protocol_version: PROTOCOL_VERSION,

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:judgement_flutter/app/app.dart';
+import 'package:judgement_flutter/networking/api_client.dart';
+import 'package:judgement_flutter/widgets/leaderboard_sheet.dart';
+import 'package:judgement_flutter/widgets/live_games_card.dart';
 
 Future<void> _acceptLegal(WidgetTester tester) async {
   final checkbox = find.byType(Checkbox).first;
@@ -10,6 +13,19 @@ Future<void> _acceptLegal(WidgetTester tester) async {
 }
 
 void main() {
+  setUp(() {
+    leaderboardLoad = () async => const LeaderboardReport(players: []);
+    fairPlayLeaderboardLoad = () async =>
+        const FairPlayLeaderboardReport(players: []);
+    activeGamesLoad = () async => const [];
+  });
+
+  tearDown(() {
+    leaderboardLoad = () => ApiClient().getLeaderboard();
+    fairPlayLeaderboardLoad = () => ApiClient().getFairPlayLeaderboard();
+    activeGamesLoad = () => ApiClient().getActiveGames();
+  });
+
   testWidgets('landing screen renders create and join flows', (tester) async {
     // Tall enough for create-mode options including the manual step editor.
     await tester.binding.setSurfaceSize(const Size(800, 2400));

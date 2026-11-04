@@ -55,6 +55,7 @@ pub fn make_finished_hook(state: Arc<AppState>) -> Arc<dyn Fn(GameId) + Send + S
 
 /// Free admission + clear InGame → Lobby (seats kept, ready cleared).
 pub fn apply_finished_cleanup(state: &AppState, game_id: GameId) {
+    crate::active_games::clear_board(state, game_id);
     let room_id = {
         let mut games = state.games.lock().unwrap();
         let room_id = games.get(&game_id).map(|g| g.room_id);
@@ -96,6 +97,7 @@ pub fn apply_finished_cleanup(state: &AppState, game_id: GameId) {
 
 /// Drop actor map entry, prune vacant seats, return room to Lobby, persist.
 pub fn apply_aborted_cleanup(state: &AppState, room_id: RoomId, info: &AbortedCleanup) {
+    crate::active_games::clear_board(state, info.game_id);
     state.games.lock().unwrap().remove(&info.game_id);
     state
         .metrics

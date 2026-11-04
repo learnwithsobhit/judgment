@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Latest game card — UI preview</title>
+  <style>
+    :root {
+      --felt: #1b5e20;
+      --felt-dark: #0d3311;
+      --gold: #ffc857;
+      --silver: #c0c0c0;
+      --bronze: #cd7f32;
+      --white: #fff;
+      --muted: rgba(255, 255, 255, 0.7);
+      --faint: rgba(255, 255, 255, 0.55);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #111;
+      color: var(--white);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 32px;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 32px 16px 48px;
+    }
+    h1 {
+      width: 100%;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 500;
+      color: #aaa;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    .col { display: flex; flex-direction: column; align-items: center; }
+    .label {
+      text-align: center;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    .phone {
+      width: 360px;
+      height: 740px;
+      border-radius: 28px;
+      overflow: hidden;
+      border: 1px solid #333;
+      background: linear-gradient(180deg, var(--felt) 0%, var(--felt-dark) 100%);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    }
+    .scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+    .center {
+      max-width: 420px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .logo {
+      text-align: center;
+      font-size: 34px;
+      font-weight: 800;
+      color: var(--gold);
+      letter-spacing: 1.5px;
+    }
+    .tagline {
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: -8px;
+    }
+    .card {
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 14px 16px 16px;
+    }
+    .card-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+    .card-time {
+      font-size: 12px;
+      color: var(--faint);
+      font-variant-numeric: tabular-nums;
+    }
+    .winner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 8px;
+      background: rgba(255, 200, 87, 0.12);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 200, 87, 0.35);
+      margin-bottom: 10px;
+    }
+    .medal {
+      font-size: 13px;
+      font-weight: 800;
+      width: 22px;
+      text-align: center;
+    }
+    .medal.g1 { color: var(--gold); }
+    .medal.g2 { color: var(--silver); }
+    .medal.g3 { color: var(--bronze); }
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #2e7d32;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 13px;
+      flex-shrink: 0;
+      color: #fff;
+    }
+    .avatar.gold {
+      box-shadow: 0 0 0 2px var(--gold);
+    }
+    .avatar.sm {
+      width: 26px;
+      height: 26px;
+      font-size: 11px;
+    }
+    .winner-name {
+      flex: 1;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .winner-score {
+      font-weight: 800;
+      font-size: 20px;
+      color: var(--gold);
+      font-variant-numeric: tabular-nums;
+    }
+    .runners {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 8px 6px;
+    }
+    .runner {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .runner-name {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .runner-score {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--white);
+      font-variant-numeric: tabular-nums;
+    }
+    .more {
+      font-size: 12px;
+      color: var(--faint);
+      margin-left: auto;
+    }
+    .meta {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--faint);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .meta .dot { color: rgba(255,255,255,0.25); }
+    .tap {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--gold);
+      text-align: center;
+      opacity: 0.85;
+    }
+    .skeleton {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 16px;
+      height: 96px;
+      position: relative;
+      overflow: hidden;
+    }
+    .skeleton::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+      animation: shimmer 1.4s infinite;
+    }
+    @keyframes shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    .hidden-note {
+      font-size: 12px;
+      color: var(--faint);
+      text-align: center;
+      padding: 8px;
+    }
+    .btn-create {
+      height: 48px;
+      border: 0;
+      border-radius: 24px;
+      background: #e8f5e9;
+      color: #1b5e20;
+      font-weight: 700;
+      font-size: 15px;
+      width: 100%;
+    }
+    .btn-top {
+      width: 100%;
+      height: 40px;
+      border: 0;
+      background: transparent;
+      color: var(--gold);
+      font-size: 14px;
+    }
+    .form-card {
+      background: rgba(0,0,0,0.25);
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .field {
+      height: 48px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(0,0,0,0.2);
+    }
+    .segment {
+      display: flex;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .segment div {
+      flex: 1;
+      text-align: center;
+      padding: 10px 0;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .segment div.on {
+      background: rgba(255,200,87,0.15);
+      color: var(--gold);
+      font-weight: 700;
+    }
+    .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+  <h1>Latest game card — home screen preview (matches Flutter felt theme)</h1>
+
+  <div class="col">
+    <div class="label">1 · Card present (typical)</div>
+    <div class="phone">
+      <div class="scroll">
+        <div class="center">
+          <div class="logo">&#9824; &#9829; Judgement &#9826; &#9827;</div>
+          <div class="tagline">Bid exactly. Win exactly. Three to eight players.</div>
+          <div class="form-card">
+            <div class="segment"><div class="on">Create room</div><div>Join room</div></div>
+            <div class="field"></div>
+            <div class="field" style="height:56px"></div>
+            <button class="btn-create">Create room</button>
+          </div>
+
+          <!-- ===== Latest game card ===== -->
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Latest game</div>
+              <div class="card-time">2h ago &middot; 30 Oct</div>
+            </div>
+            <div class="winner">
+              <div class="medal g1">#1</div>
+              <div class="avatar gold">A</div>
+              <div class="winner-name">Ankit</div>
+              <div class="winner-score">142</div>
+            </div>
+            <div class="runners">
+              <div class="runner">
+                <div class="avatar sm" style="background:#1565c0">B</div>
+                <div class="runner-name">Beena</div>
+                <div class="runner-score">128</div>
+              </div>
+              <div class="runner">
+                <div class="avatar sm" style="background:#6a1b9a">C</div>
+                <div class="runner-name">Cara</div>
+                <div class="runner-score">119</div>
+              </div>
+              <div class="more">+1</div>
+            </div>
+            <div class="meta">
+              <span>8 rounds &middot; 4 players</span>
+              <span class="dot">&middot;</span>
+              <span>Ranked</span>
+            </div>
+            <div class="tap">Tap to see the board &rsaquo;</div>
+          </div>
+          <!-- ===== end card ===== -->
+
+          <button class="btn-top">Top players</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">2 · Shared victory (tie for #1)</div>
+    <div class="phone">
+      <div class="scroll">
+        <div class="center">
+          <div class="logo">&#9824; &#9829; Judgement &#9826; &#9827;</div>
+          <div class="tagline">Bid exactly. Win exactly. Three to eight players.</div>
+          <div class="form-card">
+            <div class="segment"><div class="on">Create room</div><div>Join room</div></div>
+            <div class="field"></div>
+            <button class="btn-create">Create room</button>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <div class="card-title">Latest game</div>
+              <div class="card-time">just now</div>
+            </div>
+            <div class="winner">
+              <div class="medal g1">#1</div>
+              <div class="avatar gold">A</div>
+              <div class="winner-name">Ankit &amp; Beena</div>
+              <div class="winner-score">140</div>
+            </div>
+            <div class="runners">
+              <div class="runner">
+                <div class="avatar sm" style="background:#6a1b9a">C</div>
+                <div class="runner-name">Cara</div>
+                <div class="runner-score">110</div>
+              </div>
+              <div class="more">+2</div>
+            </div>
+            <div class="meta">
+              <span>10 rounds &middot; 5 players</span>
+              <span class="dot">&middot;</span>
+              <span>Shared first</span>
+            </div>
+            <div class="tap">Tap to see the board &rsaquo;</div>
+          </div>
+          <button class="btn-top">Top players</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">3 · Loading skeleton</div>
+    <div class="phone">
+      <div class="scroll">
+        <div class="center">
+          <div class="logo">&#9824; &#9829; Judgement &#9826; &#9827;</div>
+          <div class="tagline">Bid exactly. Win exactly. Three to eight players.</div>
+          <div class="form-card">
+            <div class="segment"><div class="on">Create room</div><div>Join room</div></div>
+            <div class="field"></div>
+            <button class="btn-create">Create room</button>
+          </div>
+          <div class="skeleton"></div>
+          <button class="btn-top">Top players</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">4 · No games yet (card hidden)</div>
+    <div class="phone">
+      <div class="scroll">
+        <div class="center">
+          <div class="logo">&#9824; &#9829; Judgement &#9826; &#9827;</div>
+          <div class="tagline">Bid exactly. Win exactly. Three to eight players.</div>
+          <div class="form-card">
+            <div class="segment"><div class="on">Create room</div><div>Join room</div></div>
+            <div class="field"></div>
+            <button class="btn-create">Create room</button>
+          </div>
+          <div class="hidden-note">(No ranked games finished yet &mdash; card stays hidden, layout unchanged)</div>
+          <button class="btn-top">Top players</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

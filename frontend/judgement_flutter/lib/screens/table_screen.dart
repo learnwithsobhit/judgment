@@ -26,6 +26,7 @@ import '../widgets/playing_card.dart';
 import '../widgets/scoreboard.dart';
 import '../widgets/share_sheet.dart';
 import '../widgets/victory_celebration.dart';
+import 'fair_play_screen.dart';
 import 'result_screen.dart';
 
 /// The main game table: opponents around the felt, the current trick in the
@@ -42,8 +43,9 @@ class TableScreen extends StatefulWidget {
 class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   Timer? _ticker;
 
-  /// After the game ends, celebrate first; open results on demand.
-  bool _showResults = false;
+  /// After the game ends: celebration → fair play (if eligible) → results.
+  /// 0 = celebration, 1 = fair play, 2 = results.
+  int _postGameStep = 0;
   bool _leaveDialogOpen = false;
   bool _leaving = false;
 
@@ -254,12 +256,25 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     }
 
     if (view.isFinished && view.finalRanking != null) {
-      if (_showResults) {
+      if (_postGameStep >= 2) {
         return ResultScreen(controller: controller);
+      }
+      if (_postGameStep == 1) {
+        // Same bearer as the hand — do not rebuild from AccountSession, which
+        // can be empty in this tab even when the seat was account-bound.
+        return FairPlayScreen(
+          api: controller.api,
+          gameId: controller.gameId,
+          onContinue: () => setState(() => _postGameStep = 2),
+        );
       }
       return VictoryCelebration(
         controller: controller,
-        onViewResults: () => setState(() => _showResults = true),
+        // countsForProfile is set at lobby from the live game token and stays
+        // true for the whole hand; guests skip straight to results.
+        onViewResults: () => setState(
+          () => _postGameStep = controller.countsForProfile ? 1 : 2,
+        ),
       );
     }
 

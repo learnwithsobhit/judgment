@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use judgement_persistence::{LeaderboardRow, MatchPulse};
-use judgement_protocol::{LeaderboardPulse, RoomView};
+use judgement_protocol::{LatestGame, LatestGameSeat, LeaderboardPulse, RoomView};
 use uuid::Uuid;
 
 use crate::state::{AppState, RoomStatus};
@@ -93,8 +93,10 @@ pub fn store_pulse(
         since: loaded.since,
         week_leader_name: loaded.week_leader_name,
         week_leader_wins: loaded.week_leader_wins,
+        week_leader_points: loaded.week_leader_points,
         last_week_leader_name: loaded.last_week_leader_name,
         last_week_leader_wins: loaded.last_week_leader_wins,
+        last_week_leader_points: loaded.last_week_leader_points,
         open_tables,
     });
 }
@@ -114,8 +116,37 @@ pub async fn refresh_leaderboard(state: &AppState) {
         }
     };
     let open_tables = open_table_count(state);
-    let mut current = state.table_pulse.lock().unwrap();
-    store_pulse(&mut current, loaded, open_tables);
+    {
+        let mut current = state.table_pulse.lock().unwrap();
+        store_pulse(&mut current, loaded, open_tables);
+    }
+    match state.store.load_latest_game().await {
+        Ok(game) => {
+            *state.latest_game.lock().unwrap() = game.map(protocol_latest_game);
+        }
+        Err(error) => tracing::warn!(%error, "latest game refresh failed"),
+    }
+}
+
+fn protocol_latest_game(game: judgement_persistence::LatestGame) -> LatestGame {
+    LatestGame {
+        game_id: game.game_id.to_string(),
+        finished_at: game.finished_at,
+        table_size: game.table_size,
+        rounds_played: game.rounds_played,
+        seats: game
+            .seats
+            .into_iter()
+            .map(|seat| LatestGameSeat {
+                user_id: seat.user_id.to_string(),
+                display_name: seat.display_name,
+                avatar_id: seat.avatar_id,
+                finish_rank: seat.finish_rank,
+                total_score: seat.total_score,
+                exact_bid_rounds: seat.exact_bid_rounds,
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +162,12 @@ mod tests {
             games: 1,
             exact_percent: 0,
             average_score: 0,
+            gold: 1,
+            silver: 0,
+            bronze: 0,
+            medal_points: 500,
+            exact: 0,
+            rounds: 0,
         }
     }
 
@@ -168,8 +205,10 @@ mod tests {
             since: None,
             week_leader_name: Some("Ankit".into()),
             week_leader_wins: 3,
+            week_leader_points: 1500,
             last_week_leader_name: Some("Beena".into()),
             last_week_leader_wins: 4,
+            last_week_leader_points: 2000,
             open_tables: 1,
         };
         let mut current = Some(previous.clone());
@@ -194,5 +233,30 @@ mod tests {
         assert_eq!(updated.games_all, 10);
         assert_eq!(updated.open_tables, 0);
         assert!(updated.week_leader_name.is_none());
+    }
+
+    #[test]
+    fn protocol_latest_game_copies_seats() {
+        let game_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let mapped = protocol_latest_game(judgement_persistence::LatestGame {
+            game_id,
+            finished_at: chrono::Utc::now(),
+            table_size: 4,
+            rounds_played: 8,
+            seats: vec![judgement_persistence::LatestGameSeat {
+                user_id,
+                display_name: "Beena".into(),
+                avatar_id: None,
+                finish_rank: 1,
+                total_score: 142,
+                exact_bid_rounds: 4,
+            }],
+        });
+        assert_eq!(mapped.game_id, game_id.to_string());
+        assert_eq!(mapped.rounds_played, 8);
+        assert_eq!(mapped.seats[0].user_id, user_id.to_string());
+        assert_eq!(mapped.seats[0].display_name, "Beena");
+        assert_eq!(mapped.seats[0].total_score, 142);
     }
 }

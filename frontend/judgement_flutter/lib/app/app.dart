@@ -12,6 +12,10 @@ const feltGreen = Color(0xFF1B5E20);
 const feltGreenDark = Color(0xFF0D3311);
 const goldAccent = Color(0xFFFFC857);
 
+/// Home listens so the live-games poll stops in a lobby or at the table.
+final RouteObserver<PageRoute<void>> homeRouteObserver =
+    RouteObserver<PageRoute<void>>();
+
 /// Parse `/e/{slug}`, `/e/{slug}/manage?token=`, `/r/{CODE}`, and
 /// cache-bust landings on `/index.html?room=` / `?event=` (Safari redirects).
 Widget initialHomeFromUri(Uri uri) {
@@ -81,6 +85,7 @@ class JudgementApp extends StatelessWidget {
     return MaterialApp(
       title: 'Judgement',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [homeRouteObserver],
       theme: ThemeData(
         colorScheme: scheme,
         useMaterial3: true,

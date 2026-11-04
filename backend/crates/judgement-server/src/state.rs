@@ -19,7 +19,9 @@ use judgement_domain::{
     EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit, MIN_PLAYERS,
 };
 use judgement_persistence::GameStore;
-use judgement_protocol::{GameEventStatus, LeaderboardPulse, RoomPhase, RoomView, SeatView};
+use judgement_protocol::{
+    ActiveGame, GameEventStatus, LatestGame, LeaderboardPulse, RoomPhase, RoomView, SeatView,
+};
 
 use crate::actor::ActorMessage;
 use crate::error::ApiError;
@@ -211,6 +213,10 @@ pub struct AppState {
     pub stats_memo: Mutex<HashMap<uuid::Uuid, (Instant, judgement_persistence::UserStatsView)>>,
     /// Ranked-game pulse from the same refresh as the board. Reads never query.
     pub table_pulse: Mutex<Option<LeaderboardPulse>>,
+    /// Most recent counted game from the same refresh. Reads never query.
+    pub latest_game: Mutex<Option<LatestGame>>,
+    /// In-progress tables. Actors write; the home card only reads.
+    pub active_games: Arc<Mutex<HashMap<GameId, ActiveGame>>>,
 }
 
 impl AppState {
@@ -236,6 +242,8 @@ impl AppState {
             leaderboard: std::sync::Arc::new(Mutex::new(std::sync::Arc::new(Vec::new()))),
             stats_memo: Mutex::default(),
             table_pulse: Mutex::default(),
+            latest_game: Mutex::default(),
+            active_games: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

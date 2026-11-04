@@ -2,9 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:judgement_flutter/app/app.dart';
 import 'package:judgement_flutter/models/protocol.dart';
+import 'package:judgement_flutter/networking/api_client.dart';
+import 'package:judgement_flutter/widgets/leaderboard_sheet.dart';
+import 'package:judgement_flutter/widgets/live_games_card.dart';
 import 'package:judgement_flutter/widgets/playing_card.dart';
 
 void main() {
+  setUp(() {
+    leaderboardLoad = () async => const LeaderboardReport(players: []);
+    activeGamesLoad = () async => const [];
+  });
+
+  tearDown(() {
+    leaderboardLoad = () => ApiClient().getLeaderboard();
+    activeGamesLoad = () => ApiClient().getActiveGames();
+  });
+
   testWidgets('playing card exposes suit+rank semantic label (not colour alone)',
       (tester) async {
     final semantics = tester.ensureSemantics();

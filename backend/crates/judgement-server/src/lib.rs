@@ -1,5 +1,6 @@
 //! Axum room service and per-game actors (PLAN.md Phase 3 + Phase 5 + Phase 9).
 
+pub mod active_games;
 pub mod actor;
 pub mod audio;
 pub mod auth;
@@ -9,6 +10,7 @@ pub mod cors;
 pub mod emotes;
 pub mod error;
 pub mod events;
+pub mod fair_play;
 pub mod http_limit;
 pub mod leaderboard;
 pub mod metrics;
@@ -50,6 +52,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/me/logout", post(auth::logout_me))
         .route("/api/v1/me/stats", get(auth::get_me_stats))
         .route("/api/v1/leaderboard", get(auth::get_leaderboard))
+        .route("/api/v1/active-games", get(active_games::get_active_games))
+        .route(
+            "/api/v1/fair-play/leaderboard",
+            get(fair_play::get_fair_play_leaderboard),
+        )
         .route("/api/v1/me/avatar", post(routes::set_avatar))
         .route("/api/v1/rooms", post(routes::create_room))
         .route("/api/v1/rooms/{room_ref}", get(routes::get_room))
@@ -86,6 +93,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/games/{game_id}/result",
             get(routes::get_game_result),
+        )
+        .route(
+            "/api/v1/games/{game_id}/fair-play",
+            get(fair_play::get_fair_play_game).post(fair_play::submit_fair_play_game),
         )
         .route(
             "/api/v1/games/{game_id}/coach/{player_id}",

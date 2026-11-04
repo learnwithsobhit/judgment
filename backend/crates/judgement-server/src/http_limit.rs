@@ -96,7 +96,10 @@ pub async fn rate_limit_middleware(
     let key = client_key(req.headers());
     let max = if path == "/api/v1/guest-sessions" {
         state.http_limiter.config().guest_max_per_window
-    } else if path == "/api/v1/leaderboard" {
+    } else if path == "/api/v1/leaderboard"
+        || path == "/api/v1/fair-play/leaderboard"
+        || path == "/api/v1/active-games"
+    {
         state.http_limiter.config().board_max_per_window
     } else {
         state.http_limiter.config().max_requests_per_window

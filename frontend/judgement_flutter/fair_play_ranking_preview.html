@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fair play ranking — UI preview</title>
+  <style>
+    :root {
+      --felt: #1b5e20;
+      --felt-dark: #0d3311;
+      --sheet: #163a18;
+      --on: #f5f5f5;
+      --muted: rgba(245, 245, 245, 0.72);
+      --line: rgba(255, 255, 255, 0.12);
+      --seg: rgba(255, 255, 255, 0.08);
+      --seg-on: #e8f5e9;
+      --seg-on-fg: #1b5e20;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #111;
+      color: var(--on);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 32px;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 32px 16px 48px;
+    }
+    h1 {
+      width: 100%;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 500;
+      color: #aaa;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    .col { display: flex; flex-direction: column; align-items: center; }
+    .label {
+      text-align: center;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    .phone {
+      width: 390px;
+      height: 780px;
+      border-radius: 28px;
+      overflow: hidden;
+      border: 1px solid #333;
+      background: linear-gradient(180deg, var(--felt) 0%, var(--felt-dark) 100%);
+      position: relative;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    }
+    .dim {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.35);
+    }
+    .sheet {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 88%;
+      background: var(--sheet);
+      border-radius: 20px 20px 0 0;
+      padding: 12px 20px 8px;
+      display: flex;
+      flex-direction: column;
+    }
+    .handle {
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.25);
+      margin: 0 auto 10px;
+    }
+    .title { font-size: 22px; font-weight: 600; margin: 0; }
+    .subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 4px 0 10px;
+    }
+    .seg {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      background: var(--seg);
+      border-radius: 20px;
+      padding: 4px;
+      margin-bottom: 12px;
+    }
+    .seg button {
+      border: 0;
+      border-radius: 16px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-weight: 600;
+      background: transparent;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .seg button.on {
+      background: var(--seg-on);
+      color: var(--seg-on-fg);
+    }
+    .list { flex: 1; overflow: auto; }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 13px;
+      flex-shrink: 0;
+      background: #2e7d32;
+      position: relative;
+    }
+    .avatar::after {
+      content: '';
+      position: absolute;
+      right: -1px;
+      bottom: -1px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #66bb6a;
+      border: 2px solid var(--sheet);
+    }
+    .name {
+      flex: 1;
+      font-size: 15px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pts {
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .avg {
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 52px;
+      text-align: right;
+    }
+    .empty {
+      padding: 24px 0;
+      color: var(--on);
+      font-size: 14px;
+    }
+    .footer {
+      padding-top: 4px;
+    }
+    .rules-btn {
+      border: 0;
+      background: transparent;
+      color: #a5d6a7;
+      font-size: 13px;
+      padding: 8px 0;
+      text-align: left;
+      cursor: default;
+    }
+    .rules {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Fair play ranking — leaderboard sheet preview</h1>
+
+  <div class="col">
+    <div class="label">Fair play tab (with rankings)</div>
+    <div class="phone">
+      <div class="dim"></div>
+      <div class="sheet">
+        <div class="handle"></div>
+        <div class="title">Fair play</div>
+        <div class="subtitle">Points from private post-game ratings</div>
+        <div class="seg">
+          <button type="button">Top players</button>
+          <button type="button" class="on">🤝 Fair play</button>
+        </div>
+        <div class="list">
+          <div class="row">
+            <div class="avatar">A</div>
+            <div class="name">1. akash</div>
+            <div class="pts">42</div>
+            <div class="avg">avg 8.4</div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#1565c0">S</div>
+            <div class="name">2. shobhit</div>
+            <div class="pts">38</div>
+            <div class="avg">avg 7.6</div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#6a1b9a">D</div>
+            <div class="name">3. Dharmendra</div>
+            <div class="pts">31</div>
+            <div class="avg">avg 7.8</div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#ef6c00">U</div>
+            <div class="name">4. Upavan</div>
+            <div class="pts">27</div>
+            <div class="avg">avg 6.8</div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#00838f">R</div>
+            <div class="name">5. Arun</div>
+            <div class="pts">22</div>
+            <div class="avg">avg 7.3</div>
+          </div>
+        </div>
+        <div class="footer">
+          <div class="rules">
+            After each game, signed-in players rate each other from 0 to 10.
+            Who gave what stays private. Only totals appear here.
+          </div>
+          <button class="rules-btn" type="button">Hide the rules</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">Empty state</div>
+    <div class="phone">
+      <div class="dim"></div>
+      <div class="sheet">
+        <div class="handle"></div>
+        <div class="title">Fair play</div>
+        <div class="subtitle">Points from private post-game ratings</div>
+        <div class="seg">
+          <button type="button">Top players</button>
+          <button type="button" class="on">🤝 Fair play</button>
+        </div>
+        <div class="list">
+          <div class="empty">No fair play ratings yet.</div>
+        </div>
+        <div class="footer">
+          <button class="rules-btn" type="button">How fair play works</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

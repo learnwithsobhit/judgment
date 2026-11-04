@@ -555,6 +555,18 @@ pub struct LeaderboardEntry {
     pub games: i32,
     pub exact_percent: i32,
     pub average_score: i32,
+    #[serde(default)]
+    pub gold: i32,
+    #[serde(default)]
+    pub silver: i32,
+    #[serde(default)]
+    pub bronze: i32,
+    #[serde(default)]
+    pub medal_points: i64,
+    #[serde(default)]
+    pub exact: i32,
+    #[serde(default)]
+    pub rounds: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -571,12 +583,36 @@ pub struct LeaderboardPulse {
     pub week_leader_name: Option<String>,
     #[serde(default)]
     pub week_leader_wins: i64,
+    #[serde(default)]
+    pub week_leader_points: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_week_leader_name: Option<String>,
     #[serde(default)]
     pub last_week_leader_wins: i64,
     #[serde(default)]
+    pub last_week_leader_points: i64,
+    #[serde(default)]
     pub open_tables: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatestGameSeat {
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    pub finish_rank: i32,
+    pub total_score: i32,
+    pub exact_bid_rounds: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatestGame {
+    pub game_id: String,
+    pub finished_at: DateTime<Utc>,
+    pub table_size: i32,
+    pub rounds_played: i32,
+    pub seats: Vec<LatestGameSeat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -585,4 +621,89 @@ pub struct LeaderboardResponse {
     /// Absent on an older server. A client that does not know it ignores the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pulse: Option<LeaderboardPulse>,
+    /// Most recent counted game. Absent on an older server or when none exist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_game: Option<LatestGame>,
+}
+
+/// One seat on a game that is still in progress. No hands, bids, or room code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveGameSeat {
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    pub total_score: i32,
+}
+
+/// Public progress for one in-progress table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveGame {
+    pub game_id: String,
+    pub updated_at: DateTime<Utc>,
+    pub round_index: i32,
+    pub total_rounds: i32,
+    /// `bidding`, `playing`, `scoring`, or `dealing`.
+    pub phase: String,
+    pub seats: Vec<ActiveGameSeat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveGamesResponse {
+    pub games: Vec<ActiveGame>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FairPlayRatee {
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FairPlayTotal {
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    pub points: i32,
+    pub ratings: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FairPlayGameView {
+    pub can_vote: bool,
+    pub already_submitted: bool,
+    pub ratees: Vec<FairPlayRatee>,
+    /// Present only after this voter has submitted (never includes ballots).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totals: Option<Vec<FairPlayTotal>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FairPlayRatingInput {
+    pub user_id: String,
+    pub points: i16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FairPlaySubmitRequest {
+    pub ratings: Vec<FairPlayRatingInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FairPlayLeaderboardEntry {
+    pub rank: i32,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    pub points_received: i32,
+    pub ratings_received: i32,
+    pub games_rated: i32,
+    pub average: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FairPlayLeaderboardResponse {
+    pub players: Vec<FairPlayLeaderboardEntry>,
 }

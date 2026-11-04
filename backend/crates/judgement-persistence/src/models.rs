@@ -192,6 +192,33 @@ pub struct LeaderboardRow {
     pub games: i32,
     pub exact_percent: i32,
     pub average_score: i32,
+    pub gold: i32,
+    pub silver: i32,
+    pub bronze: i32,
+    pub medal_points: i64,
+    pub exact: i32,
+    pub rounds: i32,
+}
+
+/// One signed-in seat from the most recent counted game.
+#[derive(Debug, Clone)]
+pub struct LatestGameSeat {
+    pub user_id: uuid::Uuid,
+    pub display_name: String,
+    pub avatar_id: Option<String>,
+    pub finish_rank: i32,
+    pub total_score: i32,
+    pub exact_bid_rounds: i32,
+}
+
+/// Home-screen snapshot: who played the last ranked game and how they finished.
+#[derive(Debug, Clone)]
+pub struct LatestGame {
+    pub game_id: uuid::Uuid,
+    pub finished_at: DateTime<Utc>,
+    pub table_size: i32,
+    pub rounds_played: i32,
+    pub seats: Vec<LatestGameSeat>,
 }
 
 /// Ranked-game totals from `user_game_results`. Open seats are not part of this.
@@ -205,8 +232,10 @@ pub struct MatchPulse {
     pub since: Option<DateTime<Utc>>,
     pub week_leader_name: Option<String>,
     pub week_leader_wins: i64,
+    pub week_leader_points: i64,
     pub last_week_leader_name: Option<String>,
     pub last_week_leader_wins: i64,
+    pub last_week_leader_points: i64,
 }
 
 #[derive(Debug, Clone)]

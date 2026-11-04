@@ -472,6 +472,22 @@ impl GameStore for PostgresStore {
             }
         }
 
+        if crate::fair_play::fair_play_enabled() && commit.game_result.is_some() {
+            sqlx::query("SAVEPOINT fair_play_roster")
+                .execute(&mut *tx)
+                .await?;
+            if let Err(error) = record_fair_play_roster(&mut tx, commit).await {
+                tracing::warn!(%error, "fair play roster skipped so the game commit can finish");
+                sqlx::query("ROLLBACK TO SAVEPOINT fair_play_roster")
+                    .execute(&mut *tx)
+                    .await?;
+            } else {
+                let _ = sqlx::query("RELEASE SAVEPOINT fair_play_roster")
+                    .execute(&mut *tx)
+                    .await;
+            }
+        }
+
         tx.commit().await?;
         Ok(())
     }
@@ -1063,16 +1079,32 @@ impl GameStore for PostgresStore {
     async fn load_leaderboard(&self, limit: i64) -> Result<Vec<LeaderboardRow>, PersistError> {
         let rows = sqlx::query(
             r#"
-            SELECT u.user_id, u.display_name, u.avatar_id,
-                   s.ranked_wins, s.ranked_games, s.ranked_points,
-                   s.ranked_rounds, s.ranked_exact
-            FROM user_stats s
-            JOIN users u ON u.user_id = s.user_id
-            WHERE s.ranked_games > 0
-            ORDER BY s.ranked_wins DESC,
-                     COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) DESC,
-                     COALESCE(s.ranked_exact::bigint * 1000000 / NULLIF(s.ranked_rounds, 0), 0) DESC,
-                     COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) DESC
+            SELECT user_id, display_name, avatar_id, games, gold, silver, bronze,
+                   exact, rounds, score_points, medal_points
+            FROM (
+                SELECT u.user_id, u.display_name, u.avatar_id,
+                       COUNT(*)::int AS games,
+                       COUNT(*) FILTER (WHERE r.finish_rank = 1)::int AS gold,
+                       COUNT(*) FILTER (WHERE r.finish_rank = 2)::int AS silver,
+                       COUNT(*) FILTER (WHERE r.finish_rank = 3)::int AS bronze,
+                       COALESCE(SUM(r.exact_bid_rounds), 0)::int AS exact,
+                       COALESCE(SUM(r.rounds_played), 0)::int AS rounds,
+                       COALESCE(SUM(r.total_score), 0)::bigint AS score_points,
+                       (COUNT(*) FILTER (WHERE r.finish_rank = 1)::bigint * 500
+                        + COUNT(*) FILTER (WHERE r.finish_rank = 2)::bigint * 100
+                        + COUNT(*) FILTER (WHERE r.finish_rank = 3)::bigint * 20) AS medal_points
+                FROM user_game_results r
+                JOIN users u ON u.user_id = r.user_id
+                WHERE r.counted
+                GROUP BY u.user_id, u.display_name, u.avatar_id
+            ) board
+            ORDER BY medal_points DESC,
+                     gold DESC,
+                     silver DESC,
+                     bronze DESC,
+                     COALESCE(gold::bigint * 1000000 / NULLIF(games, 0), 0) DESC,
+                     COALESCE(exact::bigint * 1000000 / NULLIF(rounds, 0), 0) DESC,
+                     display_name ASC
             LIMIT $1
             "#,
         )
@@ -1082,18 +1114,27 @@ impl GameStore for PostgresStore {
         Ok(rows
             .into_iter()
             .map(|row| {
-                let games: i32 = row.get("ranked_games");
-                let exact: i32 = row.get("ranked_exact");
-                let rounds: i32 = row.get("ranked_rounds");
-                let points: i64 = row.get("ranked_points");
+                let games: i32 = row.get("games");
+                let gold: i32 = row.get("gold");
+                let silver: i32 = row.get("silver");
+                let bronze: i32 = row.get("bronze");
+                let exact: i32 = row.get("exact");
+                let rounds: i32 = row.get("rounds");
+                let score_points: i64 = row.get("score_points");
                 LeaderboardRow {
                     user_id: row.get("user_id"),
                     display_name: row.get("display_name"),
                     avatar_id: row.get("avatar_id"),
-                    wins: row.get("ranked_wins"),
+                    wins: gold,
                     games,
                     exact_percent: crate::stats::exact_percent(exact, rounds),
-                    average_score: crate::stats::average_score(points, games),
+                    average_score: crate::stats::average_score(score_points, games),
+                    gold,
+                    silver,
+                    bronze,
+                    medal_points: row.get("medal_points"),
+                    exact,
+                    rounds,
                 }
             })
             .collect())
@@ -1129,53 +1170,65 @@ impl GameStore for PostgresStore {
             week_user AS (
                 SELECT user_id,
                        COUNT(DISTINCT game_id)::int AS games,
-                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS wins,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS gold,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 2)::int AS silver,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 3)::int AS bronze,
                        COALESCE(SUM(exact_bid_rounds), 0)::int AS exact,
-                       COALESCE(SUM(rounds_played), 0)::int AS rounds,
-                       COALESCE(SUM(total_score), 0)::bigint AS points
+                       COALESCE(SUM(rounds_played), 0)::int AS rounds
                 FROM counted
                 WHERE finished_at >= $2
                 GROUP BY user_id
             ),
             leader AS (
-                SELECT u.display_name, w.wins
+                SELECT u.display_name, w.gold,
+                       (w.gold::bigint * 500 + w.silver::bigint * 100 + w.bronze::bigint * 20) AS pts
                 FROM week_user w
                 JOIN users u ON u.user_id = w.user_id
-                WHERE w.wins > 0
-                ORDER BY w.wins DESC,
-                         COALESCE(w.wins::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
+                WHERE (w.gold::bigint * 500 + w.silver::bigint * 100 + w.bronze::bigint * 20) > 0
+                ORDER BY pts DESC,
+                         w.gold DESC,
+                         w.silver DESC,
+                         w.bronze DESC,
+                         COALESCE(w.gold::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
                          COALESCE(w.exact::bigint * 1000000 / NULLIF(w.rounds, 0), 0) DESC,
-                         COALESCE(w.points / NULLIF(w.games, 0), 0) DESC
+                         u.display_name ASC
                 LIMIT 1
             ),
             last_user AS (
                 SELECT user_id,
                        COUNT(DISTINCT game_id)::int AS games,
-                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS wins,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 1)::int AS gold,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 2)::int AS silver,
+                       COUNT(DISTINCT game_id) FILTER (WHERE finish_rank = 3)::int AS bronze,
                        COALESCE(SUM(exact_bid_rounds), 0)::int AS exact,
-                       COALESCE(SUM(rounds_played), 0)::int AS rounds,
-                       COALESCE(SUM(total_score), 0)::bigint AS points
+                       COALESCE(SUM(rounds_played), 0)::int AS rounds
                 FROM counted
                 WHERE finished_at >= $3 AND finished_at < $2
                 GROUP BY user_id
             ),
             last_leader AS (
-                SELECT u.display_name, w.wins
+                SELECT u.display_name, w.gold,
+                       (w.gold::bigint * 500 + w.silver::bigint * 100 + w.bronze::bigint * 20) AS pts
                 FROM last_user w
                 JOIN users u ON u.user_id = w.user_id
-                WHERE w.wins > 0
-                ORDER BY w.wins DESC,
-                         COALESCE(w.wins::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
+                WHERE (w.gold::bigint * 500 + w.silver::bigint * 100 + w.bronze::bigint * 20) > 0
+                ORDER BY pts DESC,
+                         w.gold DESC,
+                         w.silver DESC,
+                         w.bronze DESC,
+                         COALESCE(w.gold::bigint * 1000000 / NULLIF(w.games, 0), 0) DESC,
                          COALESCE(w.exact::bigint * 1000000 / NULLIF(w.rounds, 0), 0) DESC,
-                         COALESCE(w.points / NULLIF(w.games, 0), 0) DESC
+                         u.display_name ASC
                 LIMIT 1
             )
             SELECT b.games_all, b.games_today, b.games_week, b.games_last_week,
                    b.players_week, b.since,
                    l.display_name AS week_leader_name,
-                   l.wins AS week_leader_wins,
+                   l.gold AS week_leader_wins,
+                   l.pts AS week_leader_points,
                    ll.display_name AS last_week_leader_name,
-                   ll.wins AS last_week_leader_wins
+                   ll.gold AS last_week_leader_wins,
+                   ll.pts AS last_week_leader_points
             FROM bounds b
             LEFT JOIN leader l ON true
             LEFT JOIN last_leader ll ON true
@@ -1189,6 +1242,8 @@ impl GameStore for PostgresStore {
         tx.commit().await?;
         let wins: Option<i32> = row.get("week_leader_wins");
         let last_wins: Option<i32> = row.get("last_week_leader_wins");
+        let points: Option<i64> = row.get("week_leader_points");
+        let last_points: Option<i64> = row.get("last_week_leader_points");
         Ok(MatchPulse {
             games_all: row.get("games_all"),
             games_today: row.get("games_today"),
@@ -1198,9 +1253,64 @@ impl GameStore for PostgresStore {
             since: row.get("since"),
             week_leader_name: row.get("week_leader_name"),
             week_leader_wins: i64::from(wins.unwrap_or(0)),
+            week_leader_points: points.unwrap_or(0),
             last_week_leader_name: row.get("last_week_leader_name"),
             last_week_leader_wins: i64::from(last_wins.unwrap_or(0)),
+            last_week_leader_points: last_points.unwrap_or(0),
         })
+    }
+
+    async fn load_latest_game(&self) -> Result<Option<LatestGame>, PersistError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET LOCAL statement_timeout = '2s'")
+            .execute(&mut *tx)
+            .await?;
+        let rows = sqlx::query(
+            r#"
+            WITH latest AS (
+                SELECT game_id
+                FROM user_game_results
+                WHERE counted
+                ORDER BY finished_at DESC, game_id DESC
+                LIMIT 1
+            )
+            SELECT r.game_id, r.finished_at, r.table_size, r.rounds_played,
+                   r.user_id, r.finish_rank, r.total_score, r.exact_bid_rounds,
+                   u.display_name, u.avatar_id
+            FROM latest l
+            JOIN user_game_results r ON r.game_id = l.game_id AND r.counted
+            JOIN users u ON u.user_id = r.user_id
+            ORDER BY r.finish_rank ASC, r.total_score DESC, u.display_name ASC
+            "#,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        let Some(first) = rows.first() else {
+            return Ok(None);
+        };
+        let game_id: Uuid = first.get("game_id");
+        let finished_at = first.get("finished_at");
+        let table_size = i32::from(first.get::<i16, _>("table_size"));
+        let rounds_played = i32::from(first.get::<i16, _>("rounds_played"));
+        let seats = rows
+            .into_iter()
+            .map(|row| LatestGameSeat {
+                user_id: row.get("user_id"),
+                display_name: row.get("display_name"),
+                avatar_id: row.get("avatar_id"),
+                finish_rank: i32::from(row.get::<i16, _>("finish_rank")),
+                total_score: row.get("total_score"),
+                exact_bid_rounds: i32::from(row.get::<i16, _>("exact_bid_rounds")),
+            })
+            .collect();
+        Ok(Some(LatestGame {
+            game_id,
+            finished_at,
+            table_size,
+            rounds_played,
+            seats,
+        }))
     }
 
     async fn load_user_stats(&self, user_id: Uuid) -> Result<Option<UserStatsView>, PersistError> {
@@ -1225,10 +1335,10 @@ impl GameStore for PostgresStore {
             rounds,
             exact,
             ranked_games,
-            ranked_wins,
-            ranked_points,
-            ranked_rounds,
-            ranked_exact,
+            _ranked_wins,
+            _ranked_points,
+            _ranked_rounds,
+            _ranked_exact,
         ) = if let Some(row) = row {
             (
                 row.get::<i32, _>("games_played"),
@@ -1245,57 +1355,12 @@ impl GameStore for PostgresStore {
         } else {
             (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         };
-        let rank = if ranked_games == 0 {
-            None
-        } else {
-            let win_rate = if ranked_games == 0 {
-                0
-            } else {
-                i64::from(ranked_wins) * 1_000_000 / i64::from(ranked_games)
-            };
-            let strike = if ranked_rounds == 0 {
-                0
-            } else {
-                i64::from(ranked_exact) * 1_000_000 / i64::from(ranked_rounds)
-            };
-            let average = if ranked_games == 0 {
-                0
-            } else {
-                ranked_points / i64::from(ranked_games)
-            };
-            let better: i64 = sqlx::query_scalar(
-                r#"
-                SELECT COUNT(*) FROM user_stats s
-                WHERE s.ranked_games > 0
-                  AND s.user_id <> $1
-                  AND (
-                    s.ranked_wins > $2
-                    OR (
-                      s.ranked_wins = $2
-                      AND COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) > $3
-                    )
-                    OR (
-                      s.ranked_wins = $2
-                      AND COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) = $3
-                      AND COALESCE(s.ranked_exact::bigint * 1000000 / NULLIF(s.ranked_rounds, 0), 0) > $4
-                    )
-                    OR (
-                      s.ranked_wins = $2
-                      AND COALESCE(s.ranked_wins::bigint * 1000000 / NULLIF(s.ranked_games, 0), 0) = $3
-                      AND COALESCE(s.ranked_exact::bigint * 1000000 / NULLIF(s.ranked_rounds, 0), 0) = $4
-                      AND COALESCE(s.ranked_points / NULLIF(s.ranked_games, 0), 0) > $5
-                    )
-                  )
-                "#,
-            )
-            .bind(user_id)
-            .bind(ranked_wins)
-            .bind(win_rate)
-            .bind(strike)
-            .bind(average)
-            .fetch_one(&self.pool)
-            .await?;
-            Some(better as i32 + 1)
+        let rank = {
+            let board = self.load_leaderboard(0).await?;
+            board
+                .iter()
+                .position(|row| row.user_id == user_id)
+                .map(|index| index as i32 + 1)
         };
         Ok(Some(UserStatsView {
             user_id,
@@ -1309,6 +1374,232 @@ impl GameStore for PostgresStore {
             ranked_games,
             rank,
         }))
+    }
+
+    async fn write_fair_play_roster(
+        &self,
+        seats: &[crate::FairPlayRosterSeat],
+    ) -> Result<(), PersistError> {
+        let mut tx = self.pool.begin().await?;
+        for seat in seats {
+            sqlx::query(
+                r#"
+                INSERT INTO fair_play_rosters (
+                    game_id, user_id, player_id, display_name, avatar_id, finished_at
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (game_id, user_id) DO NOTHING
+                "#,
+            )
+            .bind(seat.game_id)
+            .bind(seat.user_id)
+            .bind(seat.player_id)
+            .bind(&seat.display_name)
+            .bind(&seat.avatar_id)
+            .bind(seat.finished_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn load_fair_play_roster(
+        &self,
+        game_id: Uuid,
+    ) -> Result<Vec<crate::FairPlayRosterSeat>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT game_id, user_id, player_id, display_name, avatar_id, finished_at
+            FROM fair_play_rosters
+            WHERE game_id = $1
+            ORDER BY display_name
+            "#,
+        )
+        .bind(game_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| crate::FairPlayRosterSeat {
+                game_id: row.get("game_id"),
+                user_id: row.get("user_id"),
+                player_id: row.get("player_id"),
+                display_name: row.get("display_name"),
+                avatar_id: row.get("avatar_id"),
+                finished_at: row.get("finished_at"),
+            })
+            .collect())
+    }
+
+    async fn fair_play_already_submitted(
+        &self,
+        game_id: Uuid,
+        voter_user_id: Uuid,
+    ) -> Result<bool, PersistError> {
+        let exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT voter_user_id FROM fair_play_submissions WHERE game_id = $1 AND voter_user_id = $2",
+        )
+        .bind(game_id)
+        .bind(voter_user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(exists.is_some())
+    }
+
+    async fn submit_fair_play(
+        &self,
+        game_id: Uuid,
+        voter_user_id: Uuid,
+        ratings: &[crate::FairPlayRating],
+    ) -> Result<Vec<crate::FairPlayGameTotal>, PersistError> {
+        let mut tx = self.pool.begin().await?;
+        let inserted = sqlx::query(
+            r#"
+            INSERT INTO fair_play_submissions (game_id, voter_user_id)
+            VALUES ($1, $2)
+            ON CONFLICT (game_id, voter_user_id) DO NOTHING
+            RETURNING voter_user_id
+            "#,
+        )
+        .bind(game_id)
+        .bind(voter_user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if inserted.is_none() {
+            return Err(PersistError::Conflict("already submitted".into()));
+        }
+        let mut rated_targets = std::collections::HashSet::new();
+        for rating in ratings {
+            sqlx::query(
+                r#"
+                INSERT INTO fair_play_ballots (
+                    game_id, voter_user_id, target_user_id, points
+                ) VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(game_id)
+            .bind(voter_user_id)
+            .bind(rating.target_user_id)
+            .bind(rating.points)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO fair_play_stats (
+                    user_id, points_received, ratings_received, games_rated, updated_at
+                ) VALUES ($1, $2, 1, 0, now())
+                ON CONFLICT (user_id) DO UPDATE SET
+                    points_received = fair_play_stats.points_received + EXCLUDED.points_received,
+                    ratings_received = fair_play_stats.ratings_received + 1,
+                    updated_at = now()
+                "#,
+            )
+            .bind(rating.target_user_id)
+            .bind(i32::from(rating.points))
+            .execute(&mut *tx)
+            .await?;
+            rated_targets.insert(rating.target_user_id);
+        }
+        for target in rated_targets {
+            // Count this game once per target when they receive their first ballot in it.
+            let first_for_game: Option<i16> = sqlx::query_scalar(
+                r#"
+                SELECT points FROM fair_play_ballots
+                WHERE game_id = $1 AND target_user_id = $2
+                ORDER BY created_at ASC
+                LIMIT 1
+                "#,
+            )
+            .bind(game_id)
+            .bind(target)
+            .fetch_optional(&mut *tx)
+            .await?;
+            // games_rated: increment only when this is the target's first rating in this game
+            // (ballot count for target in this game == 1 after our insert).
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM fair_play_ballots WHERE game_id = $1 AND target_user_id = $2",
+            )
+            .bind(game_id)
+            .bind(target)
+            .fetch_one(&mut *tx)
+            .await?;
+            if count == 1 {
+                let _ = first_for_game;
+                sqlx::query(
+                    "UPDATE fair_play_stats SET games_rated = games_rated + 1, updated_at = now() WHERE user_id = $1",
+                )
+                .bind(target)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        tx.commit().await?;
+        self.load_fair_play_game_totals(game_id).await
+    }
+
+    async fn load_fair_play_game_totals(
+        &self,
+        game_id: Uuid,
+    ) -> Result<Vec<crate::FairPlayGameTotal>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT r.user_id, r.display_name, r.avatar_id,
+                   COALESCE(SUM(b.points), 0)::int AS points,
+                   COUNT(b.points)::int AS ratings
+            FROM fair_play_rosters r
+            LEFT JOIN fair_play_ballots b
+              ON b.game_id = r.game_id AND b.target_user_id = r.user_id
+            WHERE r.game_id = $1
+            GROUP BY r.user_id, r.display_name, r.avatar_id
+            ORDER BY points DESC, ratings DESC, r.display_name
+            "#,
+        )
+        .bind(game_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| crate::FairPlayGameTotal {
+                user_id: row.get("user_id"),
+                display_name: row.get("display_name"),
+                avatar_id: row.get("avatar_id"),
+                points: row.get("points"),
+                ratings: row.get("ratings"),
+            })
+            .collect())
+    }
+
+    async fn load_fair_play_leaderboard(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<crate::FairPlayLeaderboardRow>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT u.user_id, u.display_name, u.avatar_id,
+                   s.points_received, s.ratings_received, s.games_rated
+            FROM fair_play_stats s
+            JOIN users u ON u.user_id = s.user_id
+            WHERE s.ratings_received > 0
+            ORDER BY COALESCE(s.points_received::bigint * 1000000 / NULLIF(s.ratings_received, 0), 0) DESC,
+                     s.games_rated DESC,
+                     s.ratings_received DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(if limit > 0 { limit } else { i64::MAX })
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| crate::FairPlayLeaderboardRow {
+                user_id: row.get("user_id"),
+                display_name: row.get("display_name"),
+                avatar_id: row.get("avatar_id"),
+                points_received: row.get("points_received"),
+                ratings_received: row.get("ratings_received"),
+                games_rated: row.get("games_rated"),
+            })
+            .collect())
     }
 }
 
@@ -1436,6 +1727,47 @@ async fn record_user_stats(
         .bind(seat.exact_bid_rounds)
         .bind(ranked_rounds)
         .bind(ranked_exact)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn record_fair_play_roster(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    commit: &CommandCommit,
+) -> Result<(), PersistError> {
+    use std::collections::HashMap;
+
+    let seats = sqlx::query(
+        "SELECT player_id, user_id FROM game_players WHERE game_id = $1 AND user_id IS NOT NULL",
+    )
+    .bind(commit.game_id.0)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut owners: HashMap<Uuid, Uuid> = HashMap::new();
+    for seat in seats {
+        owners.insert(seat.get("player_id"), seat.get("user_id"));
+    }
+    let finished_at = Utc::now();
+    for player in &commit.state.players {
+        let Some(user_id) = owners.get(&player.id.0).copied() else {
+            continue;
+        };
+        sqlx::query(
+            r#"
+            INSERT INTO fair_play_rosters (
+                game_id, user_id, player_id, display_name, avatar_id, finished_at
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (game_id, user_id) DO NOTHING
+            "#,
+        )
+        .bind(commit.game_id.0)
+        .bind(user_id)
+        .bind(player.id.0)
+        .bind(&player.nickname)
+        .bind(&player.avatar_id)
+        .bind(finished_at)
         .execute(&mut **tx)
         .await?;
     }
