@@ -161,6 +161,7 @@ class _RowSeat {
     required this.name,
     required this.rank,
     this.avatarId,
+    this.photoUrl,
     required this.score,
     required this.signedIn,
   });
@@ -168,6 +169,7 @@ class _RowSeat {
   final String name;
   final int rank;
   final String? avatarId;
+  final String? photoUrl;
   final int? score;
   final bool signedIn;
 
@@ -178,6 +180,7 @@ class _RowSeat {
       name: seat.displayName,
       rank: seat.finishRank,
       avatarId: seat.avatarId,
+      photoUrl: seat.photoUrl,
       score: seat.totalScore,
       signedIn: true,
     );
@@ -216,6 +219,7 @@ class _WinnerRow extends StatelessWidget {
           const SizedBox(width: 10),
           PlayerAvatar(
             avatarId: first.avatarId,
+            photoUrl: first.photoUrl,
             nickname: first.name,
             radius: 18,
             highlight: true,
@@ -311,6 +315,7 @@ class _RunnerLine extends StatelessWidget {
           const SizedBox(width: 8),
           PlayerAvatar(
             avatarId: seat.avatarId,
+            photoUrl: seat.photoUrl,
             nickname: seat.name,
             radius: 13,
             signedIn: seat.signedIn,

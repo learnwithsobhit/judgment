@@ -8,6 +8,7 @@ fn user(id: Uuid, name: &str) -> StoredUser {
         user_id: id,
         display_name: name.into(),
         avatar_id: Some("face_01".into()),
+        photo_url: None,
         legal_version: Some("2026-08-03".into()),
         created_at: now,
         updated_at: now,

@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../util/avatar_pack.dart';
+import '../util/photo_url.dart';
+
+/// Tests replace NetworkImage so widget tests never hit the network.
+@visibleForTesting
+ImageProvider Function(String url)? debugProfilePhotoProvider;
 
 /// Built-in pack avatar with optional cheer / flash scale bounce.
 class PlayerAvatar extends StatefulWidget {
@@ -11,6 +16,12 @@ class PlayerAvatar extends StatefulWidget {
   final bool muted;
   final String? flashMood;
   final VoidCallback? onLongPress;
+
+  /// Allowlisted Google/Telegram portrait. Painted only when [avatarId] is profile.
+  final String? photoUrl;
+
+  /// True after the profile photo paints; false if it errors. Pack faces skip this.
+  final ValueChanged<bool>? onPhotoResolved;
 
   /// 1, 2, or 3 on the overall board. Anyone else has no cap.
   final int? boardRank;
@@ -27,6 +38,8 @@ class PlayerAvatar extends StatefulWidget {
     this.muted = false,
     this.flashMood,
     this.onLongPress,
+    this.photoUrl,
+    this.onPhotoResolved,
     this.boardRank,
     this.signedIn = false,
   });
@@ -83,6 +96,15 @@ class _PlayerAvatarState extends State<PlayerAvatar>
     final letter = widget.nickname.isNotEmpty ? widget.nickname[0] : '?';
     final glyph = avatarGlyph(widget.avatarId, fallbackLetter: letter);
     final asset = avatarAssetPath(widget.avatarId);
+    final photoUrl = displayPhotoUrl(widget.photoUrl)?.trim() ?? '';
+    final showPhoto =
+        isProfileAvatar(widget.avatarId) &&
+        photoUrl.isNotEmpty &&
+        !widget.muted;
+    final letterStyle = TextStyle(fontSize: widget.radius * 0.95);
+    final fallback = widget.muted
+        ? Icon(Icons.wifi_off, size: widget.radius * 0.9, color: Colors.white54)
+        : Text(glyph, style: letterStyle);
     final portrait = AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.all(3),
@@ -104,14 +126,16 @@ class _PlayerAvatarState extends State<PlayerAvatar>
             ? AssetImage(asset)
             : null,
         child: widget.muted
-            ? Icon(
-                Icons.wifi_off,
-                size: widget.radius * 0.9,
-                color: Colors.white54,
+            ? fallback
+            : asset != null
+            ? null
+            : showPhoto
+            ? _ProfilePhoto(
+                url: photoUrl,
+                fallback: fallback,
+                onResolved: widget.onPhotoResolved,
               )
-            : asset == null
-            ? Text(glyph, style: TextStyle(fontSize: widget.radius * 0.95))
-            : null,
+            : fallback,
       ),
     );
     final rank = _capRank(widget.boardRank);
@@ -167,6 +191,77 @@ class _PlayerAvatarState extends State<PlayerAvatar>
     );
     if (widget.onLongPress == null) return child;
     return GestureDetector(onLongPress: widget.onLongPress, child: child);
+  }
+}
+
+class _ProfilePhoto extends StatefulWidget {
+  const _ProfilePhoto({
+    required this.url,
+    required this.fallback,
+    this.onResolved,
+  });
+
+  final String url;
+  final Widget fallback;
+  final ValueChanged<bool>? onResolved;
+
+  @override
+  State<_ProfilePhoto> createState() => _ProfilePhotoState();
+}
+
+class _ProfilePhotoState extends State<_ProfilePhoto> {
+  bool _notified = false;
+
+  @override
+  void didUpdateWidget(covariant _ProfilePhoto oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _notified = false;
+    }
+  }
+
+  void _notify(bool ok) {
+    if (_notified) return;
+    _notified = true;
+    final callback = widget.onResolved;
+    if (callback == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) callback(ok);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final override = debugProfilePhotoProvider;
+    final provider = override != null
+        ? override(widget.url)
+        : NetworkImage(widget.url);
+    return ClipOval(
+      child: SizedBox.expand(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(child: widget.fallback),
+            Image(
+              image: provider,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                if (wasSynchronouslyLoaded || frame != null) {
+                  _notify(true);
+                  return child;
+                }
+                return const SizedBox.shrink();
+              },
+              errorBuilder: (context, error, stack) {
+                _notify(false);
+                return const SizedBox.shrink();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -125,3 +125,13 @@ String avatarGlyph(String? avatarId, {String fallbackLetter = '?'}) {
 
 /// Default selection for new guests (first illustrated face).
 const defaultAvatarId = 'face_01';
+
+/// Signed-in portrait from Google or Telegram. Not a pack asset.
+const profileAvatarId = 'profile';
+
+bool isProfileAvatar(String? avatarId) => avatarId == profileAvatarId;
+
+/// Pack faces plus the profile sentinel that landing must keep after sign-in.
+bool isKeptAvatar(String? avatarId) =>
+    avatarId != null &&
+    (isProfileAvatar(avatarId) || avatarIds.contains(avatarId));

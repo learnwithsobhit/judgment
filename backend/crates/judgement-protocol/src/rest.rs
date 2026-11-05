@@ -186,6 +186,8 @@ pub struct SeatView {
     pub is_host: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     /// True while this in-game seat is vacant and claimable (omit/false in lobby).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub vacant: bool,
@@ -483,6 +485,9 @@ pub struct FirebaseAuthRequest {
     pub display_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legal_version: Option<String>,
+    /// Google `photoURL` only. Ignored for email/password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
 }
 
 /// Telegram Login Widget `id_token`. Not a Firebase token.
@@ -501,6 +506,8 @@ pub struct PublicUser {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -527,6 +534,8 @@ pub struct MeResponse {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     pub session_id: SessionId,
     pub nickname: String,
 }
@@ -536,6 +545,8 @@ pub struct MeStatsResponse {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     pub games_played: i32,
     pub wins: i32,
     pub losses: i32,
@@ -551,6 +562,8 @@ pub struct LeaderboardEntry {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     pub wins: i32,
     pub games: i32,
     pub exact_percent: i32,
@@ -601,6 +614,8 @@ pub struct LatestGameSeat {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     pub finish_rank: i32,
     pub total_score: i32,
     pub exact_bid_rounds: i32,
@@ -632,6 +647,8 @@ pub struct ActiveGameSeat {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     pub total_score: i32,
 }
 
@@ -658,6 +675,8 @@ pub struct FairPlayRatee {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -666,6 +685,8 @@ pub struct FairPlayTotal {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     pub points: i32,
     pub ratings: i32,
 }
@@ -697,6 +718,8 @@ pub struct FairPlayLeaderboardEntry {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     pub points_received: i32,
     pub ratings_received: i32,
     pub games_rated: i32,

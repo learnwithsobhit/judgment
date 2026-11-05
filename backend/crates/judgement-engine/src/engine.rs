@@ -160,6 +160,7 @@ impl GameEngine {
         player_id: PlayerId,
         nickname: String,
         avatar_id: Option<String>,
+        photo_url: Option<String>,
     ) -> Result<(), GameError> {
         let player = self
             .state
@@ -169,6 +170,7 @@ impl GameEngine {
             .ok_or(GameError::PlayerNotInGame)?;
         player.nickname = nickname;
         player.avatar_id = avatar_id;
+        player.photo_url = photo_url;
         player.is_bot = false;
         player.connection_status = judgement_domain::ConnectionStatus::Connected;
         self.state.version += 1;

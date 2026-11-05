@@ -21,8 +21,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::audio::{sound_ttl_ms, validate_voice_note, AUDIO_COOLDOWN_MS};
 use crate::emotes::{
-    is_allowed_avatar, is_allowed_emoji, is_allowed_mood, resolve_emote_text, MAX_EMOTE_TEXT_LEN,
-    REACTION_COOLDOWN_MS,
+    is_allowed_emoji, is_allowed_mood, resolve_emote_text, MAX_EMOTE_TEXT_LEN, REACTION_COOLDOWN_MS,
 };
 use crate::metrics::Metrics;
 use crate::persist::command_commit_from;
@@ -85,6 +84,7 @@ pub enum ActorMessage {
         preferred: Option<PlayerId>,
         nickname: String,
         avatar_id: Option<String>,
+        photo_url: Option<String>,
         /// Account of the person taking the seat. None for a guest.
         user_id: Option<uuid::Uuid>,
         reply: oneshot::Sender<Result<PlayerId, String>>,
@@ -320,10 +320,12 @@ impl GameActor {
                     preferred,
                     nickname,
                     avatar_id,
+                    photo_url,
                     user_id,
                     reply,
                 } => {
-                    let result = self.handle_claim_vacant(preferred, nickname, avatar_id, user_id);
+                    let result = self
+                        .handle_claim_vacant(preferred, nickname, avatar_id, photo_url, user_id);
                     let _ = reply.send(result);
                 }
                 ActorMessage::EndGame {
@@ -638,6 +640,7 @@ impl GameActor {
         preferred: Option<PlayerId>,
         nickname: String,
         avatar_id: Option<String>,
+        photo_url: Option<String>,
         user_id: Option<uuid::Uuid>,
     ) -> Result<PlayerId, String> {
         if self.ended || self.engine.is_finished() {
@@ -672,7 +675,7 @@ impl GameActor {
             }
         };
         self.engine
-            .set_seat_identity(player_id, nickname.clone(), avatar_id)
+            .set_seat_identity(player_id, nickname.clone(), avatar_id, photo_url)
             .map_err(|e| e.to_string())?;
         self.seat_users.insert(player_id, user_id);
         self.vacancy_ids.remove(&player_id);
@@ -925,7 +928,15 @@ impl GameActor {
 
         if let ClientCommand::SetAvatar { avatar_id } = &envelope.action {
             let avatar_id = avatar_id.clone();
-            if !is_allowed_avatar(&avatar_id) {
+            let has_photo = self
+                .engine
+                .state()
+                .players
+                .iter()
+                .find(|p| p.id == player_id)
+                .and_then(|p| p.photo_url.as_ref())
+                .is_some();
+            if !crate::emotes::avatar_allowed_for_user(&avatar_id, has_photo) {
                 self.reject(
                     player_id,
                     Some(action_id),

@@ -12,6 +12,7 @@ class RoundScoreColumn {
   final String playerId;
   final String displayName;
   final String? avatarId;
+  final String? photoUrl;
   final int? boardRank;
   final bool highlightHeader;
   final int? total;
@@ -20,6 +21,7 @@ class RoundScoreColumn {
     required this.playerId,
     required this.displayName,
     this.avatarId,
+    this.photoUrl,
     this.boardRank,
     this.highlightHeader = false,
     this.total,
@@ -344,6 +346,7 @@ class _HeaderCell extends StatelessWidget {
           children: [
             PlayerAvatar(
               avatarId: column.avatarId,
+              photoUrl: column.photoUrl,
               nickname: column.displayName,
               radius: 10,
               highlight: column.highlightHeader,

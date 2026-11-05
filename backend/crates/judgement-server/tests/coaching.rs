@@ -32,6 +32,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
                 },
                 created_at: Utc::now(),
                 avatar_id: None,
+                photo_url: None,
                 user_id: None,
             })
             .await
@@ -79,6 +80,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
                     ready: true,
                     joined_at: Utc::now(),
                     avatar_id: None,
+                    photo_url: None,
                 })
                 .collect(),
             created_at: Utc::now(),
@@ -208,6 +210,7 @@ async fn spawn(store: Arc<MemoryStore>) -> (String, Arc<AppState>) {
                 nickname: session.nickname.clone(),
                 token: session.token.clone(),
                 avatar_id: session.avatar_id.clone(),
+                photo_url: session.photo_url.clone(),
                 user_id: None,
             },
         );

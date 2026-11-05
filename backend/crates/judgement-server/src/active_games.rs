@@ -32,6 +32,7 @@ pub fn board_from_state(state: &InternalGameState, now: DateTime<Utc>) -> Active
                 player.nickname.clone()
             },
             avatar_id: player.avatar_id.clone(),
+            photo_url: player.photo_url.clone(),
             total_score: state.score_table.total_score(player.id),
         })
         .collect();

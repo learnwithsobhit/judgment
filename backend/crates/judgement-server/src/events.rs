@@ -711,6 +711,7 @@ pub async fn open_lobby(
             ready: false,
             joined_at: Utc::now(),
             avatar_id: session.avatar_id.clone(),
+            photo_url: session.photo_url.clone(),
         }],
         status: RoomStatus::Lobby,
         max_players,

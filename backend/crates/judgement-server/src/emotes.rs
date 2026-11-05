@@ -33,6 +33,62 @@ pub fn is_allowed_avatar(id: &str) -> bool {
     ALLOWED_AVATARS.contains(&id)
 }
 
+/// Sentinel `avatar_id` for a signed-in account that chose its stored photo.
+pub const PROFILE_AVATAR: &str = "profile";
+const MAX_PHOTO_URL_LEN: usize = 1024;
+
+pub fn is_profile_avatar(id: &str) -> bool {
+    id == PROFILE_AVATAR
+}
+
+/// Pack ids always; `profile` only when this account has a stored photo.
+pub fn avatar_allowed_for_user(id: &str, has_photo: bool) -> bool {
+    if is_profile_avatar(id) {
+        has_photo
+    } else {
+        is_allowed_avatar(id)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PhotoSource {
+    Google,
+    Telegram,
+}
+
+/// Keep only https URLs on the provider's own hosts. Rejected URLs become None.
+pub fn sanitize_photo_url(source: PhotoSource, raw: Option<&str>) -> Option<String> {
+    let url = raw.map(str::trim).filter(|value| !value.is_empty())?;
+    if url.len() > MAX_PHOTO_URL_LEN {
+        return None;
+    }
+    let rest = url.strip_prefix("https://")?;
+    let host = rest.split(['/', '?', '#']).next()?.to_ascii_lowercase();
+    if host.is_empty() || host.contains('@') {
+        return None;
+    }
+    let allowed = match source {
+        PhotoSource::Google => {
+            host == "googleusercontent.com" || host.ends_with(".googleusercontent.com")
+        }
+        PhotoSource::Telegram => is_telegram_photo_host(&host),
+    };
+    allowed.then(|| url.to_string())
+}
+
+/// Telegram profile CDN hosts. Used for stored URLs and the image proxy.
+pub fn is_telegram_photo_host(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    host == "t.me"
+        || host.ends_with(".t.me")
+        || host == "telesco.pe"
+        || host.ends_with(".telesco.pe")
+        || host == "telegram.org"
+        || host.ends_with(".telegram.org")
+        || host == "telegram-cdn.org"
+        || host.ends_with(".telegram-cdn.org")
+}
+
 pub fn is_allowed_emoji(emoji: &str) -> bool {
     ALLOWED_EMOJIS.contains(&emoji)
 }
@@ -318,6 +374,52 @@ mod tests {
         assert!(is_allowed_avatar("face_40"));
         assert!(!is_allowed_avatar("photo_upload"));
         assert!(!is_allowed_avatar("face_99"));
+        assert!(!is_allowed_avatar("profile"));
+        assert!(avatar_allowed_for_user("profile", true));
+        assert!(!avatar_allowed_for_user("profile", false));
+        assert!(avatar_allowed_for_user("face_01", false));
+    }
+
+    #[test]
+    fn google_and_telegram_photos_are_host_allowlisted() {
+        assert_eq!(
+            sanitize_photo_url(
+                PhotoSource::Google,
+                Some("https://lh3.googleusercontent.com/a/abc")
+            )
+            .as_deref(),
+            Some("https://lh3.googleusercontent.com/a/abc")
+        );
+        assert!(
+            sanitize_photo_url(PhotoSource::Google, Some("https://evil.example/x.png")).is_none()
+        );
+        assert!(sanitize_photo_url(
+            PhotoSource::Google,
+            Some("http://lh3.googleusercontent.com/a/abc")
+        )
+        .is_none());
+        assert!(sanitize_photo_url(
+            PhotoSource::Telegram,
+            Some("https://t.me/i/userpic/320/abc.jpg")
+        )
+        .is_some());
+        assert!(sanitize_photo_url(
+            PhotoSource::Telegram,
+            Some("https://cdn1.telesco.pe/file/abc")
+        )
+        .is_some());
+        assert!(
+            sanitize_photo_url(PhotoSource::Telegram, Some("https://cdn.example/pic.jpg"))
+                .is_none()
+        );
+        assert!(sanitize_photo_url(
+            PhotoSource::Telegram,
+            Some("https://cdn4.telesco.pe/file/abc")
+        )
+        .is_some());
+        assert!(is_telegram_photo_host("cdn4.telesco.pe"));
+        assert!(is_telegram_photo_host("telegram.org"));
+        assert!(!is_telegram_photo_host("evil.example"));
     }
 
     #[test]

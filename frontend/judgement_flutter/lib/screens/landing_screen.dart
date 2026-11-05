@@ -156,10 +156,22 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
         }
       }
       final avatar = account.avatarId;
-      if (avatar != null && avatarIds.contains(avatar)) {
-        _selectedAvatarId = avatar;
+      if (isKeptAvatar(avatar)) {
+        _selectedAvatarId = avatar!;
       }
     });
+  }
+
+  Future<void> _pickAvatar(String id) async {
+    setState(() => _selectedAvatarId = id);
+    final account = AccountSession.instance;
+    final token = account.token;
+    if (!account.isSignedIn || token == null || token.isEmpty) return;
+    try {
+      final api = ApiClient()..token = token;
+      await api.setAvatar(id);
+      account.rememberAvatar(id);
+    } catch (_) {}
   }
 
   // Room options (create mode, ADR 0003).
@@ -786,18 +798,16 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                           onSubmitted: (_) => _submit(),
                         ),
                         const SizedBox(height: 16),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Your avatar',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
                         AvatarPicker(
                           selectedId: _selectedAvatarId,
-                          onSelected: (id) =>
-                              setState(() => _selectedAvatarId = id),
+                          photoUrl: AccountSession.instance.photoUrl,
+                          nickname:
+                              AccountSession.instance.displayName ?? 'Player',
+                          autoSelectProfile:
+                              AccountSession.instance.isSignedIn &&
+                              (AccountSession.instance.avatarId == null ||
+                                  AccountSession.instance.avatarId!.isEmpty),
+                          onSelected: _pickAvatar,
                         ),
                         if (_joining && !_fromLink) ...[
                           const SizedBox(height: 12),
@@ -859,6 +869,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                                 child: ActionChip(
                                   avatar: PlayerAvatar(
                                     avatarId: account.avatarId,
+                                    photoUrl: account.photoUrl,
                                     nickname: account.displayName ?? 'Player',
                                     radius: 12,
                                   ),

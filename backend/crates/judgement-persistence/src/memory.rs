@@ -510,6 +510,7 @@ impl GameStore for MemoryStore {
             user_id,
             display_name: user.display_name.clone(),
             avatar_id: user.avatar_id.clone(),
+            photo_url: user.photo_url.clone(),
             games_played: row.games_played,
             wins: row.wins,
             lifetime_points: row.lifetime_points,
@@ -554,6 +555,7 @@ impl GameStore for MemoryStore {
                         .map(|u| u.display_name.clone())
                         .unwrap_or_else(|| "Player".into()),
                     avatar_id: user.and_then(|u| u.avatar_id.clone()),
+                    photo_url: user.and_then(|u| u.photo_url.clone()),
                     finish_rank: finish.finish_rank,
                     total_score: finish.total_score,
                     exact_bid_rounds: finish.exact_bid_rounds,
@@ -672,6 +674,7 @@ impl GameStore for MemoryStore {
                             .map(|u| u.display_name.clone())
                             .unwrap_or_else(|| "Player".into()),
                         avatar_id: user.and_then(|u| u.avatar_id.clone()),
+                        photo_url: user.and_then(|u| u.photo_url.clone()),
                         points_received: row.points_received,
                         ratings_received: row.ratings_received,
                         games_rated: row.games_rated,
@@ -707,6 +710,7 @@ fn game_totals_locked(inner: &MemoryInner, game_id: Uuid) -> Vec<FairPlayGameTot
             user_id: seat.user_id,
             display_name: seat.display_name.clone(),
             avatar_id: seat.avatar_id.clone(),
+            photo_url: seat.photo_url.clone(),
             points,
             ratings,
         });
@@ -737,12 +741,19 @@ fn record_fair_play_roster_memory(
             .iter()
             .find(|p| p.id == player.player_id)
             .and_then(|p| p.avatar_id.clone());
+        let photo_url = commit
+            .state
+            .players
+            .iter()
+            .find(|p| p.id == player.player_id)
+            .and_then(|p| p.photo_url.clone());
         seats.push(FairPlayRosterSeat {
             game_id: commit.game_id.0,
             user_id,
             player_id: player.player_id.0,
             display_name: player.nickname.clone(),
             avatar_id,
+            photo_url,
             finished_at,
         });
     }
@@ -766,16 +777,20 @@ fn memory_board(inner: &MemoryInner, limit: i64) -> Vec<LeaderboardRow> {
         .into_iter()
         .filter(|(user_id, _)| inner.users.contains_key(user_id))
         .map(|(user_id, rec)| {
-            let avatar_id = inner.users.get(&user_id).and_then(|u| u.avatar_id.clone());
-            (user_id, avatar_id, rec)
+            let user = inner.users.get(&user_id);
+            let avatar_id = user.and_then(|u| u.avatar_id.clone());
+            let photo_url = user.and_then(|u| u.photo_url.clone());
+            (user_id, avatar_id, photo_url, rec)
         })
         .collect();
-    rows.sort_by(|a, b| b.2.key().cmp(&a.2.key()));
+    rows.sort_by(|a, b| b.3.key().cmp(&a.3.key()));
     if limit > 0 {
         rows.truncate(limit as usize);
     }
     rows.into_iter()
-        .map(|(user_id, avatar_id, rec)| to_leaderboard_row(user_id, avatar_id, &rec))
+        .map(|(user_id, avatar_id, photo_url, rec)| {
+            to_leaderboard_row(user_id, avatar_id, photo_url, &rec)
+        })
         .collect()
 }
 

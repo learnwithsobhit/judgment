@@ -27,10 +27,11 @@ Future<void> signInWithGoogle(ApiClient api) async {
     return;
   }
   await google_auth.loadLibrary();
-  final idToken = await google_auth.fetchGoogleIdToken();
+  final google = await google_auth.fetchGoogleIdToken();
   final session = await api.authFirebase(
-    idToken: idToken,
+    idToken: google.idToken,
     legalVersion: kLegalAgreementVersion,
+    photoUrl: google.photoUrl,
   );
   await AccountSession.instance.apply(session);
 }

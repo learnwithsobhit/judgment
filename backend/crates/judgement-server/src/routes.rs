@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::emotes::is_allowed_avatar;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
@@ -65,7 +64,7 @@ pub async fn set_avatar(
     Json(body): Json<SetAvatarRequest>,
 ) -> Result<Json<SetAvatarResponse>, ApiError> {
     let session = state.authenticate(&headers)?;
-    if !is_allowed_avatar(&body.avatar_id) {
+    if !crate::emotes::avatar_allowed_for_user(&body.avatar_id, session.photo_url.is_some()) {
         return Err(ApiError::BadRequest("unknown avatar_id".into()));
     }
     let avatar_id = state
@@ -192,6 +191,7 @@ pub async fn create_room(
                 ready: false,
                 joined_at: Utc::now(),
                 avatar_id: session.avatar_id.clone(),
+                photo_url: session.photo_url.clone(),
             }],
             None => Vec::new(),
         },
@@ -367,6 +367,7 @@ pub async fn join_room(
             ready: false,
             joined_at: Utc::now(),
             avatar_id: session.avatar_id.clone(),
+            photo_url: session.photo_url.clone(),
         });
         // Setup rooms keep the organizer as host_session until someone sits.
         // The first seated player becomes host; later joins do not take it.
@@ -435,6 +436,7 @@ async fn claim_seat_inner(
             preferred: req.player_id,
             nickname: session.nickname.clone(),
             avatar_id: session.avatar_id.clone(),
+            photo_url: session.photo_url.clone(),
             user_id: session.user_id,
             reply: reply_tx,
         })
@@ -460,6 +462,7 @@ async fn claim_seat_inner(
             seat.session_id = session.id;
             seat.nickname = session.nickname.clone();
             seat.avatar_id = session.avatar_id.clone();
+            seat.photo_url = session.photo_url.clone();
         } else {
             return Err(ApiError::Conflict("vacant seat missing from room".into()));
         }
@@ -968,6 +971,9 @@ async fn start_game_inner(
                 let mut p = PlayerState::human(s.player_id, s.nickname.clone(), s.seat);
                 if let Some(avatar) = &s.avatar_id {
                     p = p.with_avatar(avatar.clone());
+                }
+                if let Some(photo) = &s.photo_url {
+                    p = p.with_photo(photo.clone());
                 }
                 p
             })

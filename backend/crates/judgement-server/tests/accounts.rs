@@ -26,6 +26,8 @@ struct DevClaims {
     email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     firebase: Option<DevFirebase>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    picture: Option<String>,
 }
 
 fn dev_token(secret: &str, subject: &str, name: &str) -> String {
@@ -55,6 +57,7 @@ fn provider_token(
             firebase: provider.map(|provider| DevFirebase {
                 sign_in_provider: provider.into(),
             }),
+            picture: None,
         },
         &EncodingKey::from_secret(secret.as_bytes()),
     )
@@ -76,6 +79,7 @@ fn telegram_token(secret: &str, subject: &str, name: &str) -> String {
             name: name.into(),
             email: None,
             firebase: None,
+            picture: None,
         },
         &EncodingKey::from_secret(secret.as_bytes()),
     )
@@ -422,6 +426,7 @@ async fn leaderboard_includes_the_latest_counted_game() {
                 user_id: id,
                 display_name: name.into(),
                 avatar_id: Some("face_01".into()),
+                photo_url: None,
                 legal_version: Some("2026-08-03".into()),
                 created_at: now,
                 updated_at: now,
@@ -478,4 +483,248 @@ async fn leaderboard_includes_the_latest_counted_game() {
     assert_eq!(seats[0]["total_score"], 142);
     assert_eq!(seats[1]["display_name"], "Ankit");
     assert_eq!(seats[1]["finish_rank"], 2);
+}
+
+fn telegram_token_with_picture(secret: &str, subject: &str, name: &str, picture: &str) -> String {
+    let exp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as usize
+        + 3600;
+    encode(
+        &Header::default(),
+        &DevClaims {
+            sub: subject.into(),
+            iss: "judgement-dev-telegram".into(),
+            exp,
+            name: name.into(),
+            email: None,
+            firebase: None,
+            picture: Some(picture.into()),
+        },
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn google_photo_is_stored_without_changing_an_existing_face() {
+    let secret = "test-firebase-dev-secret";
+    std::env::set_var("JUDGEMENT_FIREBASE_DEV_SECRET", secret);
+    let store = Arc::new(MemoryStore::new());
+    let base = serve_store(store.clone()).await;
+    let client = reqwest::Client::new();
+    let photo = "https://lh3.googleusercontent.com/a/test-photo";
+
+    let first: Value = client
+        .post(format!("{base}/api/v1/auth/firebase"))
+        .json(&serde_json::json!({
+            "id_token": provider_token(secret, "google-photo-ada", "Ada", Some("google.com"), true),
+            "photo_url": photo,
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(first["user"]["photo_url"], photo);
+    assert!(first["user"]["avatar_id"].is_null());
+
+    let token = first["token"].as_str().unwrap();
+    client
+        .post(format!("{base}/api/v1/me/avatar"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "avatar_id": "face_07" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let again: Value = client
+        .post(format!("{base}/api/v1/auth/firebase"))
+        .json(&serde_json::json!({
+            "id_token": provider_token(secret, "google-photo-ada", "Ada", Some("google.com"), true),
+            "photo_url": "https://lh3.googleusercontent.com/a/other",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(again["user"]["avatar_id"], "face_07");
+    assert_eq!(
+        again["user"]["photo_url"],
+        "https://lh3.googleusercontent.com/a/other"
+    );
+}
+
+#[tokio::test]
+async fn google_photo_on_another_host_is_stored_as_null() {
+    let secret = "test-firebase-dev-secret";
+    std::env::set_var("JUDGEMENT_FIREBASE_DEV_SECRET", secret);
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let signed: Value = client
+        .post(format!("{base}/api/v1/auth/firebase"))
+        .json(&serde_json::json!({
+            "id_token": provider_token(secret, "google-bad-host", "Ada", Some("google.com"), true),
+            "photo_url": "https://evil.example/pic.png",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(signed["user"]["photo_url"].is_null());
+    assert_eq!(signed["user"]["display_name"], "Ada");
+}
+
+#[tokio::test]
+async fn email_sign_in_ignores_a_client_photo_url() {
+    let secret = "test-firebase-dev-secret";
+    std::env::set_var("JUDGEMENT_FIREBASE_DEV_SECRET", secret);
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let signed: Value = client
+        .post(format!("{base}/api/v1/auth/firebase"))
+        .json(&serde_json::json!({
+            "id_token": provider_token(secret, "email-no-photo", "Ada", Some("password"), true),
+            "photo_url": "https://lh3.googleusercontent.com/a/should-ignore",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(signed["user"]["photo_url"].is_null());
+}
+
+#[tokio::test]
+async fn telegram_picture_claim_is_stored_and_missing_picture_still_signs_in() {
+    let secret = "test-telegram-dev-secret";
+    std::env::set_var("JUDGEMENT_TELEGRAM_DEV_SECRET", secret);
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let photo = "https://t.me/i/userpic/320/abc.jpg";
+    let with_pic: Value = client
+        .post(format!("{base}/api/v1/auth/telegram"))
+        .json(&serde_json::json!({
+            "id_token": telegram_token_with_picture(secret, "4242", "Ada", photo),
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(with_pic["user"]["photo_url"], photo);
+
+    let no_pic: Value = client
+        .post(format!("{base}/api/v1/auth/telegram"))
+        .json(&serde_json::json!({
+            "id_token": telegram_token(secret, "4243", "Beena"),
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(no_pic["user"]["photo_url"].is_null());
+    assert_eq!(no_pic["user"]["display_name"], "Beena");
+}
+
+#[tokio::test]
+async fn profile_avatar_is_rejected_for_guests_and_accounts_without_a_photo() {
+    let secret = "test-firebase-dev-secret";
+    std::env::set_var("JUDGEMENT_FIREBASE_DEV_SECRET", secret);
+    let base = serve().await;
+    let client = reqwest::Client::new();
+
+    let guest: Value = client
+        .post(format!("{base}/api/v1/guest-sessions"))
+        .json(&serde_json::json!({ "nickname": "Guest" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let guest_reject = client
+        .post(format!("{base}/api/v1/me/avatar"))
+        .bearer_auth(guest["token"].as_str().unwrap())
+        .json(&serde_json::json!({ "avatar_id": "profile" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(guest_reject.status(), 400);
+
+    let no_photo: Value = client
+        .post(format!("{base}/api/v1/auth/firebase"))
+        .json(&serde_json::json!({
+            "id_token": provider_token(secret, "google-no-pic", "Ada", Some("google.com"), true),
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let no_photo_reject = client
+        .post(format!("{base}/api/v1/me/avatar"))
+        .bearer_auth(no_photo["token"].as_str().unwrap())
+        .json(&serde_json::json!({ "avatar_id": "profile" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(no_photo_reject.status(), 400);
+
+    let with_photo: Value = client
+        .post(format!("{base}/api/v1/auth/firebase"))
+        .json(&serde_json::json!({
+            "id_token": provider_token(secret, "google-yes-pic", "Beena", Some("google.com"), true),
+            "photo_url": "https://lh3.googleusercontent.com/a/ok",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let accepted: Value = client
+        .post(format!("{base}/api/v1/me/avatar"))
+        .bearer_auth(with_photo["token"].as_str().unwrap())
+        .json(&serde_json::json!({ "avatar_id": "profile" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(accepted["avatar_id"], "profile");
 }

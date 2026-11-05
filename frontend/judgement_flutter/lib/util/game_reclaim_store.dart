@@ -2,6 +2,7 @@
 library;
 
 export 'game_reclaim_store_stub.dart'
+    if (dart.library.io) 'game_reclaim_store_io.dart'
     if (dart.library.js_interop) 'game_reclaim_store_web.dart';
 
 /// Vacancy TTL aligned with server (~10 minutes).
@@ -30,14 +31,14 @@ class GameReclaimBlob {
       DateTime.now().toUtc().difference(savedAt) > kReclaimTtl;
 
   Map<String, dynamic> toJson() => {
-        'token': token,
-        if (sessionId != null) 'session_id': sessionId,
-        'room_code': roomCode,
-        'player_id': playerId,
-        if (gameId != null) 'game_id': gameId,
-        'nickname': nickname,
-        'saved_at': savedAt.toUtc().toIso8601String(),
-      };
+    'token': token,
+    if (sessionId != null) 'session_id': sessionId,
+    'room_code': roomCode,
+    'player_id': playerId,
+    if (gameId != null) 'game_id': gameId,
+    'nickname': nickname,
+    'saved_at': savedAt.toUtc().toIso8601String(),
+  };
 
   factory GameReclaimBlob.fromJson(Map<String, dynamic> json) {
     return GameReclaimBlob(

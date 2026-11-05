@@ -77,6 +77,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
               String id,
               String name,
               String? avatar,
+              String? photoUrl,
               int? boardRank,
               bool winner,
             })
@@ -85,6 +86,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
               id: widget.controller.myPlayerId,
               name: widget.controller.myNickname,
               avatar: view.ownAvatarId,
+              photoUrl: view.ownPhotoUrl,
               boardRank: view.ownLadderRank,
               winner: winnerIds.contains(widget.controller.myPlayerId),
             ),
@@ -93,6 +95,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
                 id: o.playerId,
                 name: o.nickname,
                 avatar: o.avatarId,
+                photoUrl: o.photoUrl,
                 boardRank: o.ladderRank,
                 winner: winnerIds.contains(o.playerId),
               ),
@@ -178,6 +181,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
                             _DancingSeat(
                               name: seats[i].name,
                               avatarId: seats[i].avatar,
+                              photoUrl: seats[i].photoUrl,
                               boardRank: seats[i].boardRank,
                               isWinner: seats[i].winner,
                               phase: _dance.value,
@@ -283,6 +287,7 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
 class _DancingSeat extends StatelessWidget {
   final String name;
   final String? avatarId;
+  final String? photoUrl;
   final int? boardRank;
   final bool isWinner;
   final double phase;
@@ -291,6 +296,7 @@ class _DancingSeat extends StatelessWidget {
   const _DancingSeat({
     required this.name,
     required this.avatarId,
+    this.photoUrl,
     required this.boardRank,
     required this.isWinner,
     required this.phase,
@@ -333,6 +339,7 @@ class _DancingSeat extends StatelessWidget {
                     ),
                   PlayerAvatar(
                     avatarId: avatarId,
+                    photoUrl: photoUrl,
                     nickname: name,
                     radius: 28,
                     highlight: isWinner,

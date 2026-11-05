@@ -372,6 +372,7 @@ class _PodiumSeat extends StatelessWidget {
           const SizedBox(height: 6),
           PlayerAvatar(
             avatarId: controller.avatarOf(ranked.playerId),
+            photoUrl: controller.photoUrlOf(ranked.playerId),
             nickname: name,
             radius: elevate ? 28 : 22,
             highlight: ranked.rank == 1,
@@ -472,6 +473,7 @@ class _StandingsTable extends StatelessWidget {
                       children: [
                         PlayerAvatar(
                           avatarId: controller.avatarOf(ranked.playerId),
+                          photoUrl: controller.photoUrlOf(ranked.playerId),
                           nickname: controller.nicknameOf(ranked.playerId),
                           radius: 12,
                           highlight: ranked.rank == 1,
@@ -737,6 +739,7 @@ class _RoundVerifyMatrix extends StatelessWidget {
             playerId: playerId,
             displayName: controller.nicknameOf(playerId),
             avatarId: controller.avatarOf(playerId),
+            photoUrl: controller.photoUrlOf(playerId),
             boardRank: controller.boardRankOf(playerId),
             highlightHeader: playerId == controller.myPlayerId,
             total: _columnSum(playerId),

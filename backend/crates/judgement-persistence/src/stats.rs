@@ -158,12 +158,14 @@ pub fn medals_from_finishes(
 pub fn to_leaderboard_row(
     user_id: Uuid,
     avatar_id: Option<String>,
+    photo_url: Option<String>,
     rec: &MedalRecord,
 ) -> LeaderboardRow {
     LeaderboardRow {
         user_id,
         display_name: rec.display_name.clone(),
         avatar_id,
+        photo_url,
         wins: rec.gold,
         games: rec.games,
         exact_percent: exact_percent(rec.exact, rec.rounds),

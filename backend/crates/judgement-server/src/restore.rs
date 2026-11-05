@@ -30,6 +30,7 @@ pub async fn restore_from_store(
                     nickname: session.nickname,
                     token: session.token,
                     avatar_id: session.avatar_id,
+                    photo_url: session.photo_url,
                     user_id: session.user_id,
                 },
             );
@@ -63,6 +64,7 @@ pub async fn restore_from_store(
                             ready: p.ready,
                             joined_at: p.joined_at,
                             avatar_id: p.avatar_id,
+                            photo_url: p.photo_url,
                         })
                         .collect(),
                     status,
@@ -214,7 +216,7 @@ fn resolve_host_player_id(
 /// Convenience for tests: build AppState and restore in one step.
 ///
 /// Uses **zero** reconnect grace so existing tests keep immediate vacant-on-drop
-/// (production [`AppState::new`] reads `RECONNECT_GRACE_SECONDS`, default 12).
+/// (production [`AppState::new`] reads `RECONNECT_GRACE_SECONDS`, default 90).
 pub async fn bootstrap(
     store: Arc<dyn GameStore>,
 ) -> Result<Arc<AppState>, judgement_persistence::PersistError> {

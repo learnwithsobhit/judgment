@@ -20,6 +20,7 @@ async fn submit_updates_totals_without_exposing_peer_scores_in_storage_api() {
                 player_id: Uuid::new_v4(),
                 display_name: "Alice".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
             FairPlayRosterSeat {
@@ -28,6 +29,7 @@ async fn submit_updates_totals_without_exposing_peer_scores_in_storage_api() {
                 player_id: Uuid::new_v4(),
                 display_name: "Bob".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
             FairPlayRosterSeat {
@@ -36,6 +38,7 @@ async fn submit_updates_totals_without_exposing_peer_scores_in_storage_api() {
                 player_id: Uuid::new_v4(),
                 display_name: "Cara".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
         ])
@@ -81,6 +84,7 @@ async fn submit_updates_totals_without_exposing_peer_scores_in_storage_api() {
                 player_id: Uuid::new_v4(),
                 display_name: "Alice".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
             FairPlayRosterSeat {
@@ -89,6 +93,7 @@ async fn submit_updates_totals_without_exposing_peer_scores_in_storage_api() {
                 player_id: Uuid::new_v4(),
                 display_name: "Bob".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
             FairPlayRosterSeat {
@@ -97,6 +102,7 @@ async fn submit_updates_totals_without_exposing_peer_scores_in_storage_api() {
                 player_id: Uuid::new_v4(),
                 display_name: "Cara".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
         ])

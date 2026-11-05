@@ -81,12 +81,13 @@ impl GameStore for PostgresStore {
     async fn upsert_session(&self, session: &StoredSession) -> Result<(), PersistError> {
         sqlx::query(
             r#"
-            INSERT INTO guest_sessions (session_id, nickname, token, created_at, avatar_id, user_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO guest_sessions (session_id, nickname, token, created_at, avatar_id, photo_url, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (session_id) DO UPDATE
               SET nickname = EXCLUDED.nickname,
                   token = EXCLUDED.token,
                   avatar_id = EXCLUDED.avatar_id,
+                  photo_url = EXCLUDED.photo_url,
                   user_id = EXCLUDED.user_id
             "#,
         )
@@ -95,6 +96,7 @@ impl GameStore for PostgresStore {
         .bind(&session.token)
         .bind(session.created_at)
         .bind(&session.avatar_id)
+        .bind(&session.photo_url)
         .bind(session.user_id)
         .execute(&self.pool)
         .await?;
@@ -149,8 +151,8 @@ impl GameStore for PostgresStore {
             sqlx::query(
                 r#"
                 INSERT INTO room_players (
-                    room_id, session_id, player_id, nickname, seat, ready, joined_at, avatar_id
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    room_id, session_id, player_id, nickname, seat, ready, joined_at, avatar_id, photo_url
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                 "#,
             )
             .bind(room.room_id.0)
@@ -161,6 +163,7 @@ impl GameStore for PostgresStore {
             .bind(player.ready)
             .bind(player.joined_at)
             .bind(&player.avatar_id)
+            .bind(&player.photo_url)
             .execute(&mut *tx)
             .await?;
         }
@@ -179,7 +182,7 @@ impl GameStore for PostgresStore {
 
     async fn load_sessions(&self) -> Result<Vec<StoredSession>, PersistError> {
         let rows = sqlx::query(
-            "SELECT session_id, nickname, token, created_at, avatar_id, user_id FROM guest_sessions",
+            "SELECT session_id, nickname, token, created_at, avatar_id, photo_url, user_id FROM guest_sessions",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -192,6 +195,7 @@ impl GameStore for PostgresStore {
                 token: row.get("token"),
                 created_at: row.get("created_at"),
                 avatar_id: row.get("avatar_id"),
+                photo_url: row.get("photo_url"),
                 user_id: row.get("user_id"),
             })
             .collect())
@@ -214,7 +218,7 @@ impl GameStore for PostgresStore {
             let room_id: Uuid = row.get("room_id");
             let players = sqlx::query(
                 r#"
-                SELECT session_id, player_id, nickname, seat, ready, joined_at, avatar_id
+                SELECT session_id, player_id, nickname, seat, ready, joined_at, avatar_id, photo_url
                 FROM room_players WHERE room_id = $1 ORDER BY seat
                 "#,
             )
@@ -230,6 +234,7 @@ impl GameStore for PostgresStore {
                 ready: p.get("ready"),
                 joined_at: p.get("joined_at"),
                 avatar_id: p.get("avatar_id"),
+                photo_url: p.get("photo_url"),
             })
             .collect();
 
@@ -981,12 +986,13 @@ impl GameStore for PostgresStore {
         sqlx::query(
             r#"
             INSERT INTO users (
-                user_id, display_name, avatar_id, created_at, updated_at, last_seen_at,
+                user_id, display_name, avatar_id, photo_url, created_at, updated_at, last_seen_at,
                 legal_accepted_at, legal_version
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (user_id) DO UPDATE SET
                 display_name = EXCLUDED.display_name,
                 avatar_id = COALESCE(EXCLUDED.avatar_id, users.avatar_id),
+                photo_url = COALESCE(EXCLUDED.photo_url, users.photo_url),
                 updated_at = now(),
                 last_seen_at = now(),
                 legal_accepted_at = COALESCE(EXCLUDED.legal_accepted_at, users.legal_accepted_at),
@@ -996,6 +1002,7 @@ impl GameStore for PostgresStore {
         .bind(user.user_id)
         .bind(&user.display_name)
         .bind(&user.avatar_id)
+        .bind(&user.photo_url)
         .bind(user.created_at)
         .bind(user.updated_at)
         .bind(user.last_seen_at)
@@ -1031,7 +1038,7 @@ impl GameStore for PostgresStore {
     ) -> Result<Option<StoredUser>, PersistError> {
         let row = sqlx::query(
             r#"
-            SELECT u.user_id, u.display_name, u.avatar_id, u.legal_version,
+            SELECT u.user_id, u.display_name, u.avatar_id, u.photo_url, u.legal_version,
                    u.created_at, u.updated_at, u.last_seen_at
             FROM users u
             JOIN user_identities i ON i.user_id = u.user_id
@@ -1048,7 +1055,7 @@ impl GameStore for PostgresStore {
     async fn load_user(&self, user_id: Uuid) -> Result<Option<StoredUser>, PersistError> {
         let row = sqlx::query(
             r#"
-            SELECT user_id, display_name, avatar_id, legal_version,
+            SELECT user_id, display_name, avatar_id, photo_url, legal_version,
                    created_at, updated_at, last_seen_at
             FROM users WHERE user_id = $1
             "#,
@@ -1079,10 +1086,10 @@ impl GameStore for PostgresStore {
     async fn load_leaderboard(&self, limit: i64) -> Result<Vec<LeaderboardRow>, PersistError> {
         let rows = sqlx::query(
             r#"
-            SELECT user_id, display_name, avatar_id, games, gold, silver, bronze,
+            SELECT user_id, display_name, avatar_id, photo_url, games, gold, silver, bronze,
                    exact, rounds, score_points, medal_points
             FROM (
-                SELECT u.user_id, u.display_name, u.avatar_id,
+                SELECT u.user_id, u.display_name, u.avatar_id, u.photo_url,
                        COUNT(*)::int AS games,
                        COUNT(*) FILTER (WHERE r.finish_rank = 1)::int AS gold,
                        COUNT(*) FILTER (WHERE r.finish_rank = 2)::int AS silver,
@@ -1096,7 +1103,7 @@ impl GameStore for PostgresStore {
                 FROM user_game_results r
                 JOIN users u ON u.user_id = r.user_id
                 WHERE r.counted
-                GROUP BY u.user_id, u.display_name, u.avatar_id
+                GROUP BY u.user_id, u.display_name, u.avatar_id, u.photo_url
             ) board
             ORDER BY medal_points DESC,
                      gold DESC,
@@ -1125,6 +1132,7 @@ impl GameStore for PostgresStore {
                     user_id: row.get("user_id"),
                     display_name: row.get("display_name"),
                     avatar_id: row.get("avatar_id"),
+                    photo_url: row.get("photo_url"),
                     wins: gold,
                     games,
                     exact_percent: crate::stats::exact_percent(exact, rounds),
@@ -1276,7 +1284,7 @@ impl GameStore for PostgresStore {
             )
             SELECT r.game_id, r.finished_at, r.table_size, r.rounds_played,
                    r.user_id, r.finish_rank, r.total_score, r.exact_bid_rounds,
-                   u.display_name, u.avatar_id
+                   u.display_name, u.avatar_id, u.photo_url
             FROM latest l
             JOIN user_game_results r ON r.game_id = l.game_id AND r.counted
             JOIN users u ON u.user_id = r.user_id
@@ -1299,6 +1307,7 @@ impl GameStore for PostgresStore {
                 user_id: row.get("user_id"),
                 display_name: row.get("display_name"),
                 avatar_id: row.get("avatar_id"),
+                photo_url: row.get("photo_url"),
                 finish_rank: i32::from(row.get::<i16, _>("finish_rank")),
                 total_score: row.get("total_score"),
                 exact_bid_rounds: i32::from(row.get::<i16, _>("exact_bid_rounds")),
@@ -1366,6 +1375,7 @@ impl GameStore for PostgresStore {
             user_id,
             display_name: user.display_name,
             avatar_id: user.avatar_id,
+            photo_url: user.photo_url,
             games_played: games,
             wins,
             lifetime_points: points,
@@ -1385,8 +1395,8 @@ impl GameStore for PostgresStore {
             sqlx::query(
                 r#"
                 INSERT INTO fair_play_rosters (
-                    game_id, user_id, player_id, display_name, avatar_id, finished_at
-                ) VALUES ($1, $2, $3, $4, $5, $6)
+                    game_id, user_id, player_id, display_name, avatar_id, photo_url, finished_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (game_id, user_id) DO NOTHING
                 "#,
             )
@@ -1395,6 +1405,7 @@ impl GameStore for PostgresStore {
             .bind(seat.player_id)
             .bind(&seat.display_name)
             .bind(&seat.avatar_id)
+            .bind(&seat.photo_url)
             .bind(seat.finished_at)
             .execute(&mut *tx)
             .await?;
@@ -1409,7 +1420,7 @@ impl GameStore for PostgresStore {
     ) -> Result<Vec<crate::FairPlayRosterSeat>, PersistError> {
         let rows = sqlx::query(
             r#"
-            SELECT game_id, user_id, player_id, display_name, avatar_id, finished_at
+            SELECT game_id, user_id, player_id, display_name, avatar_id, photo_url, finished_at
             FROM fair_play_rosters
             WHERE game_id = $1
             ORDER BY display_name
@@ -1426,6 +1437,7 @@ impl GameStore for PostgresStore {
                 player_id: row.get("player_id"),
                 display_name: row.get("display_name"),
                 avatar_id: row.get("avatar_id"),
+                photo_url: row.get("photo_url"),
                 finished_at: row.get("finished_at"),
             })
             .collect())
@@ -1543,14 +1555,14 @@ impl GameStore for PostgresStore {
     ) -> Result<Vec<crate::FairPlayGameTotal>, PersistError> {
         let rows = sqlx::query(
             r#"
-            SELECT r.user_id, r.display_name, r.avatar_id,
+            SELECT r.user_id, r.display_name, r.avatar_id, r.photo_url,
                    COALESCE(SUM(b.points), 0)::int AS points,
                    COUNT(b.points)::int AS ratings
             FROM fair_play_rosters r
             LEFT JOIN fair_play_ballots b
               ON b.game_id = r.game_id AND b.target_user_id = r.user_id
             WHERE r.game_id = $1
-            GROUP BY r.user_id, r.display_name, r.avatar_id
+            GROUP BY r.user_id, r.display_name, r.avatar_id, r.photo_url
             ORDER BY points DESC, ratings DESC, r.display_name
             "#,
         )
@@ -1563,6 +1575,7 @@ impl GameStore for PostgresStore {
                 user_id: row.get("user_id"),
                 display_name: row.get("display_name"),
                 avatar_id: row.get("avatar_id"),
+                photo_url: row.get("photo_url"),
                 points: row.get("points"),
                 ratings: row.get("ratings"),
             })
@@ -1575,7 +1588,7 @@ impl GameStore for PostgresStore {
     ) -> Result<Vec<crate::FairPlayLeaderboardRow>, PersistError> {
         let rows = sqlx::query(
             r#"
-            SELECT u.user_id, u.display_name, u.avatar_id,
+            SELECT u.user_id, u.display_name, u.avatar_id, u.photo_url,
                    s.points_received, s.ratings_received, s.games_rated
             FROM fair_play_stats s
             JOIN users u ON u.user_id = s.user_id
@@ -1595,6 +1608,7 @@ impl GameStore for PostgresStore {
                 user_id: row.get("user_id"),
                 display_name: row.get("display_name"),
                 avatar_id: row.get("avatar_id"),
+                photo_url: row.get("photo_url"),
                 points_received: row.get("points_received"),
                 ratings_received: row.get("ratings_received"),
                 games_rated: row.get("games_rated"),
@@ -1608,6 +1622,7 @@ fn user_from_row(row: sqlx::postgres::PgRow) -> StoredUser {
         user_id: row.get("user_id"),
         display_name: row.get("display_name"),
         avatar_id: row.get("avatar_id"),
+        photo_url: row.get("photo_url"),
         legal_version: row.get("legal_version"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
@@ -1757,8 +1772,8 @@ async fn record_fair_play_roster(
         sqlx::query(
             r#"
             INSERT INTO fair_play_rosters (
-                game_id, user_id, player_id, display_name, avatar_id, finished_at
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+                game_id, user_id, player_id, display_name, avatar_id, photo_url, finished_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (game_id, user_id) DO NOTHING
             "#,
         )
@@ -1767,6 +1782,7 @@ async fn record_fair_play_roster(
         .bind(player.id.0)
         .bind(&player.nickname)
         .bind(&player.avatar_id)
+        .bind(&player.photo_url)
         .bind(finished_at)
         .execute(&mut **tx)
         .await?;

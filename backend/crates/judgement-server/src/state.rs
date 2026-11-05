@@ -28,10 +28,11 @@ use crate::error::ApiError;
 use crate::http_limit::{HttpLimitConfig, HttpRateLimiter};
 use crate::metrics::Metrics;
 
-/// Live Railway default: absorb short WS blips without immediate vacant.
-pub const DEFAULT_RECONNECT_GRACE: Duration = Duration::from_secs(12);
+/// Live default: hold the seat through a phone radio blip / short call.
+/// Last-night table had 26–41s reconnects; 12s grace vacated them first.
+pub const DEFAULT_RECONNECT_GRACE: Duration = Duration::from_secs(90);
 
-/// `RECONNECT_GRACE_SECONDS` (default 12, clamp 0..=120).
+/// `RECONNECT_GRACE_SECONDS` (default 90, clamp 0..=120).
 pub fn reconnect_grace_from_env() -> Duration {
     let secs = std::env::var("RECONNECT_GRACE_SECONDS")
         .ok()
@@ -47,8 +48,10 @@ pub struct Session {
     pub nickname: String,
     /// Opaque bearer token. Never logged (PLAN.md §22).
     pub token: String,
-    /// Built-in avatar pack id (cosmetic).
+    /// Built-in avatar pack id or `profile` (cosmetic).
     pub avatar_id: Option<String>,
+    /// Allowlisted Google/Telegram portrait. None for guests.
+    pub photo_url: Option<String>,
     /// Google account, when this session was created by sign-in.
     pub user_id: Option<uuid::Uuid>,
 }
@@ -63,6 +66,7 @@ pub struct RoomSeat {
     /// Connection order, used for host promotion (locked decision 5).
     pub joined_at: DateTime<Utc>,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +119,7 @@ impl Room {
                 ready: s.ready,
                 is_host: s.session_id == self.host_session,
                 avatar_id: s.avatar_id.clone(),
+                photo_url: s.photo_url.clone(),
                 vacant: false,
                 ladder_rank: None,
                 signed_in: false,
@@ -253,6 +258,7 @@ impl AppState {
             nickname,
             token: generate_token(),
             avatar_id: None,
+            photo_url: None,
             user_id: None,
         };
         self.sessions
@@ -272,12 +278,14 @@ impl AppState {
         nickname: String,
         user_id: uuid::Uuid,
         avatar_id: Option<String>,
+        photo_url: Option<String>,
     ) -> Session {
         let session = Session {
             id: SessionId::new(),
             nickname,
             token: generate_token(),
             avatar_id,
+            photo_url,
             user_id: Some(user_id),
         };
         self.sessions

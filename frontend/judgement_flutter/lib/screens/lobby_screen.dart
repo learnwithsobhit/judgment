@@ -216,6 +216,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     });
     try {
       await widget.api.setAvatar(avatarId);
+      AccountSession.instance.rememberAvatar(avatarId);
       await _refresh();
     } on ApiException catch (error) {
       _showError(error.message);
@@ -482,13 +483,14 @@ class _LobbyScreenState extends State<LobbyScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    'Your avatar',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
                   AvatarPicker(
                     selectedId: _myAvatarId,
+                    photoUrl: AccountSession.instance.photoUrl,
+                    nickname: widget.nickname,
+                    autoSelectProfile:
+                        AccountSession.instance.isSignedIn &&
+                        (AccountSession.instance.avatarId == null ||
+                            AccountSession.instance.avatarId!.isEmpty),
                     onSelected: _busy ? (_) {} : _pickAvatar,
                   ),
                   const SizedBox(height: 20),
@@ -597,6 +599,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
             )
           : PlayerAvatar(
               avatarId: seat.avatarId,
+              photoUrl: seat.photoUrl,
               nickname: seat.nickname,
               radius: 18,
               highlight: isMe,

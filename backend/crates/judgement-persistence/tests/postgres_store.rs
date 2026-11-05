@@ -33,6 +33,7 @@ async fn postgres_persists_and_restores_a_game() {
             token: format!("tok-{}", session_id),
             created_at: Utc::now(),
             avatar_id: None,
+            photo_url: None,
             user_id: None,
         })
         .await
@@ -51,6 +52,7 @@ async fn postgres_persists_and_restores_a_game() {
                 token: format!("tok-{sid}"),
                 created_at: Utc::now(),
                 avatar_id: None,
+                photo_url: None,
                 user_id: None,
             })
             .await
@@ -64,6 +66,7 @@ async fn postgres_persists_and_restores_a_game() {
             ready: true,
             joined_at: Utc::now(),
             avatar_id: None,
+            photo_url: None,
         });
         players.push(PlayerState::human(pid, format!("P{seat}"), seat));
         game_players.push(NewGamePlayer {
@@ -179,6 +182,7 @@ async fn postgres_loads_the_newest_counted_game() {
                 user_id: id,
                 display_name: name.into(),
                 avatar_id: Some("face_01".into()),
+                photo_url: None,
                 legal_version: Some("2026-08-03".into()),
                 created_at: now,
                 updated_at: now,

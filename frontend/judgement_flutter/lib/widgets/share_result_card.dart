@@ -209,6 +209,7 @@ class _SharePodiumSeat extends StatelessWidget {
           const SizedBox(height: 6),
           PlayerAvatar(
             avatarId: controller.avatarOf(ranked.playerId),
+            photoUrl: controller.photoUrlOf(ranked.playerId),
             nickname: name,
             radius: elevate ? 28 : 22,
             highlight: elevate,

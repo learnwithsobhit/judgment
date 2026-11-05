@@ -183,6 +183,7 @@ class _FairPlayTab extends StatelessWidget {
                 children: [
                   PlayerAvatar(
                     avatarId: row.avatarId,
+                    photoUrl: row.photoUrl,
                     nickname: row.displayName,
                     radius: 18,
                     signedIn: true,
@@ -564,6 +565,7 @@ class _BoardRow extends StatelessWidget {
       children: [
         PlayerAvatar(
           avatarId: row.avatarId,
+          photoUrl: row.photoUrl,
           nickname: row.displayName,
           radius: 16,
           boardRank: row.rank,

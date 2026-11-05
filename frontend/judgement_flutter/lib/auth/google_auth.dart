@@ -4,11 +4,18 @@ library;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
+class GoogleSignInResult {
+  const GoogleSignInResult({required this.idToken, this.photoUrl});
+
+  final String idToken;
+  final String? photoUrl;
+}
+
 /// Firebase ID token for `POST /api/v1/auth/firebase`, or throws.
 ///
 /// Web uses Firebase's Google popup so the hosting app
 /// `judgment-railway-test` does not need a separate OAuth client id.
-Future<String> fetchGoogleIdToken() {
+Future<GoogleSignInResult> fetchGoogleIdToken() {
   return _popupToken(GoogleAuthProvider(), 'Google sign-in is not configured');
 }
 
@@ -89,14 +96,21 @@ String _emailAuthMessage(FirebaseAuthException error) {
   }
 }
 
-Future<String> _popupToken(AuthProvider provider, String missing) async {
+Future<GoogleSignInResult> _popupToken(
+  AuthProvider provider,
+  String missing,
+) async {
   await _ensureFirebase(missing);
   final signedIn = await FirebaseAuth.instance.signInWithPopup(provider);
   final firebaseToken = await signedIn.user?.getIdToken();
   if (firebaseToken == null || firebaseToken.isEmpty) {
     throw StateError('Firebase did not return a token');
   }
-  return firebaseToken;
+  return GoogleSignInResult(
+    idToken: firebaseToken,
+    photoUrl:
+        signedIn.user?.photoURL ?? FirebaseAuth.instance.currentUser?.photoURL,
+  );
 }
 
 Future<void> _ensureFirebase(String missing) async {

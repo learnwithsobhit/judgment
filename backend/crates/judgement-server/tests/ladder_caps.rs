@@ -54,6 +54,7 @@ fn row(user_id: uuid::Uuid, name: &str, wins: i32) -> LeaderboardRow {
         user_id,
         display_name: name.into(),
         avatar_id: None,
+        photo_url: None,
         wins,
         games: 10,
         exact_percent: 50,

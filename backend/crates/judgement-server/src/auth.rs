@@ -25,7 +25,7 @@ use judgement_protocol::{
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::emotes::is_allowed_avatar;
+use crate::emotes::{avatar_allowed_for_user, sanitize_photo_url, PhotoSource};
 use crate::error::ApiError;
 use crate::persist::stored_session;
 use crate::state::AppState;
@@ -37,7 +37,19 @@ pub async fn auth_firebase(
     Json(body): Json<FirebaseAuthRequest>,
 ) -> Result<Json<AuthSessionResponse>, ApiError> {
     let identity = verify_id_token(&body.id_token).await?;
-    open_account_session(&state, identity, body.display_name, body.legal_version).await
+    let photo_url = if identity.provider == "google" {
+        sanitize_photo_url(PhotoSource::Google, body.photo_url.as_deref())
+    } else {
+        None
+    };
+    open_account_session(
+        &state,
+        identity,
+        body.display_name,
+        body.legal_version,
+        photo_url,
+    )
+    .await
 }
 
 pub async fn auth_telegram(
@@ -45,7 +57,15 @@ pub async fn auth_telegram(
     Json(body): Json<TelegramAuthRequest>,
 ) -> Result<Json<AuthSessionResponse>, ApiError> {
     let identity = verify_telegram_token(&body.id_token).await?;
-    open_account_session(&state, identity, body.display_name, body.legal_version).await
+    let photo_url = identity.photo_url.clone();
+    open_account_session(
+        &state,
+        identity,
+        body.display_name,
+        body.legal_version,
+        photo_url,
+    )
+    .await
 }
 
 async fn open_account_session(
@@ -53,6 +73,7 @@ async fn open_account_session(
     identity: VerifiedAccount,
     requested_name: Option<String>,
     requested_legal: Option<String>,
+    incoming_photo: Option<String>,
 ) -> Result<Json<AuthSessionResponse>, ApiError> {
     let now = Utc::now();
     let existing = state
@@ -79,6 +100,8 @@ async fn open_account_session(
         40,
     );
     let avatar_id = existing.as_ref().and_then(|user| user.avatar_id.clone());
+    let photo_url =
+        incoming_photo.or_else(|| existing.as_ref().and_then(|user| user.photo_url.clone()));
     let legal_version = requested_legal
         .as_deref()
         .map(str::trim)
@@ -94,6 +117,7 @@ async fn open_account_session(
         user_id,
         display_name: display_name.clone(),
         avatar_id: avatar_id.clone(),
+        photo_url: photo_url.clone(),
         legal_version,
         created_at: existing.as_ref().map(|user| user.created_at).unwrap_or(now),
         updated_at: now,
@@ -116,7 +140,8 @@ async fn open_account_session(
         .map_err(|e| ApiError::Conflict(format!("save identity: {e}")))?;
 
     let nickname = table_nickname_from_display(&display_name);
-    let session = state.create_session_for_user(nickname, user_id, avatar_id.clone());
+    let session =
+        state.create_session_for_user(nickname, user_id, avatar_id.clone(), photo_url.clone());
     state
         .store
         .upsert_session(&stored_session(&session))
@@ -131,6 +156,7 @@ async fn open_account_session(
             user_id: user_id.to_string(),
             display_name,
             avatar_id,
+            photo_url,
         },
     }))
 }
@@ -151,6 +177,7 @@ pub async fn get_me(
         user_id: user.user_id.to_string(),
         display_name: user.display_name,
         avatar_id: user.avatar_id,
+        photo_url: user.photo_url,
         session_id: session.id,
         nickname: session.nickname,
     }))
@@ -178,7 +205,7 @@ pub async fn patch_me(
         user.display_name = name;
     }
     if let Some(avatar_id) = body.avatar_id.as_deref() {
-        if !is_allowed_avatar(avatar_id) {
+        if !avatar_allowed_for_user(avatar_id, user.photo_url.is_some()) {
             return Err(ApiError::BadRequest("unknown avatar_id".into()));
         }
         user.avatar_id = Some(avatar_id.to_string());
@@ -222,6 +249,7 @@ pub async fn patch_me(
         user_id: user.user_id.to_string(),
         display_name: user.display_name,
         avatar_id: user.avatar_id,
+        photo_url: user.photo_url,
         session_id: session.id,
         nickname: session.nickname,
     }))
@@ -294,6 +322,7 @@ pub async fn get_leaderboard(
             rank: index as i32 + 1,
             display_name: row.display_name.clone(),
             avatar_id: row.avatar_id.clone(),
+            photo_url: row.photo_url.clone(),
             wins: row.wins,
             games: row.games,
             exact_percent: row.exact_percent,
@@ -320,6 +349,7 @@ fn stats_response(view: &judgement_persistence::UserStatsView) -> MeStatsRespons
     MeStatsResponse {
         display_name: view.display_name.clone(),
         avatar_id: view.avatar_id.clone(),
+        photo_url: view.photo_url.clone(),
         games_played: view.games_played,
         wins: view.wins,
         losses: view.games_played.saturating_sub(view.wins),
@@ -339,6 +369,7 @@ struct VerifiedAccount {
     subject: String,
     email: Option<String>,
     name: Option<String>,
+    photo_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -422,6 +453,7 @@ fn accept_claims(claims: TokenClaims) -> Result<VerifiedAccount, ApiError> {
         subject: claims.sub,
         email: claims.email.filter(|email| !email.is_empty()),
         name: claims.name.filter(|name| !name.is_empty()),
+        photo_url: None,
     })
 }
 
@@ -439,6 +471,8 @@ struct TelegramClaims {
     family_name: Option<String>,
     #[serde(default)]
     preferred_username: Option<String>,
+    #[serde(default)]
+    picture: Option<String>,
 }
 
 fn json_string<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -524,11 +558,13 @@ fn telegram_account(claims: TelegramClaims) -> Result<VerifiedAccount, ApiError>
         return Err(ApiError::BadRequest("invalid Telegram token".into()));
     }
     let name = telegram_name(&claims);
+    let photo_url = sanitize_photo_url(PhotoSource::Telegram, claims.picture.as_deref());
     Ok(VerifiedAccount {
         provider: "telegram".into(),
         subject: claims.sub,
         email: None,
         name,
+        photo_url,
     })
 }
 

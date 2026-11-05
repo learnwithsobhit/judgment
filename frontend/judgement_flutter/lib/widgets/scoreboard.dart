@@ -31,6 +31,7 @@ class Scoreboard extends StatelessWidget {
         seat: view.ownSeat,
         name: '${controller.myNickname} (you)',
         avatarId: view.ownAvatarId,
+        photoUrl: view.ownPhotoUrl,
         boardRank: view.ownLadderRank,
         signedIn: view.ownSignedIn,
         bid: bidsByPlayer[controller.myPlayerId] ?? view.ownBid,
@@ -43,6 +44,7 @@ class Scoreboard extends StatelessWidget {
           seat: o.seat,
           name: o.nickname,
           avatarId: o.avatarId,
+          photoUrl: o.photoUrl,
           boardRank: o.ladderRank,
           signedIn: o.signedIn,
           bid: o.bid,
@@ -128,6 +130,7 @@ class Scoreboard extends StatelessWidget {
                         .replaceAll(RegExp(r'\s*\(you\)\s*'), '')
                         .trim(),
                     avatarId: row.avatarId,
+                    photoUrl: row.photoUrl,
                     boardRank: row.boardRank,
                     highlightHeader: leaderId == row.playerId,
                     total: row.total,
@@ -183,6 +186,7 @@ class Scoreboard extends StatelessWidget {
       children: [
         PlayerAvatar(
           avatarId: row.avatarId,
+          photoUrl: row.photoUrl,
           nickname: row.name,
           radius: 12,
           highlight: isLeader,
@@ -239,6 +243,7 @@ class _PlayerRow {
   final int seat;
   final String name;
   final String? avatarId;
+  final String? photoUrl;
   final int? boardRank;
   final bool signedIn;
   final int? bid;
@@ -250,6 +255,7 @@ class _PlayerRow {
     required this.seat,
     required this.name,
     required this.avatarId,
+    this.photoUrl,
     required this.boardRank,
     required this.signedIn,
     required this.bid,

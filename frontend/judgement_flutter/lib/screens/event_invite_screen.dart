@@ -251,16 +251,14 @@ class _EventInviteScreenState extends State<EventInviteScreen> {
               ),
               if (_rsvpStatus == 'going' || _rsvpStatus == null) ...[
                 const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Your avatar',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-                const SizedBox(height: 8),
                 AvatarPicker(
                   selectedId: _selectedAvatarId,
+                  photoUrl: AccountSession.instance.photoUrl,
+                  nickname: AccountSession.instance.displayName ?? 'Player',
+                  autoSelectProfile:
+                      AccountSession.instance.isSignedIn &&
+                      (AccountSession.instance.avatarId == null ||
+                          AccountSession.instance.avatarId!.isEmpty),
                   onSelected: (id) => setState(() => _selectedAvatarId = id),
                 ),
                 const SizedBox(height: 8),

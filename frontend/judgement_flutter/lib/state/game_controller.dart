@@ -62,6 +62,12 @@ class GameController extends ChangeNotifier {
   bool _disposed = false;
   int _reconnectAttempts = 0;
 
+  /// First drop in the current streak. Auto-retry until this window elapses.
+  DateTime? _disconnectSince;
+
+  /// Matches server `RECONNECT_GRACE_SECONDS` (90). After this, show Retry.
+  static const reconnectGiveUpAfter = Duration(seconds: 90);
+
   /// Stop auto-reconnect after abort / intentional switch to a new game.
   bool _suppressReconnect = false;
 
@@ -95,6 +101,36 @@ class GameController extends ChangeNotifier {
   /// Seat whose turn clock is still running.
   PaceOpen? paceOpen;
   GameConnectionState connection = GameConnectionState.connecting;
+
+  /// Tests skip `GameSocket.connect` so they never hit the network.
+  @visibleForTesting
+  bool debugSkipNetworkConnect = false;
+
+  @visibleForTesting
+  int debugCloseSocketCalls = 0;
+
+  @visibleForTesting
+  bool debugPretendSocketOpen = false;
+
+  @visibleForTesting
+  void debugMarkConnected() {
+    connection = GameConnectionState.connected;
+    debugPretendSocketOpen = true;
+  }
+
+  @visibleForTesting
+  void debugMarkDisconnected() {
+    connection = GameConnectionState.disconnected;
+    debugPretendSocketOpen = false;
+  }
+
+  @visibleForTesting
+  bool get debugShouldReconnectOnResume =>
+      !_disposed &&
+      !_suppressReconnect &&
+      !gameAborted &&
+      !(view?.isFinished ?? false) &&
+      connection != GameConnectionState.connected;
 
   static const reconnectChromeDelay = Duration(milliseconds: 1500);
 
@@ -309,6 +345,13 @@ class GameController extends ChangeNotifier {
     return o.first.avatarId;
   }
 
+  String? photoUrlOf(String playerId) {
+    if (playerId == myPlayerId) return view?.ownPhotoUrl;
+    final o = view?.opponents.where((e) => e.playerId == playerId);
+    if (o == null || o.isEmpty) return null;
+    return o.first.photoUrl;
+  }
+
   /// Overall board place, 1–3, for a player at this table.
   int? boardRankOf(String playerId) {
     final current = view;
@@ -351,6 +394,16 @@ class GameController extends ChangeNotifier {
         ? GameConnectionState.connecting
         : GameConnectionState.reconnecting;
     _notify();
+    if (debugSkipNetworkConnect) {
+      connection = GameConnectionState.connected;
+      debugPretendSocketOpen = true;
+      _connectionUnstableSince = null;
+      _reconnectAttempts = 0;
+      _disconnectSince = null;
+      _connectInFlight = false;
+      _notify();
+      return;
+    }
     try {
       final socket = await GameSocket.connect(
         api.gameSocketUri(gameId),
@@ -367,6 +420,7 @@ class GameController extends ChangeNotifier {
       connection = GameConnectionState.connected;
       _connectionUnstableSince = null;
       _reconnectAttempts = 0;
+      _disconnectSince = null;
       // A fresh personalised snapshot is pushed on connect; ask explicitly
       // as well in case this is a resumed session.
       _sendAction({'type': 'request_state_sync'});
@@ -379,12 +433,18 @@ class GameController extends ChangeNotifier {
     }
   }
 
-  static const _maxReconnectAttempts = 5;
+  static const _maxReconnectDelay = Duration(seconds: 4);
+
+  bool get _stillInReconnectWindow {
+    final since = _disconnectSince;
+    if (since == null) return true;
+    return DateTime.now().difference(since) < reconnectGiveUpAfter;
+  }
 
   /// True when auto-reconnect gave up and the user can retry manually.
   bool get canManualReconnect =>
       connection == GameConnectionState.disconnected &&
-      _reconnectAttempts >= _maxReconnectAttempts &&
+      !_stillInReconnectWindow &&
       !_suppressReconnect &&
       !gameAborted &&
       !(view?.isFinished ?? false);
@@ -407,6 +467,7 @@ class GameController extends ChangeNotifier {
   Future<void> manualReconnect() async {
     if (_disposed) return;
     _reconnectAttempts = 0;
+    _disconnectSince = null;
     pendingActionId = null;
     await connect();
   }
@@ -424,14 +485,16 @@ class GameController extends ChangeNotifier {
     if (_suppressReconnect || gameAborted || (view?.isFinished ?? false)) {
       return;
     }
-    final willReconnect = _reconnectAttempts < _maxReconnectAttempts;
+    _disconnectSince ??= DateTime.now();
+    final willReconnect = _stillInReconnectWindow;
     if (!_intentionalLeave) {
       recordExitWsDisconnect(willReconnect: willReconnect);
     }
     if (willReconnect) {
       _reconnectAttempts += 1;
+      final expMs = 500 * pow(2, min(_reconnectAttempts, 3)).toInt();
       final delay = Duration(
-        milliseconds: 500 * pow(2, _reconnectAttempts).toInt(),
+        milliseconds: min(expMs, _maxReconnectDelay.inMilliseconds),
       );
       _reconnectTimer?.cancel();
       _reconnectTimer = Timer(delay, () {
@@ -611,18 +674,22 @@ class GameController extends ChangeNotifier {
     _sendCommand({'type': 'leave_game'});
   }
 
-  /// After foreground resume (tab/app visible), send one keepalive immediately
-  /// in case the periodic timer was throttled while hidden.
-  void onAppResumed() {
+  /// After foreground resume: keepalive if the socket is live, else reconnect.
+  Future<void> onAppResumed() async {
     if (_disposed ||
         _suppressReconnect ||
         gameAborted ||
-        (view?.isFinished ?? false) ||
-        connection != GameConnectionState.connected ||
-        _socket == null) {
+        (view?.isFinished ?? false)) {
       return;
     }
-    _socket!.sendKeepAlive();
+    if (connection == GameConnectionState.connected &&
+        (_socket != null || debugPretendSocketOpen)) {
+      _socket?.sendKeepAlive();
+      return;
+    }
+    _reconnectAttempts = 0;
+    _disconnectSince = null;
+    await connect();
   }
 
   /// True while leaving the route would vacate a live seat (back/close guard).
@@ -707,11 +774,14 @@ class GameController extends ChangeNotifier {
     restartInFlight = false;
     _suppressReconnect = false;
     _reconnectAttempts = 0;
+    _disconnectSince = null;
     _notify();
     await connect();
   }
 
   void _closeSocket() {
+    debugCloseSocketCalls += 1;
+    debugPretendSocketOpen = false;
     _stopKeepAlive();
     _subscription?.cancel();
     _subscription = null;

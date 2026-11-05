@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app.dart';
+import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
@@ -1004,6 +1005,12 @@ class _TableArea extends StatelessWidget {
                   child: SingleChildScrollView(
                     child: AvatarPicker(
                       selectedId: current,
+                      photoUrl: controller.view?.ownPhotoUrl,
+                      nickname: controller.myNickname,
+                      autoSelectProfile:
+                          AccountSession.instance.isSignedIn &&
+                          (AccountSession.instance.avatarId == null ||
+                              AccountSession.instance.avatarId!.isEmpty),
                       onSelected: (id) {
                         controller.setAvatar(id);
                         Navigator.of(sheetContext).pop();
@@ -1036,6 +1043,7 @@ class _TableArea extends StatelessWidget {
               onTap: () => _showAvatarPickerSheet(context),
               child: PlayerAvatar(
                 avatarId: view.ownAvatarId,
+                photoUrl: view.ownPhotoUrl,
                 nickname: controller.myNickname,
                 radius: 12,
                 highlight: isMyTurn,
@@ -1166,6 +1174,7 @@ class _OpponentSeat extends StatelessWidget {
             children: [
               PlayerAvatar(
                 avatarId: opponent.avatarId,
+                photoUrl: opponent.photoUrl,
                 nickname: opponent.nickname,
                 radius: avatarRadius,
                 highlight: isTurn || isLeader,

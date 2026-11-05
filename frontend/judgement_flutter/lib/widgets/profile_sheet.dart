@@ -46,6 +46,7 @@ class _ProfileSheetState extends State<ProfileSheet> {
               children: [
                 PlayerAvatar(
                   avatarId: account.avatarId,
+                  photoUrl: account.photoUrl,
                   nickname: account.displayName ?? 'Player',
                   radius: 22,
                 ),

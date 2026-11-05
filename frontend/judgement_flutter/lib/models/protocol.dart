@@ -123,6 +123,7 @@ class OpponentView {
   final int tricksWon;
   final String connectionStatus;
   final String? avatarId;
+  final String? photoUrl;
 
   /// 1, 2, or 3 on the overall board. Null for everyone else.
   final int? ladderRank;
@@ -139,6 +140,7 @@ class OpponentView {
       tricksWon = json['tricks_won'] as int,
       connectionStatus = json['connection_status'] as String,
       avatarId = json['avatar_id'] as String?,
+      photoUrl = json['photo_url'] as String?,
       ladderRank = json['ladder_rank'] as int?,
       signedIn = json['signed_in'] as bool? ?? false;
 }
@@ -269,6 +271,7 @@ class PlayerGameView {
   final int? ownBid;
   final int ownTricksWon;
   final String? ownAvatarId;
+  final String? ownPhotoUrl;
 
   /// Viewer's place on the overall board, 1–3.
   final int? ownLadderRank;
@@ -300,6 +303,7 @@ class PlayerGameView {
       ownBid = json['own_bid'] as int?,
       ownTricksWon = json['own_tricks_won'] as int,
       ownAvatarId = json['own_avatar_id'] as String?,
+      ownPhotoUrl = json['own_photo_url'] as String?,
       ownLadderRank = json['own_ladder_rank'] as int?,
       ownSignedIn = json['own_signed_in'] as bool? ?? false,
       opponents = (json['opponents'] as List)
@@ -684,6 +688,7 @@ class SeatView {
   final bool ready;
   final bool isHost;
   final String? avatarId;
+  final String? photoUrl;
   final bool vacant;
 
   /// 1, 2, or 3 on the overall board. Null for guests and everyone else.
@@ -699,6 +704,7 @@ class SeatView {
       ready = json['ready'] as bool,
       isHost = json['is_host'] as bool,
       avatarId = json['avatar_id'] as String?,
+      photoUrl = json['photo_url'] as String?,
       vacant = json['vacant'] as bool? ?? false,
       ladderRank = json['ladder_rank'] as int?,
       signedIn = json['signed_in'] as bool? ?? false;

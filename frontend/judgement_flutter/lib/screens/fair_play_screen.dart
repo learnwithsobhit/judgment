@@ -285,6 +285,7 @@ class _RateeRow extends StatelessWidget {
           children: [
             PlayerAvatar(
               avatarId: ratee.avatarId,
+              photoUrl: ratee.photoUrl,
               nickname: ratee.displayName,
               radius: 18,
             ),
@@ -361,6 +362,7 @@ class _TotalsPane extends StatelessWidget {
                   contentPadding: EdgeInsets.zero,
                   leading: PlayerAvatar(
                     avatarId: row.avatarId,
+                    photoUrl: row.photoUrl,
                     nickname: row.displayName,
                     radius: 18,
                     signedIn: true,

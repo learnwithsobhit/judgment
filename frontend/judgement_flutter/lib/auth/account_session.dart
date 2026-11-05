@@ -23,6 +23,7 @@ class AccountSession extends ChangeNotifier {
   String? userId;
   String? displayName;
   String? avatarId;
+  String? photoUrl;
   String? tableNickname;
 
   bool get isSignedIn => token != null && token!.isNotEmpty;
@@ -67,6 +68,7 @@ class AccountSession extends ChangeNotifier {
         userId: me.user.userId,
         displayName: me.user.displayName,
         avatarId: me.user.avatarId,
+        photoUrl: me.user.photoUrl,
         tableNickname: me.nickname,
       );
       await _persist();
@@ -92,6 +94,7 @@ class AccountSession extends ChangeNotifier {
       userId: session.user.userId,
       displayName: session.user.displayName,
       avatarId: session.user.avatarId,
+      photoUrl: session.user.photoUrl,
       tableNickname: session.nickname,
     );
     await _persist();
@@ -117,6 +120,7 @@ class AccountSession extends ChangeNotifier {
     userId = null;
     displayName = null;
     avatarId = null;
+    photoUrl = null;
     tableNickname = null;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -130,7 +134,8 @@ class AccountSession extends ChangeNotifier {
     required String sessionId,
     required String userId,
     required String displayName,
-    required String avatarId,
+    String? avatarId,
+    String? photoUrl,
     required String tableNickname,
   }) {
     this.token = token;
@@ -138,7 +143,14 @@ class AccountSession extends ChangeNotifier {
     this.userId = userId;
     this.displayName = displayName;
     this.avatarId = avatarId;
+    this.photoUrl = photoUrl;
     this.tableNickname = tableNickname;
+  }
+
+  void rememberAvatar(String avatarId) {
+    this.avatarId = avatarId;
+    notifyListeners();
+    _persist();
   }
 
   Future<void> _persist() async {
@@ -153,6 +165,7 @@ class AccountSession extends ChangeNotifier {
         'user_id': userId,
         'display_name': displayName,
         'avatar_id': avatarId,
+        'photo_url': photoUrl,
         'table_nickname': tableNickname,
       }),
     );

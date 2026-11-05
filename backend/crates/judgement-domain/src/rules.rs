@@ -392,7 +392,7 @@ impl GameRules {
             scoring_rule: ScoringRule::default(),
             turn_timeout_seconds: Some(30),
             // Engine/tests default: vacant immediately. Live games override via
-            // `RECONNECT_GRACE_SECONDS` (default 12) at start — see ADR 0004.
+            // `RECONNECT_GRACE_SECONDS` (default 90) at start — see ADR 0004.
             reconnect_grace_seconds: 0,
             allow_bots: true,
         }

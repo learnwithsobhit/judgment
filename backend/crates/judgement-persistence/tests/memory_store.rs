@@ -22,6 +22,7 @@ async fn memory_store_finishes_game_and_records_history() {
                 token: format!("tok-{i}"),
                 created_at: Utc::now(),
                 avatar_id: None,
+                photo_url: None,
                 user_id: None,
             })
             .await
@@ -68,6 +69,7 @@ async fn memory_store_finishes_game_and_records_history() {
                     ready: true,
                     joined_at: Utc::now(),
                     avatar_id: None,
+                    photo_url: None,
                 })
                 .collect(),
             created_at: Utc::now(),
@@ -189,6 +191,7 @@ async fn action_committed_detects_durable_action_id() {
                     ready: true,
                     joined_at: Utc::now(),
                     avatar_id: None,
+                    photo_url: None,
                 })
                 .collect(),
             created_at: Utc::now(),
@@ -253,6 +256,7 @@ async fn signed_in_finish_is_counted_once_and_survives_delete() {
             user_id,
             display_name: "Ada".into(),
             avatar_id: Some("face_01".into()),
+            photo_url: None,
             legal_version: Some("2026-08-03".into()),
             created_at: now,
             updated_at: now,

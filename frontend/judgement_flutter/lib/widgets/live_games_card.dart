@@ -186,6 +186,7 @@ class _LeaderRow extends StatelessWidget {
           const SizedBox(width: 10),
           PlayerAvatar(
             avatarId: first.avatarId,
+            photoUrl: first.photoUrl,
             nickname: first.displayName,
             radius: 18,
             highlight: true,
@@ -283,6 +284,7 @@ class _RunnerLine extends StatelessWidget {
           const SizedBox(width: 8),
           PlayerAvatar(
             avatarId: seat.avatarId,
+            photoUrl: seat.photoUrl,
             nickname: seat.displayName,
             radius: 13,
           ),

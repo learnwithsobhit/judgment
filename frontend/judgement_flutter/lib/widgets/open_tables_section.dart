@@ -61,6 +61,7 @@ class _OpenTableRow extends StatelessWidget {
       children: [
         PlayerAvatar(
           avatarId: table.hostAvatarId,
+          photoUrl: table.hostPhotoUrl,
           nickname: table.hostNickname,
           radius: 18,
         ),

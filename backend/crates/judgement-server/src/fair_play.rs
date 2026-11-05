@@ -56,6 +56,7 @@ pub async fn get_fair_play_game(
             user_id: s.user_id.to_string(),
             display_name: s.display_name.clone(),
             avatar_id: s.avatar_id.clone(),
+            photo_url: s.photo_url.clone(),
         })
         .collect();
     let can_vote = window_open && !already && !ratees.is_empty();
@@ -119,6 +120,7 @@ pub async fn submit_fair_play_game(
             user_id: s.user_id.to_string(),
             display_name: s.display_name.clone(),
             avatar_id: s.avatar_id.clone(),
+            photo_url: s.photo_url.clone(),
         })
         .collect();
     Ok(Json(FairPlayGameView {
@@ -132,6 +134,7 @@ pub async fn submit_fair_play_game(
                     user_id: t.user_id.to_string(),
                     display_name: t.display_name,
                     avatar_id: t.avatar_id,
+                    photo_url: t.photo_url,
                     points: t.points,
                     ratings: t.ratings,
                 })
@@ -160,6 +163,7 @@ pub async fn get_fair_play_leaderboard(
             rank: index as i32 + 1,
             display_name: row.display_name,
             avatar_id: row.avatar_id,
+            photo_url: row.photo_url,
             points_received: row.points_received,
             ratings_received: row.ratings_received,
             games_rated: row.games_rated,
@@ -182,6 +186,7 @@ async fn load_totals(state: &AppState, game_id: Uuid) -> Result<Vec<FairPlayTota
             user_id: t.user_id.to_string(),
             display_name: t.display_name,
             avatar_id: t.avatar_id,
+            photo_url: t.photo_url,
             points: t.points,
             ratings: t.ratings,
         })

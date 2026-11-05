@@ -18,6 +18,8 @@ pub struct StoredSession {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
     /// Set when this play session belongs to a Google account.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_id: Option<uuid::Uuid>,
@@ -33,6 +35,8 @@ pub struct StoredRoomPlayer {
     pub joined_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +173,7 @@ pub struct StoredUser {
     pub user_id: uuid::Uuid,
     pub display_name: String,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
     pub legal_version: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -188,6 +193,7 @@ pub struct LeaderboardRow {
     pub user_id: uuid::Uuid,
     pub display_name: String,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
     pub wins: i32,
     pub games: i32,
     pub exact_percent: i32,
@@ -206,6 +212,7 @@ pub struct LatestGameSeat {
     pub user_id: uuid::Uuid,
     pub display_name: String,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
     pub finish_rank: i32,
     pub total_score: i32,
     pub exact_bid_rounds: i32,
@@ -243,6 +250,7 @@ pub struct UserStatsView {
     pub user_id: uuid::Uuid,
     pub display_name: String,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
     pub games_played: i32,
     pub wins: i32,
     pub lifetime_points: i64,

@@ -313,6 +313,7 @@ class ApiClient {
     required String idToken,
     String? displayName,
     String? legalVersion,
+    String? photoUrl,
   }) async {
     final response = await _http.post(
       Uri.parse('$baseUrl/api/v1/auth/firebase'),
@@ -321,6 +322,7 @@ class ApiClient {
         'id_token': idToken,
         if (displayName != null) 'display_name': displayName,
         if (legalVersion != null) 'legal_version': legalVersion,
+        if (photoUrl != null) 'photo_url': photoUrl,
       }),
     );
     final json = _decode(response);
@@ -449,17 +451,20 @@ class FairPlayRatee {
     required this.userId,
     required this.displayName,
     this.avatarId,
+    this.photoUrl,
   });
 
   final String userId;
   final String displayName;
   final String? avatarId;
+  final String? photoUrl;
 
   factory FairPlayRatee.fromJson(Map<String, dynamic> json) {
     return FairPlayRatee(
       userId: json['user_id'] as String,
       displayName: json['display_name'] as String,
       avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
     );
   }
 }
@@ -471,11 +476,13 @@ class FairPlayTotal {
     required this.points,
     required this.ratings,
     this.avatarId,
+    this.photoUrl,
   });
 
   final String userId;
   final String displayName;
   final String? avatarId;
+  final String? photoUrl;
   final int points;
   final int ratings;
 
@@ -484,6 +491,7 @@ class FairPlayTotal {
       userId: json['user_id'] as String,
       displayName: json['display_name'] as String,
       avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
       points: json['points'] as int,
       ratings: json['ratings'] as int,
     );
@@ -526,11 +534,13 @@ class FairPlayLeaderboardEntry {
     required this.gamesRated,
     required this.average,
     this.avatarId,
+    this.photoUrl,
   });
 
   final int rank;
   final String displayName;
   final String? avatarId;
+  final String? photoUrl;
   final int pointsReceived;
   final int ratingsReceived;
   final int gamesRated;
@@ -541,6 +551,7 @@ class FairPlayLeaderboardEntry {
       rank: json['rank'] as int,
       displayName: json['display_name'] as String,
       avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
       pointsReceived: json['points_received'] as int? ?? 0,
       ratingsReceived: json['ratings_received'] as int? ?? 0,
       gamesRated: json['games_rated'] as int? ?? 0,
@@ -569,18 +580,21 @@ class PublicUser {
   PublicUser({
     required this.userId,
     required this.displayName,
-    required this.avatarId,
+    this.avatarId,
+    this.photoUrl,
   });
 
   final String userId;
   final String displayName;
-  final String avatarId;
+  final String? avatarId;
+  final String? photoUrl;
 
   factory PublicUser.fromJson(Map<String, dynamic> json) {
     return PublicUser(
       userId: json['user_id'] as String,
       displayName: json['display_name'] as String,
-      avatarId: json['avatar_id'] as String? ?? 'fox',
+      avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
     );
   }
 }
@@ -631,7 +645,8 @@ class AuthSession {
 class MeStats {
   MeStats({
     required this.displayName,
-    required this.avatarId,
+    this.avatarId,
+    this.photoUrl,
     required this.gamesPlayed,
     required this.wins,
     required this.losses,
@@ -641,7 +656,8 @@ class MeStats {
   });
 
   final String displayName;
-  final String avatarId;
+  final String? avatarId;
+  final String? photoUrl;
   final int gamesPlayed;
   final int wins;
   final int losses;
@@ -652,7 +668,8 @@ class MeStats {
   factory MeStats.fromJson(Map<String, dynamic> json) {
     return MeStats(
       displayName: json['display_name'] as String? ?? 'Player',
-      avatarId: json['avatar_id'] as String? ?? 'fox',
+      avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
       gamesPlayed: json['games_played'] as int? ?? 0,
       wins: json['wins'] as int? ?? 0,
       losses: json['losses'] as int? ?? 0,
@@ -668,6 +685,7 @@ class LeaderboardEntry {
     required this.rank,
     required this.displayName,
     required this.avatarId,
+    this.photoUrl,
     required this.wins,
     required this.games,
     required this.exactPercent,
@@ -683,6 +701,7 @@ class LeaderboardEntry {
   final int rank;
   final String displayName;
   final String avatarId;
+  final String? photoUrl;
   final int wins;
   final int games;
   final int exactPercent;
@@ -722,6 +741,7 @@ class LeaderboardEntry {
       rank: json['rank'] as int? ?? 0,
       displayName: json['display_name'] as String? ?? 'Player',
       avatarId: json['avatar_id'] as String? ?? 'fox',
+      photoUrl: json['photo_url'] as String?,
       wins: wins,
       games: json['games'] as int? ?? 0,
       exactPercent: json['exact_percent'] as int? ?? 0,
@@ -791,17 +811,20 @@ class ActiveGameSeat {
   const ActiveGameSeat({
     required this.displayName,
     this.avatarId,
+    this.photoUrl,
     required this.totalScore,
   });
 
   final String displayName;
   final String? avatarId;
+  final String? photoUrl;
   final int totalScore;
 
   factory ActiveGameSeat.fromJson(Map<String, dynamic> json) {
     return ActiveGameSeat(
       displayName: json['display_name'] as String? ?? 'Player',
       avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
       totalScore: json['total_score'] as int? ?? 0,
     );
   }
@@ -855,6 +878,7 @@ class LatestGameSeat {
     required this.userId,
     required this.displayName,
     this.avatarId,
+    this.photoUrl,
     required this.finishRank,
     required this.totalScore,
     required this.exactBidRounds,
@@ -863,6 +887,7 @@ class LatestGameSeat {
   final String userId;
   final String displayName;
   final String? avatarId;
+  final String? photoUrl;
   final int finishRank;
   final int totalScore;
   final int exactBidRounds;
@@ -872,6 +897,7 @@ class LatestGameSeat {
       userId: json['user_id'] as String? ?? '',
       displayName: json['display_name'] as String? ?? 'Player',
       avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
       finishRank: json['finish_rank'] as int? ?? 0,
       totalScore: json['total_score'] as int? ?? 0,
       exactBidRounds: json['exact_bid_rounds'] as int? ?? 0,
@@ -931,6 +957,49 @@ class LeaderboardReport {
       latestGame: latest is Map<String, dynamic>
           ? LatestGame.fromJson(latest)
           : null,
+    );
+  }
+}
+
+class OpenTable {
+  const OpenTable({
+    required this.roomId,
+    required this.hostNickname,
+    this.hostAvatarId,
+    this.hostPhotoUrl,
+    required this.seated,
+    required this.maxPlayers,
+    required this.seatsOpen,
+    this.withNames = const [],
+    required this.yours,
+    this.inGame = false,
+  });
+
+  final String roomId;
+  final String hostNickname;
+  final String? hostAvatarId;
+  final String? hostPhotoUrl;
+  final int seated;
+  final int maxPlayers;
+  final int seatsOpen;
+  final List<String> withNames;
+  final bool yours;
+  final bool inGame;
+
+  factory OpenTable.fromJson(Map<String, dynamic> json) {
+    return OpenTable(
+      roomId: json['room_id'] as String,
+      hostNickname: json['host_nickname'] as String? ?? 'Player',
+      hostAvatarId: json['host_avatar_id'] as String?,
+      hostPhotoUrl: json['host_photo_url'] as String?,
+      seated: json['seated'] as int? ?? 0,
+      maxPlayers: json['max_players'] as int? ?? 0,
+      seatsOpen: json['seats_open'] as int? ?? 0,
+      withNames: (json['with_names'] as List<dynamic>? ?? const [])
+          .map((name) => name as String)
+          .toList(),
+      yours: json['yours'] as bool? ?? false,
+      inGame: json['in_game'] as bool? ?? false,
     );
   }
 }

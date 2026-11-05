@@ -90,6 +90,7 @@ async fn fair_play_http_hides_ballots_and_ranks_totals() {
                 player_id: Uuid::new_v4(),
                 display_name: "Alice".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
             FairPlayRosterSeat {
@@ -98,6 +99,7 @@ async fn fair_play_http_hides_ballots_and_ranks_totals() {
                 player_id: Uuid::new_v4(),
                 display_name: "Bob".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
             FairPlayRosterSeat {
@@ -106,6 +108,7 @@ async fn fair_play_http_hides_ballots_and_ranks_totals() {
                 player_id: Uuid::new_v4(),
                 display_name: "Cara".into(),
                 avatar_id: None,
+                photo_url: None,
                 finished_at: finished,
             },
         ])

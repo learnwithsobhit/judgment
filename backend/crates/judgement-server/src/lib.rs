@@ -15,6 +15,7 @@ pub mod http_limit;
 pub mod leaderboard;
 pub mod metrics;
 pub mod persist;
+pub mod photos;
 pub mod rag_boot;
 pub mod reaper;
 pub mod restore;
@@ -58,6 +59,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(fair_play::get_fair_play_leaderboard),
         )
         .route("/api/v1/me/avatar", post(routes::set_avatar))
+        .route("/api/v1/photos", get(photos::proxy_photo))
         .route("/api/v1/rooms", post(routes::create_room))
         .route("/api/v1/rooms/{room_ref}", get(routes::get_room))
         .route("/api/v1/rooms/{room_ref}/join", post(routes::join_room))

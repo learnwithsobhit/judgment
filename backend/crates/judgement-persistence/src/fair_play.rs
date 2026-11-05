@@ -23,6 +23,7 @@ pub struct FairPlayRosterSeat {
     pub player_id: Uuid,
     pub display_name: String,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
     pub finished_at: DateTime<Utc>,
 }
 
@@ -37,6 +38,7 @@ pub struct FairPlayGameTotal {
     pub user_id: Uuid,
     pub display_name: String,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
     pub points: i32,
     pub ratings: i32,
 }
@@ -46,6 +48,7 @@ pub struct FairPlayLeaderboardRow {
     pub user_id: Uuid,
     pub display_name: String,
     pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
     pub points_received: i32,
     pub ratings_received: i32,
     pub games_rated: i32,
@@ -129,6 +132,7 @@ mod tests {
             player_id: Uuid::from_u128(100 + user as u128),
             display_name: name.into(),
             avatar_id: None,
+            photo_url: None,
             finished_at: Utc::now(),
         }
     }
