@@ -76,6 +76,56 @@ pub fn sanitize_photo_url(source: PhotoSource, raw: Option<&str>) -> Option<Stri
     allowed.then(|| url.to_string())
 }
 
+/// Drop our cache-busting `jrev` query param before fetching the provider URL.
+pub fn strip_photo_revision(url: &str) -> String {
+    let Some((base, rest)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    let (query, fragment) = match rest.split_once('#') {
+        Some((query, fragment)) => (query, Some(fragment)),
+        None => (rest, None),
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|part| !part.is_empty() && part.split('=').next() != Some("jrev"))
+        .collect();
+    let mut out = base.to_string();
+    if !kept.is_empty() {
+        out.push('?');
+        out.push_str(&kept.join("&"));
+    }
+    if let Some(fragment) = fragment {
+        out.push('#');
+        out.push_str(fragment);
+    }
+    out
+}
+
+/// New sign-ins keep the provider URL but change this param so browsers fetch
+/// the current bytes. Google and Telegram often reuse one URL forever.
+pub fn stamp_photo_revision(url: String) -> String {
+    let base = strip_photo_revision(&url);
+    let rev = next_photo_revision();
+    let stamped = if base.contains('?') {
+        format!("{base}&jrev={rev}")
+    } else {
+        format!("{base}?jrev={rev}")
+    };
+    if stamped.len() > MAX_PHOTO_URL_LEN {
+        base
+    } else {
+        stamped
+    }
+}
+
+fn next_photo_revision() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TICK: AtomicU64 = AtomicU64::new(1);
+    let tick = TICK.fetch_add(1, Ordering::Relaxed);
+    let millis = chrono::Utc::now().timestamp_millis().max(0) as u64;
+    millis.saturating_add(tick)
+}
+
 /// Telegram profile CDN hosts. Used for stored URLs and the image proxy.
 pub fn is_telegram_photo_host(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
@@ -420,6 +470,21 @@ mod tests {
         assert!(is_telegram_photo_host("cdn4.telesco.pe"));
         assert!(is_telegram_photo_host("telegram.org"));
         assert!(!is_telegram_photo_host("evil.example"));
+    }
+
+    #[test]
+    fn photo_revision_changes_each_sign_in_and_strips_for_fetch() {
+        let first = stamp_photo_revision("https://lh3.googleusercontent.com/a/abc".into());
+        let second = stamp_photo_revision("https://lh3.googleusercontent.com/a/abc?jrev=1".into());
+        assert_ne!(first, second);
+        assert_eq!(
+            strip_photo_revision(&first),
+            "https://lh3.googleusercontent.com/a/abc"
+        );
+        assert_eq!(
+            strip_photo_revision("https://t.me/i/userpic/320/abc.jpg?size=320&jrev=9"),
+            "https://t.me/i/userpic/320/abc.jpg?size=320"
+        );
     }
 
     #[test]

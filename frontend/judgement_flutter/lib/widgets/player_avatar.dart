@@ -140,6 +140,9 @@ class _PlayerAvatarState extends State<PlayerAvatar>
     );
     final rank = _capRank(widget.boardRank);
     final badgeSize = (widget.radius * 0.72).clamp(12.0, 18.0);
+    final capHeight = widget.radius * _capHeightFactor;
+    // Portrait padding is the top of the circle. Sit the brim on that rim.
+    const portraitPad = 3.0;
     final child = ScaleTransition(
       scale: _scale,
       child: Stack(
@@ -149,7 +152,7 @@ class _PlayerAvatarState extends State<PlayerAvatar>
           portrait,
           if (rank != null)
             Positioned(
-              top: -widget.radius * 0.55,
+              top: portraitPad - capHeight,
               left: 0,
               right: 0,
               child: Align(
@@ -270,8 +273,11 @@ int? _capRank(int? rank) {
   return rank;
 }
 
-/// Painted cap for overall 1st, 2nd, or 3rd. It sits on the portrait and
-/// does not change the avatar's layout size.
+const _capWidthFactor = 1.45;
+const _capHeightFactor = 1.07;
+
+/// Painted cap for overall 1st, 2nd, or 3rd. It sits on the top rim of the
+/// portrait and does not change the avatar's layout size.
 class _RankCap extends StatelessWidget {
   final int rank;
   final double radius;
@@ -310,8 +316,8 @@ class _RankCap extends StatelessWidget {
       child: Semantics(
         label: label,
         child: SizedBox(
-          width: radius * 2.5,
-          height: radius * 1.85,
+          width: radius * _capWidthFactor,
+          height: radius * _capHeightFactor,
           child: CustomPaint(
             painter: _CapPainter(
               dome: dome,

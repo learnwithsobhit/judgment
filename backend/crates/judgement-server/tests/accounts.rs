@@ -530,7 +530,7 @@ async fn google_photo_is_stored_without_changing_an_existing_face() {
         .json()
         .await
         .unwrap();
-    assert_eq!(first["user"]["photo_url"], photo);
+    assert_photo_base(&first["user"]["photo_url"], photo);
     assert!(first["user"]["avatar_id"].is_null());
 
     let token = first["token"].as_str().unwrap();
@@ -559,10 +559,37 @@ async fn google_photo_is_stored_without_changing_an_existing_face() {
         .await
         .unwrap();
     assert_eq!(again["user"]["avatar_id"], "face_07");
-    assert_eq!(
-        again["user"]["photo_url"],
-        "https://lh3.googleusercontent.com/a/other"
+    assert_photo_base(
+        &again["user"]["photo_url"],
+        "https://lh3.googleusercontent.com/a/other",
     );
+
+    let same: Value = client
+        .post(format!("{base}/api/v1/auth/firebase"))
+        .json(&serde_json::json!({
+            "id_token": provider_token(secret, "google-photo-ada", "Ada", Some("google.com"), true),
+            "photo_url": "https://lh3.googleusercontent.com/a/other",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_photo_base(
+        &same["user"]["photo_url"],
+        "https://lh3.googleusercontent.com/a/other",
+    );
+    assert_ne!(same["user"]["photo_url"], again["user"]["photo_url"]);
+}
+
+fn assert_photo_base(actual: &Value, base: &str) {
+    let url = actual.as_str().expect("photo url");
+    let stored = url.split("?jrev=").next().unwrap();
+    assert_eq!(stored, base, "{url}");
+    assert!(url.contains("jrev="), "{url}");
 }
 
 #[tokio::test]
@@ -632,7 +659,7 @@ async fn telegram_picture_claim_is_stored_and_missing_picture_still_signs_in() {
         .json()
         .await
         .unwrap();
-    assert_eq!(with_pic["user"]["photo_url"], photo);
+    assert_photo_base(&with_pic["user"]["photo_url"], photo);
 
     let no_pic: Value = client
         .post(format!("{base}/api/v1/auth/telegram"))

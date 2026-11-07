@@ -13,7 +13,9 @@ use axum::response::{IntoResponse, Response};
 use reqwest::redirect::Policy;
 use serde::Deserialize;
 
-use crate::emotes::{is_telegram_photo_host, sanitize_photo_url, PhotoSource};
+use crate::emotes::{
+    is_telegram_photo_host, sanitize_photo_url, strip_photo_revision, PhotoSource,
+};
 
 const MAX_PHOTO_BYTES: usize = 512 * 1024;
 
@@ -32,7 +34,9 @@ pub async fn proxy_photo(Query(query): Query<PhotoQuery>) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let response = match photo_client().get(&url).send().await {
+    // `jrev` only changes the browser cache key. Telegram must see its own URL.
+    let upstream = strip_photo_revision(&url);
+    let response = match photo_client().get(&upstream).send().await {
         Ok(response) if response.status().is_success() => response,
         Ok(_) | Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
     };
@@ -57,7 +61,7 @@ pub async fn proxy_photo(Query(query): Query<PhotoQuery>) -> Response {
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=86400"),
+        HeaderValue::from_static("private, no-cache"),
     );
     headers.insert(
         header::HeaderName::from_static("cross-origin-resource-policy"),

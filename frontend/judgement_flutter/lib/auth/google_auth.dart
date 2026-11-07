@@ -102,15 +102,38 @@ Future<GoogleSignInResult> _popupToken(
 ) async {
   await _ensureFirebase(missing);
   final signedIn = await FirebaseAuth.instance.signInWithPopup(provider);
-  final firebaseToken = await signedIn.user?.getIdToken();
+  var user = signedIn.user;
+  if (user != null) {
+    try {
+      await user.reload();
+      user = FirebaseAuth.instance.currentUser ?? user;
+    } catch (_) {
+      // Popup already succeeded. Keep that user if the refresh fails.
+    }
+  }
+  final firebaseToken = await user?.getIdToken(true);
   if (firebaseToken == null || firebaseToken.isEmpty) {
     throw StateError('Firebase did not return a token');
   }
   return GoogleSignInResult(
     idToken: firebaseToken,
-    photoUrl:
-        signedIn.user?.photoURL ?? FirebaseAuth.instance.currentUser?.photoURL,
+    photoUrl: _providerPhotoUrl(user),
   );
+}
+
+/// Google keeps the same photo URL string after a picture change. `reload`
+/// still picks up a new URL when the provider actually issued one.
+String? _providerPhotoUrl(User? user) {
+  if (user == null) return null;
+  for (final info in user.providerData) {
+    final url = info.photoURL?.trim();
+    if (info.providerId == 'google.com' && url != null && url.isNotEmpty) {
+      return url;
+    }
+  }
+  final url = user.photoURL?.trim();
+  if (url == null || url.isEmpty) return null;
+  return url;
 }
 
 Future<void> _ensureFirebase(String missing) async {

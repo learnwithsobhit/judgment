@@ -25,7 +25,9 @@ use judgement_protocol::{
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::emotes::{avatar_allowed_for_user, sanitize_photo_url, PhotoSource};
+use crate::emotes::{
+    avatar_allowed_for_user, sanitize_photo_url, stamp_photo_revision, PhotoSource,
+};
 use crate::error::ApiError;
 use crate::persist::stored_session;
 use crate::state::AppState;
@@ -100,8 +102,12 @@ async fn open_account_session(
         40,
     );
     let avatar_id = existing.as_ref().and_then(|user| user.avatar_id.clone());
-    let photo_url =
-        incoming_photo.or_else(|| existing.as_ref().and_then(|user| user.photo_url.clone()));
+    // A provider photo replaces the stored URL and busts the browser cache.
+    // No photo on this sign-in (email, or a missing claim) keeps the old one.
+    let photo_url = match incoming_photo {
+        Some(url) => Some(stamp_photo_revision(url)),
+        None => existing.as_ref().and_then(|user| user.photo_url.clone()),
+    };
     let legal_version = requested_legal
         .as_deref()
         .map(str::trim)
