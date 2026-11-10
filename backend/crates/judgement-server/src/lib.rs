@@ -4,8 +4,10 @@ pub mod active_games;
 pub mod actor;
 pub mod audio;
 pub mod auth;
+pub mod availability;
 pub mod capacity;
 pub mod cleanup;
+pub mod config;
 pub mod cors;
 pub mod emotes;
 pub mod error;
@@ -28,7 +30,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware;
-use axum::routing::{any, get, post};
+use axum::routing::{any, get, patch, post, put};
 use axum::Router;
 
 use crate::cors::cors_layer_from_env;
@@ -53,7 +55,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/me/logout", post(auth::logout_me))
         .route("/api/v1/me/stats", get(auth::get_me_stats))
         .route("/api/v1/leaderboard", get(auth::get_leaderboard))
+        .route("/api/v1/config", get(config::get_public_config))
+        .route("/api/v1/admin/festival", patch(config::set_festival))
         .route("/api/v1/active-games", get(active_games::get_active_games))
+        .route("/api/v1/availability", get(availability::get_availability))
+        .route(
+            "/api/v1/me/availability",
+            put(availability::put_my_availability),
+        )
         .route(
             "/api/v1/fair-play/leaderboard",
             get(fair_play::get_fair_play_leaderboard),

@@ -1078,3 +1078,59 @@ class HighlightsResponse {
       deterministic = json['deterministic'] as bool? ?? true,
       fallbackReason = json['fallback_reason'] as String?;
 }
+
+/// One signed-in player free to play right now. Names and avatars only.
+class AvailabilityPlayer {
+  const AvailabilityPlayer({
+    required this.userId,
+    required this.displayName,
+    this.avatarId,
+    this.photoUrl,
+    required this.availableUntil,
+  });
+
+  final String userId;
+  final String displayName;
+  final String? avatarId;
+  final String? photoUrl;
+  final DateTime availableUntil;
+
+  factory AvailabilityPlayer.fromJson(Map<String, dynamic> json) {
+    final until = json['available_until'] as String?;
+    return AvailabilityPlayer(
+      userId: json['user_id'] as String? ?? '',
+      displayName: json['display_name'] as String? ?? 'Player',
+      avatarId: json['avatar_id'] as String?,
+      photoUrl: json['photo_url'] as String?,
+      availableUntil: until == null
+          ? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
+          : (DateTime.tryParse(until) ??
+                DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)),
+    );
+  }
+}
+
+/// Public `GET /api/v1/availability` board.
+class AvailabilityBoard {
+  const AvailabilityBoard({
+    required this.count,
+    required this.ready,
+    required this.players,
+  });
+
+  final int count;
+  final bool ready;
+  final List<AvailabilityPlayer> players;
+
+  factory AvailabilityBoard.fromJson(Map<String, dynamic> json) {
+    final players = (json['players'] as List<dynamic>? ?? const [])
+        .map((row) => AvailabilityPlayer.fromJson(row as Map<String, dynamic>))
+        .toList();
+    final count = json['count'] as int? ?? players.length;
+    return AvailabilityBoard(
+      count: count,
+      ready: json['ready'] as bool? ?? count >= 3,
+      players: players,
+    );
+  }
+}

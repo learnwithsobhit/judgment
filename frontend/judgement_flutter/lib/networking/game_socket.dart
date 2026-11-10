@@ -10,7 +10,9 @@ import '../models/protocol.dart';
 
 class GameSocket {
   final WebSocketChannel _channel;
-  final StreamController<ServerMessage> _messages = StreamController.broadcast();
+  // Single-subscription so frames that arrive between handshake and
+  // GameController.listen (token_rotated, snapshot, game_resumed) are buffered.
+  final StreamController<ServerMessage> _messages = StreamController();
   final void Function()? onDone;
   final void Function(Object error)? onError;
 
@@ -65,7 +67,11 @@ class GameSocket {
   }
 
   void sendEnvelope(Map<String, dynamic> envelope) {
-    _channel.sink.add(jsonEncode(envelope));
+    try {
+      _channel.sink.add(jsonEncode(envelope));
+    } catch (error) {
+      onError?.call(error);
+    }
   }
 
   void close() {

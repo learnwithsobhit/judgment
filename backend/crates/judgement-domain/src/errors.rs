@@ -25,7 +25,10 @@ pub enum GameError {
     #[error("you have already placed a bid this round")]
     BidAlreadyPlaced,
     #[error("your client state is stale; resynchronise")]
-    StaleState { expected_version: u64, actual_version: u64 },
+    StaleState {
+        expected_version: u64,
+        actual_version: u64,
+    },
     #[error("this action was already processed")]
     ActionAlreadyProcessed,
     #[error("player is not part of this game")]

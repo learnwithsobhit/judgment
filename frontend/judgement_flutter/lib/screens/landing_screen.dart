@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../app/app.dart';
 import '../auth/account_session.dart';
+import '../theme/festival_controller.dart';
+import '../theme/judgement_palette.dart';
 import '../auth/google_sign_in_flow.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
@@ -14,9 +16,12 @@ import '../util/legal_consent.dart';
 import '../util/room_rejoin.dart';
 import '../util/table_media_session.dart';
 import '../widgets/app_version_bar.dart';
+import '../widgets/festival_admin_toggle.dart';
+import '../widgets/festival_greeting_banner.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/latest_game_card.dart';
 import '../widgets/live_games_card.dart';
+import '../widgets/whos_free_card.dart';
 import '../widgets/leaderboard_sheet.dart';
 import '../widgets/legal_consent_checkbox.dart';
 import '../widgets/player_avatar.dart';
@@ -48,11 +53,18 @@ class LandingScreen extends StatefulWidget {
 class _LandingScreenState extends State<LandingScreen> with RouteAware {
   final _nickname = TextEditingController();
   final _roomCode = TextEditingController();
+  final _scrollController = ScrollController();
+  final _createCardKey = GlobalKey();
+  final _nicknameFocus = FocusNode();
+  final _createButtonFocus = FocusNode();
   late bool _joining; // false = create, true = join
   bool _busy = false;
   bool _legalAccepted = false;
   LeaderboardReport? _latestReport;
   List<ActiveGame> _liveGames = const [];
+  AvailabilityBoard? _availability;
+  bool _availabilitySaving = false;
+  String? _availabilitySaveError;
   Timer? _liveTimer;
   bool _watchingRoute = false;
   String _selectedAvatarId = defaultAvatarId;
@@ -77,8 +89,10 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     }
     AccountSession.instance.addListener(_onAccount);
     AccountSession.instance.restore();
+    FestivalController.instance.refreshIfIdle();
     _loadLatestGame();
     _loadLiveGames();
+    _loadAvailability();
     _startLivePoll();
   }
 
@@ -100,16 +114,18 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
 
   @override
   void didPopNext() {
+    FestivalController.instance.refreshIfIdle();
     _loadLiveGames();
+    _loadAvailability();
     _startLivePoll();
   }
 
   void _startLivePoll() {
     if (_liveTimer != null) return;
-    _liveTimer = Timer.periodic(
-      const Duration(seconds: 15),
-      (_) => _loadLiveGames(),
-    );
+    _liveTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _loadLiveGames();
+      _loadAvailability(refreshWindow: true);
+    });
   }
 
   void _stopLivePoll() {
@@ -123,6 +139,77 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
       if (!mounted) return;
       setState(() => _liveGames = games);
     } catch (_) {}
+  }
+
+  bool get _iAmFree {
+    final id = AccountSession.instance.userId;
+    final board = _availability;
+    if (id == null || id.isEmpty || board == null) return false;
+    return board.players.any((player) => player.userId == id);
+  }
+
+  Future<void> _loadAvailability({bool refreshWindow = false}) async {
+    try {
+      if (refreshWindow &&
+          !_availabilitySaving &&
+          AccountSession.instance.isSignedIn &&
+          _iAmFree) {
+        try {
+          final api = ApiClient()..token = AccountSession.instance.token;
+          await api.setAvailability(true);
+        } catch (_) {}
+      }
+      final board = await availabilityLoad();
+      if (!mounted) return;
+      setState(() => _availability = board);
+    } catch (_) {}
+  }
+
+  Future<void> _setAvailability(bool available) async {
+    if (_availabilitySaving) return;
+    final token = AccountSession.instance.token;
+    if (!AccountSession.instance.isSignedIn || token == null || token.isEmpty) {
+      return;
+    }
+    setState(() {
+      _availabilitySaving = true;
+      _availabilitySaveError = null;
+    });
+    try {
+      final api = ApiClient()..token = token;
+      var board = await api.setAvailability(available);
+      try {
+        board = await availabilityLoad();
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() => _availability = board);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _availabilitySaveError = 'Couldn\'t update. Try again.');
+    } finally {
+      if (mounted) setState(() => _availabilitySaving = false);
+    }
+  }
+
+  void _startTableFromBoard() {
+    setState(() => _joining = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = _createCardKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOut,
+          alignment: 0.05,
+        );
+      }
+      if (_nickname.text.trim().isEmpty) {
+        _nicknameFocus.requestFocus();
+      } else {
+        _createButtonFocus.requestFocus();
+      }
+    });
   }
 
   Future<void> _loadLatestGame() async {
@@ -142,6 +229,9 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     AccountSession.instance.removeListener(_onAccount);
     _nickname.dispose();
     _roomCode.dispose();
+    _scrollController.dispose();
+    _nicknameFocus.dispose();
+    _createButtonFocus.dispose();
     super.dispose();
   }
 
@@ -160,6 +250,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
         _selectedAvatarId = avatar!;
       }
     });
+    _loadAvailability();
   }
 
   Future<void> _pickAvatar(String id) async {
@@ -329,6 +420,12 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           ),
         );
       }
+      if (account.isSignedIn) {
+        try {
+          final clearer = ApiClient()..token = account.token;
+          await clearer.setAvailability(false);
+        } catch (_) {}
+      }
       final seatedId = playerId;
       if (seatedId == null) {
         Navigator.of(context).push(
@@ -448,6 +545,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (_) => const ProfileSheet(),
     );
   }
@@ -721,22 +819,25 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
+          controller: _scrollController,
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
+                Text(
                   '\u2660 \u2665 Judgement \u2666 \u2663',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 34,
                     fontWeight: FontWeight.w800,
-                    color: goldAccent,
+                    color: context.palette.title,
                     letterSpacing: 1.5,
                   ),
                 ),
+                const FestivalAdminToggle(),
+                const FestivalGreetingBanner(),
                 const SizedBox(height: 8),
                 Text(
                   'Bid exactly. Win exactly. Three to eight players.',
@@ -744,7 +845,26 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
                 ),
                 const SizedBox(height: 32),
+                if (_availability != null) ...[
+                  ListenableBuilder(
+                    listenable: AccountSession.instance,
+                    builder: (context, _) {
+                      final account = AccountSession.instance;
+                      return WhosFreeCard(
+                        board: _availability!,
+                        signedIn: account.isSignedIn,
+                        myUserId: account.userId,
+                        saving: _availabilitySaving,
+                        saveError: _availabilitySaveError,
+                        onToggle: _setAvailability,
+                        onStartTable: _startTableFromBoard,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 Card(
+                  key: _createCardKey,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: Column(
@@ -752,11 +872,11 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                         if (_fromLink) ...[
                           Text(
                             'Joining room ${_roomCode.text}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 2,
-                              color: goldAccent,
+                              color: context.palette.title,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -788,6 +908,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                         const SizedBox(height: 20),
                         TextField(
                           controller: _nickname,
+                          focusNode: _nicknameFocus,
                           autofocus: _fromLink,
                           maxLength: 24,
                           decoration: const InputDecoration(
@@ -842,6 +963,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                               width: double.infinity,
                               height: 48,
                               child: FilledButton(
+                                focusNode: _createButtonFocus,
                                 onPressed: blocked ? null : _submit,
                                 child: _busy
                                     ? const SizedBox(

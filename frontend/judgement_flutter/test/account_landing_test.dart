@@ -4,8 +4,11 @@ import 'package:judgement_flutter/app/app.dart';
 import 'package:judgement_flutter/auth/account_session.dart';
 import 'package:judgement_flutter/auth/google_sign_in_flow.dart';
 import 'package:judgement_flutter/networking/api_client.dart';
+import 'package:judgement_flutter/theme/festival_controller.dart';
 import 'package:judgement_flutter/widgets/leaderboard_sheet.dart';
+import 'package:judgement_flutter/models/protocol.dart';
 import 'package:judgement_flutter/widgets/live_games_card.dart';
+import 'package:judgement_flutter/widgets/whos_free_card.dart';
 import 'package:judgement_flutter/widgets/profile_sheet.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -68,6 +71,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await AccountSession.instance.clearLocal();
     activeGamesLoad = () async => const [];
+    availabilityLoad = () async =>
+        const AvailabilityBoard(count: 0, ready: false, players: []);
+    festivalConfigLoad = () async => 'off';
+    FestivalController.instance.resetForTest();
   });
 
   tearDown(() {
@@ -76,6 +83,9 @@ void main() {
     debugTelegramSignInOverride = null;
     leaderboardLoad = () => ApiClient().getLeaderboard();
     activeGamesLoad = () => ApiClient().getActiveGames();
+    availabilityLoad = () => ApiClient().getAvailability();
+    festivalConfigLoad = () => ApiClient().getConfig();
+    FestivalController.instance.resetForTest();
   });
 
   testWidgets('a failed Google sign-in leaves Create room usable', (

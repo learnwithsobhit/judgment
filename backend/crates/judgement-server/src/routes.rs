@@ -691,6 +691,52 @@ pub async fn leave_room(
         .resolve_room_id(&room_ref)
         .ok_or(ApiError::NotFound("room"))?;
 
+    let in_game =
+        {
+            let rooms = state.rooms.lock().unwrap();
+            let room = rooms.get(&room_id).ok_or(ApiError::NotFound("room"))?;
+            match room.status {
+                RoomStatus::InGame(game_id) => {
+                    let player_id = room.seat_of(session.id).map(|s| s.player_id).ok_or(
+                        ApiError::Forbidden("you are not seated in this room".into()),
+                    )?;
+                    Some((game_id, player_id))
+                }
+                RoomStatus::Lobby => None,
+            }
+        };
+    if let Some((game_id, player_id)) = in_game {
+        let commands = {
+            let games = state.games.lock().unwrap();
+            games
+                .get(&game_id)
+                .map(|info| info.commands.clone())
+                .ok_or(ApiError::Conflict("game actor not found".into()))?
+        };
+        let (reply_tx, reply_rx) = oneshot::channel();
+        commands
+            .send(ActorMessage::LeaveSeat {
+                player_id,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| ApiError::Conflict("game actor unavailable".into()))?;
+        reply_rx
+            .await
+            .map_err(|_| ApiError::Conflict("leave reply dropped".into()))?
+            .map_err(ApiError::Conflict)?;
+        let mut view = {
+            let rooms = state.rooms.lock().unwrap();
+            rooms
+                .get(&room_id)
+                .ok_or(ApiError::NotFound("room"))?
+                .view()
+        };
+        enrich_room_vacancy(&state, &mut view).await;
+        crate::leaderboard::stamp_room_ladder_ranks(&state, &mut view);
+        return Ok(Json(view));
+    }
+
     let outcome = {
         let mut rooms = state.rooms.lock().unwrap();
         let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;

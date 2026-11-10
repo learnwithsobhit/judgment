@@ -55,6 +55,15 @@ class ApiClient {
     return _decode(response);
   }
 
+  Future<Map<String, dynamic>> _put(String path, Object body) async {
+    final response = await _http.put(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
+    return _decode(response);
+  }
+
   Map<String, dynamic> _decode(http.Response response) {
     final json = response.body.isEmpty
         ? <String, dynamic>{}
@@ -409,6 +418,26 @@ class ApiClient {
     return LeaderboardReport.fromJson(_decode(response));
   }
 
+  /// Public. Never sends a bearer token so a 401 cannot sign anyone out.
+  Future<String> getConfig() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/config'),
+      headers: const {'Content-Type': 'application/json'},
+    );
+    final json = _decode(response);
+    return json['festival_id'] as String? ?? 'off';
+  }
+
+  Future<String> setFestival(String id) async {
+    final response = await _http.patch(
+      Uri.parse('$baseUrl/api/v1/admin/festival'),
+      headers: _headers,
+      body: jsonEncode({'id': id}),
+    );
+    final json = _decode(response);
+    return json['festival_id'] as String? ?? id;
+  }
+
   Future<List<ActiveGame>> getActiveGames() async {
     final response = await _http.get(
       Uri.parse('$baseUrl/api/v1/active-games'),
@@ -418,6 +447,22 @@ class ApiClient {
     return (json['games'] as List<dynamic>? ?? const [])
         .map((row) => ActiveGame.fromJson(row as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Public. Never sends a bearer token so a 401 cannot sign anyone out.
+  Future<AvailabilityBoard> getAvailability() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/availability'),
+      headers: const {'Content-Type': 'application/json'},
+    );
+    return AvailabilityBoard.fromJson(_decode(response));
+  }
+
+  Future<AvailabilityBoard> setAvailability(bool available) async {
+    final json = await _put('/api/v1/me/availability', {
+      'available': available,
+    });
+    return AvailabilityBoard.fromJson(json);
   }
 
   Future<FairPlayGameView> getFairPlay(String gameId) async {
@@ -604,17 +649,20 @@ class MeProfile {
     required this.user,
     required this.sessionId,
     required this.nickname,
+    this.isAdmin = false,
   });
 
   final PublicUser user;
   final String sessionId;
   final String nickname;
+  final bool isAdmin;
 
   factory MeProfile.fromJson(Map<String, dynamic> json) {
     return MeProfile(
       user: PublicUser.fromJson(json),
       sessionId: json['session_id'] as String,
       nickname: json['nickname'] as String,
+      isAdmin: json['is_admin'] == true,
     );
   }
 }

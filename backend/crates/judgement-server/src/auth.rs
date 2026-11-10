@@ -179,14 +179,7 @@ pub async fn get_me(
         .await
         .map_err(|e| ApiError::Conflict(format!("load account: {e}")))?
         .ok_or(ApiError::NotFound("profile"))?;
-    Ok(Json(MeResponse {
-        user_id: user.user_id.to_string(),
-        display_name: user.display_name,
-        avatar_id: user.avatar_id,
-        photo_url: user.photo_url,
-        session_id: session.id,
-        nickname: session.nickname,
-    }))
+    Ok(Json(me_response(&state, &session, user).await?))
 }
 
 pub async fn patch_me(
@@ -251,14 +244,41 @@ pub async fn patch_me(
         .await
         .map_err(|e| ApiError::Conflict(format!("persist session: {e}")))?;
 
-    Ok(Json(MeResponse {
+    Ok(Json(me_response(&state, &session, user).await?))
+}
+
+pub(crate) async fn user_is_admin(state: &AppState, user_id: uuid::Uuid) -> Result<bool, ApiError> {
+    if state.admin_emails.is_empty() {
+        return Ok(false);
+    }
+    let emails = state
+        .store
+        .user_emails(user_id)
+        .await
+        .map_err(|e| ApiError::Conflict(format!("load identity: {e}")))?;
+    Ok(emails.iter().any(|email| {
+        state
+            .admin_emails
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(email))
+    }))
+}
+
+async fn me_response(
+    state: &AppState,
+    session: &crate::state::Session,
+    user: StoredUser,
+) -> Result<MeResponse, ApiError> {
+    let is_admin = user_is_admin(state, user.user_id).await?;
+    Ok(MeResponse {
         user_id: user.user_id.to_string(),
         display_name: user.display_name,
         avatar_id: user.avatar_id,
         photo_url: user.photo_url,
         session_id: session.id,
-        nickname: session.nickname,
-    }))
+        nickname: session.nickname.clone(),
+        is_admin,
+    })
 }
 
 pub async fn logout_me(

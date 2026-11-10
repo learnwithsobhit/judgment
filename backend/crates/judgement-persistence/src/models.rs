@@ -180,6 +180,16 @@ pub struct StoredUser {
     pub last_seen_at: DateTime<Utc>,
 }
 
+/// A signed-in player whose free-to-play window has not expired.
+#[derive(Debug, Clone)]
+pub struct StoredAvailablePlayer {
+    pub user_id: uuid::Uuid,
+    pub display_name: String,
+    pub avatar_id: Option<String>,
+    pub photo_url: Option<String>,
+    pub available_until: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone)]
 pub struct StoredIdentity {
     pub user_id: uuid::Uuid,

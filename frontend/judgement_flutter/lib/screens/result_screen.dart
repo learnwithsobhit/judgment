@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app.dart';
+import '../theme/judgement_palette.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/social_share.dart';
@@ -39,11 +40,11 @@ class ResultScreen extends StatelessWidget {
         automaticallyImplyLeading: false,
       ),
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [feltGreen, feltGreenDark],
+            colors: [context.palette.felt, context.palette.feltDark],
           ),
         ),
         child: Center(

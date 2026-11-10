@@ -28,11 +28,20 @@ use crate::error::ApiError;
 use crate::http_limit::{HttpLimitConfig, HttpRateLimiter};
 use crate::metrics::Metrics;
 
-/// Live default: hold the seat through a phone radio blip / short call.
-/// Last-night table had 26–41s reconnects; 12s grace vacated them first.
-pub const DEFAULT_RECONNECT_GRACE: Duration = Duration::from_secs(90);
+/// Live default: hold the seat through a short call / radio blip.
+pub const DEFAULT_RECONNECT_GRACE: Duration = Duration::from_secs(30);
 
-/// `RECONNECT_GRACE_SECONDS` (default 90, clamp 0..=120).
+/// Comma-separated, case-insensitive. Empty means no admin UI.
+pub fn admin_emails_from_env() -> Vec<String> {
+    std::env::var("ADMIN_EMAILS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|part| part.trim().to_ascii_lowercase())
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+/// `RECONNECT_GRACE_SECONDS` (default 30, clamp 0..=120).
 pub fn reconnect_grace_from_env() -> Duration {
     let secs = std::env::var("RECONNECT_GRACE_SECONDS")
         .ok()
@@ -222,6 +231,10 @@ pub struct AppState {
     pub latest_game: Mutex<Option<LatestGame>>,
     /// In-progress tables. Actors write; the home card only reads.
     pub active_games: Arc<Mutex<HashMap<GameId, ActiveGame>>>,
+    /// Lowercased admin emails from `ADMIN_EMAILS`. Empty means nobody is admin.
+    pub admin_emails: Vec<String>,
+    /// Live festival id served by GET /config. Default `off`.
+    pub festival_id: Mutex<String>,
 }
 
 impl AppState {
@@ -249,6 +262,20 @@ impl AppState {
             table_pulse: Mutex::default(),
             latest_game: Mutex::default(),
             active_games: Arc::new(Mutex::new(HashMap::new())),
+            admin_emails: admin_emails_from_env(),
+            festival_id: Mutex::new("off".into()),
+        }
+    }
+
+    pub async fn load_festival(&self) {
+        let Ok(Some(value)) = self.store.load_setting("festival").await else {
+            return;
+        };
+        let Some(id) = value.get("id").and_then(|v| v.as_str()) else {
+            return;
+        };
+        if judgement_protocol::festival_id_allowed(id) {
+            *self.festival_id.lock().unwrap() = id.to_string();
         }
     }
 

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../app/app.dart';
+import '../theme/judgement_palette.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/room_share.dart';
@@ -49,11 +50,11 @@ class ShareResultCard extends StatelessWidget {
         width: logicalSize.width,
         height: logicalSize.height,
         child: DecoratedBox(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [feltGreen, feltGreenDark],
+              colors: [context.palette.felt, context.palette.feltDark],
             ),
           ),
           child: Padding(

@@ -38,6 +38,7 @@ async fn main() {
                 .await
                 .expect("failed to restore durable state");
             tracing::info!(restored, "restored active games from database");
+            state.load_festival().await;
             state
         }
         None => {

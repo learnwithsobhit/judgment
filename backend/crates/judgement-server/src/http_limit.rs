@@ -99,6 +99,8 @@ pub async fn rate_limit_middleware(
     } else if path == "/api/v1/leaderboard"
         || path == "/api/v1/fair-play/leaderboard"
         || path == "/api/v1/active-games"
+        || path == "/api/v1/availability"
+        || path == "/api/v1/config"
     {
         state.http_limiter.config().board_max_per_window
     } else {

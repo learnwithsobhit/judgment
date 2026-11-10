@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../app/app.dart';
+import '../theme/judgement_palette.dart';
 import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
@@ -15,6 +15,7 @@ import '../util/social_share.dart';
 import '../util/game_exit_guard.dart';
 import '../util/session_exit_analytics.dart';
 import '../widgets/app_version_bar.dart';
+import '../widgets/festival_greeting_banner.dart';
 import '../widgets/avatar_picker.dart';
 import '../widgets/exit_confirm_dialogs.dart';
 import '../widgets/player_avatar.dart';
@@ -327,6 +328,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  const FestivalGreetingBanner(),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -338,11 +340,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
                           Text(
                             _room.code,
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 32,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 8,
-                              color: goldAccent,
+                              color: context.palette.title,
                             ),
                           ),
                           const SizedBox(height: 6),

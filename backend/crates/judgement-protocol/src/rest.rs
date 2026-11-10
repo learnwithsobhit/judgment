@@ -538,6 +538,9 @@ pub struct MeResponse {
     pub photo_url: Option<String>,
     pub session_id: SessionId,
     pub nickname: String,
+    /// Derived from `ADMIN_EMAILS`. Absent or false on older servers.
+    #[serde(default)]
+    pub is_admin: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -729,4 +732,40 @@ pub struct FairPlayLeaderboardEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FairPlayLeaderboardResponse {
     pub players: Vec<FairPlayLeaderboardEntry>,
+}
+
+/// Public site chrome. No auth.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicConfigResponse {
+    pub festival_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetFestivalRequest {
+    pub id: String,
+}
+
+/// Signed-in player turning the free-to-play switch on or off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetAvailabilityRequest {
+    pub available: bool,
+}
+
+/// One free-to-play seat. Names and avatars only — no email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailabilityPlayer {
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_url: Option<String>,
+    pub available_until: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailabilityResponse {
+    pub count: u32,
+    pub ready: bool,
+    pub players: Vec<AvailabilityPlayer>,
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
+import '../theme/judgement_palette.dart';
 import '../networking/api_client.dart';
 import '../widgets/player_avatar.dart';
 
@@ -132,11 +133,11 @@ class _FairPlayScreenState extends State<FairPlayScreen> {
         automaticallyImplyLeading: false,
       ),
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [feltGreen, feltGreenDark],
+            colors: [context.palette.felt, context.palette.feltDark],
           ),
         ),
         child: SafeArea(

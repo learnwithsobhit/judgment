@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../app/app.dart';
+import '../theme/judgement_palette.dart';
 import '../util/social_share.dart';
 import '../widgets/share_sheet.dart';
 
@@ -36,11 +36,11 @@ class SetupRoomScreen extends StatelessWidget {
               Text(
                 code,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 8,
-                  color: goldAccent,
+                  color: context.palette.title,
                 ),
               ),
               const SizedBox(height: 8),

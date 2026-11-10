@@ -89,6 +89,11 @@ pub enum ActorMessage {
         user_id: Option<uuid::Uuid>,
         reply: oneshot::Sender<Result<PlayerId, String>>,
     },
+    /// REST leave during a live game — vacate even if the socket is already gone.
+    LeaveSeat {
+        player_id: PlayerId,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
     /// Host (or vacancy timeout via internal reason) ends the game.
     EndGame {
         requesting_player_id: Option<PlayerId>,
@@ -326,6 +331,10 @@ impl GameActor {
                 } => {
                     let result = self
                         .handle_claim_vacant(preferred, nickname, avatar_id, photo_url, user_id);
+                    let _ = reply.send(result);
+                }
+                ActorMessage::LeaveSeat { player_id, reply } => {
+                    let result = self.handle_leave_seat(player_id).await;
                     let _ = reply.send(result);
                 }
                 ActorMessage::EndGame {
@@ -583,8 +592,43 @@ impl GameActor {
             .await;
     }
 
+    async fn handle_leave_seat(&mut self, player_id: PlayerId) -> Result<(), String> {
+        if self.ended || self.engine.is_finished() {
+            return Err("game is over".into());
+        }
+        if !self
+            .engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.id == player_id)
+        {
+            return Err("you are not seated in this game".into());
+        }
+        self.conn_gens.remove(&player_id);
+        if self.clients.remove(&player_id).is_some() {
+            self.broadcast(ServerMessage::PlayerDisconnected { player_id });
+        }
+        self.grace_ids.remove(&player_id);
+        self.pause_announced.remove(&player_id);
+        if player_id == self.host_player_id {
+            self.migrate_host();
+        }
+        self.mark_seat_vacant(player_id).await;
+        Ok(())
+    }
+
     async fn mark_seat_vacant(&mut self, player_id: PlayerId) {
         if self.ended || self.engine.is_finished() {
+            return;
+        }
+        if self
+            .engine
+            .state()
+            .players
+            .iter()
+            .any(|p| p.id == player_id && p.connection_status == ConnectionStatus::Vacant)
+        {
             return;
         }
         let _ = self
@@ -646,6 +690,14 @@ impl GameActor {
         if self.ended || self.engine.is_finished() {
             return Err("game is over".into());
         }
+        if let Some(uid) = user_id {
+            if let Some(own) = self.player_id_for_user(uid) {
+                if self.clients.contains_key(&own) {
+                    return Err("that seat is already in play on another device".into());
+                }
+                return self.bind_human_to_seat(own, nickname, avatar_id, photo_url, user_id);
+            }
+        }
         let vacant_players: Vec<_> = self
             .engine
             .state()
@@ -674,6 +726,23 @@ impl GameActor {
                 }
             }
         };
+        self.bind_human_to_seat(player_id, nickname, avatar_id, photo_url, user_id)
+    }
+
+    fn player_id_for_user(&self, user_id: uuid::Uuid) -> Option<PlayerId> {
+        self.seat_users
+            .iter()
+            .find_map(|(player_id, bound)| (*bound == Some(user_id)).then_some(*player_id))
+    }
+
+    fn bind_human_to_seat(
+        &mut self,
+        player_id: PlayerId,
+        nickname: String,
+        avatar_id: Option<String>,
+        photo_url: Option<String>,
+        user_id: Option<uuid::Uuid>,
+    ) -> Result<PlayerId, String> {
         self.engine
             .set_seat_identity(player_id, nickname.clone(), avatar_id, photo_url)
             .map_err(|e| e.to_string())?;
@@ -869,17 +938,7 @@ impl GameActor {
         }
 
         if matches!(envelope.action, ClientCommand::LeaveGame) {
-            // Permanent leave: seat becomes vacant (replace-or-end).
-            self.conn_gens.remove(&player_id);
-            if self.clients.remove(&player_id).is_some() {
-                self.grace_ids.remove(&player_id);
-                self.pause_announced.remove(&player_id);
-                self.broadcast(ServerMessage::PlayerDisconnected { player_id });
-                if player_id == self.host_player_id {
-                    self.migrate_host();
-                }
-                self.mark_seat_vacant(player_id).await;
-            }
+            let _ = self.handle_leave_seat(player_id).await;
             return;
         }
 

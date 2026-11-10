@@ -179,6 +179,28 @@ pub trait GameStore: Send + Sync {
         &self,
         limit: i64,
     ) -> Result<Vec<FairPlayLeaderboardRow>, PersistError>;
+
+    async fn load_setting(&self, key: &str) -> Result<Option<serde_json::Value>, PersistError>;
+
+    async fn upsert_setting(&self, key: &str, value: serde_json::Value)
+        -> Result<(), PersistError>;
+
+    async fn user_emails(&self, user_id: uuid::Uuid) -> Result<Vec<String>, PersistError>;
+
+    async fn set_availability(
+        &self,
+        user_id: uuid::Uuid,
+        until: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), PersistError>;
+
+    async fn clear_availability(&self, user_id: uuid::Uuid) -> Result<(), PersistError>;
+
+    /// Live free-to-play seats. Drops expired rows and returns the rest,
+    /// oldest update first.
+    async fn list_available(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<StoredAvailablePlayer>, PersistError>;
 }
 
 /// Round / game completion events also warrant keeping an explicit historical

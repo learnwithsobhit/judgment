@@ -37,7 +37,9 @@ impl RoundPattern {
     /// MVP pattern for a given player count: descending from the derived
     /// maximum down to 1 (e.g. `8 → 7 → … → 1` for six players).
     pub fn descending_for_players(player_count: u8) -> Self {
-        RoundPattern::Descending { max_cards: max_cards_per_player(player_count) }
+        RoundPattern::Descending {
+            max_cards: max_cards_per_player(player_count),
+        }
     }
 
     /// House automatic schedule. At most 12 rounds, always ending at 1.
@@ -118,7 +120,11 @@ pub enum RoundScheduleError {
     #[error("expanded schedule must have between 1 and {MAX_MANUAL_ROUNDS} rounds")]
     RoundCountOutOfRange,
     #[error("dealing {cards} cards to {player_count} players exceeds the deck ({max_dealt} max)")]
-    DeckOverflow { cards: u8, player_count: u8, max_dealt: u8 },
+    DeckOverflow {
+        cards: u8,
+        player_count: u8,
+        max_dealt: u8,
+    },
 }
 
 impl RoundSchedule {
@@ -180,9 +186,7 @@ impl RoundSchedule {
     ) -> Result<RoundPattern, RoundScheduleError> {
         match self.mode {
             // Automatic ignores any leftover steps from the client.
-            RoundScheduleMode::Automatic => {
-                Ok(RoundPattern::automatic_for_players(player_count))
-            }
+            RoundScheduleMode::Automatic => Ok(RoundPattern::automatic_for_players(player_count)),
             RoundScheduleMode::Manual => {
                 let rounds = self.expand_and_validate(player_count, reveal_undealt_trump)?;
                 Ok(RoundPattern::Custom { rounds })
@@ -244,7 +248,10 @@ impl RoundSchedule {
             steps.push(ManualRoundStep { cards, repeat: 1 });
         }
         if steps.is_empty() {
-            steps.push(ManualRoundStep { cards: max.max(1), repeat: 1 });
+            steps.push(ManualRoundStep {
+                cards: max.max(1),
+                repeat: 1,
+            });
         }
         Self {
             mode: RoundScheduleMode::Manual,
@@ -264,7 +271,9 @@ pub enum TrumpRule {
     RandomSuit,
     NoTrump,
     /// Trump for round `n` is `suits[n % suits.len()]`; no card is revealed.
-    FixedSequence { suits: Vec<Suit> },
+    FixedSequence {
+        suits: Vec<Suit>,
+    },
 }
 
 impl TrumpRule {
@@ -392,7 +401,7 @@ impl GameRules {
             scoring_rule: ScoringRule::default(),
             turn_timeout_seconds: Some(30),
             // Engine/tests default: vacant immediately. Live games override via
-            // `RECONNECT_GRACE_SECONDS` (default 90) at start — see ADR 0004.
+            // `RECONNECT_GRACE_SECONDS` (default 30) at start — see ADR 0004.
             reconnect_grace_seconds: 0,
             allow_bots: true,
         }
@@ -435,7 +444,10 @@ mod tests {
         let TrumpRule::FixedSequence { suits } = TrumpRule::rotating_from(Suit::Clubs) else {
             panic!("rotating_from must produce a fixed sequence");
         };
-        assert_eq!(suits, vec![Suit::Clubs, Suit::Hearts, Suit::Spades, Suit::Diamonds]);
+        assert_eq!(
+            suits,
+            vec![Suit::Clubs, Suit::Hearts, Suit::Spades, Suit::Diamonds]
+        );
 
         let TrumpRule::FixedSequence { suits } = TrumpRule::rotating_from(Suit::Spades) else {
             panic!("rotating_from must produce a fixed sequence");
@@ -457,28 +469,15 @@ mod tests {
         };
         assert_eq!(
             suits,
-            vec![
-                Suit::Spades,
-                Suit::Clubs,
-                Suit::Hearts,
-                Suit::Diamonds
-            ]
+            vec![Suit::Spades, Suit::Clubs, Suit::Hearts, Suit::Diamonds]
         );
         assert!(TrumpRule::from_cycle(vec![Suit::Spades, Suit::Clubs]).is_err());
-        assert!(validate_trump_cycle(&[
-            Suit::Spades,
-            Suit::Spades,
-            Suit::Hearts,
-            Suit::Diamonds
-        ])
-        .is_err());
+        assert!(
+            validate_trump_cycle(&[Suit::Spades, Suit::Spades, Suit::Hearts, Suit::Diamonds])
+                .is_err()
+        );
         let rule = trump_rule_from_config(
-            Some(&[
-                Suit::Hearts,
-                Suit::Diamonds,
-                Suit::Spades,
-                Suit::Clubs,
-            ]),
+            Some(&[Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs]),
             Some(Suit::Spades),
         )
         .unwrap();
@@ -511,9 +510,18 @@ mod tests {
         let schedule = RoundSchedule {
             mode: RoundScheduleMode::Manual,
             steps: Some(vec![
-                ManualRoundStep { cards: 12, repeat: 2 },
-                ManualRoundStep { cards: 11, repeat: 2 },
-                ManualRoundStep { cards: 1, repeat: 1 },
+                ManualRoundStep {
+                    cards: 12,
+                    repeat: 2,
+                },
+                ManualRoundStep {
+                    cards: 11,
+                    repeat: 2,
+                },
+                ManualRoundStep {
+                    cards: 1,
+                    repeat: 1,
+                },
             ]),
         };
         let rounds = schedule.expand_and_validate(4, true).unwrap();
@@ -544,11 +552,17 @@ mod tests {
             mode: RoundScheduleMode::Manual,
             steps: Some(vec![]),
         };
-        assert_eq!(empty.expand_and_validate(4, true), Err(RoundScheduleError::EmptySteps));
+        assert_eq!(
+            empty.expand_and_validate(4, true),
+            Err(RoundScheduleError::EmptySteps)
+        );
 
         let oversized = RoundSchedule {
             mode: RoundScheduleMode::Manual,
-            steps: Some(vec![ManualRoundStep { cards: 13, repeat: 1 }]),
+            steps: Some(vec![ManualRoundStep {
+                cards: 13,
+                repeat: 1,
+            }]),
         };
         assert!(matches!(
             oversized.expand_and_validate(4, true),
@@ -584,9 +598,6 @@ mod tests {
             schedule.summary(4),
             "Automatic (12,11,10,9,8,7,6,5,4,3,2,1)"
         );
-        assert_eq!(
-            schedule.summary(6),
-            "Automatic (8,8,7,7,6,6,5,5,4,3,2,1)"
-        );
+        assert_eq!(schedule.summary(6), "Automatic (8,8,7,7,6,6,5,5,4,3,2,1)");
     }
 }

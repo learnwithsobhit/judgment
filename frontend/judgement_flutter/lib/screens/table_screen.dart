@@ -5,13 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app.dart';
+import '../theme/festival_controller.dart';
+import '../theme/judgement_palette.dart';
 import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/card_assets.dart';
 import '../util/game_exit_guard.dart';
+import '../util/page_resume.dart';
 import '../util/score_reveal.dart';
 import '../util/seat_label.dart';
+import '../util/table_place.dart';
 import '../util/session_exit_analytics.dart';
 import '../util/social_share.dart';
 import '../widgets/assistant_panel.dart';
@@ -20,6 +24,7 @@ import '../widgets/bid_panel.dart';
 import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
 import '../widgets/emote_bar.dart';
+import '../widgets/festival_admin_toggle.dart';
 import '../widgets/pace_line.dart';
 import '../widgets/exit_confirm_dialogs.dart';
 import '../widgets/player_avatar.dart';
@@ -56,8 +61,12 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    listenPageResume(() {
+      controller.onAppResumed();
+    });
     controller.addListener(_onControllerChanged);
     _syncExitGuard();
+    _syncFestivalLock();
     _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
       final clockDue =
@@ -79,7 +88,10 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    cancelPageResume();
     setGameExitGuard(false);
+    FestivalController.instance.setPlayLocked(false);
+    FestivalController.instance.setCelebrationLocked(false);
     _ticker?.cancel();
     controller.removeListener(_onControllerChanged);
     controller.dispose();
@@ -88,6 +100,14 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
 
   void _syncExitGuard() {
     setGameExitGuard(!_leaving && controller.shouldGuardExit);
+  }
+
+  void _syncFestivalLock() {
+    final finished = controller.view?.isFinished == true;
+    FestivalController.instance.setPlayLocked(!finished);
+    FestivalController.instance.setCelebrationLocked(
+      finished && _postGameStep == 0,
+    );
   }
 
   @override
@@ -112,8 +132,7 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
       recordExitLeaveConfirmed(surface: ExitSurface.table, source: source);
       _leaving = true;
       setGameExitGuard(false);
-      controller.leaveGame();
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await controller.leaveGame();
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
@@ -124,6 +143,7 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
 
   void _onControllerChanged() {
     _syncExitGuard();
+    _syncFestivalLock();
     if (_leaveDialogOpen && !controller.shouldGuardExit && mounted) {
       final nav = Navigator.of(context, rootNavigator: true);
       if (nav.canPop()) nav.pop();
@@ -257,6 +277,7 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     }
 
     if (view.isFinished && view.finalRanking != null) {
+      _syncFestivalLock();
       if (_postGameStep >= 2) {
         return ResultScreen(controller: controller);
       }
@@ -266,16 +287,20 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
         return FairPlayScreen(
           api: controller.api,
           gameId: controller.gameId,
-          onContinue: () => setState(() => _postGameStep = 2),
+          onContinue: () => setState(() {
+            _postGameStep = 2;
+            _syncFestivalLock();
+          }),
         );
       }
       return VictoryCelebration(
         controller: controller,
         // countsForProfile is set at lobby from the live game token and stays
         // true for the whole hand; guests skip straight to results.
-        onViewResults: () => setState(
-          () => _postGameStep = controller.countsForProfile ? 1 : 2,
-        ),
+        onViewResults: () => setState(() {
+          _postGameStep = controller.countsForProfile ? 1 : 2;
+          _syncFestivalLock();
+        }),
       );
     }
 
@@ -714,6 +739,7 @@ class _TopBar extends StatelessWidget {
         const SizedBox(width: 8),
       ],
       _connectionDot(controller.displayedConnection),
+      const FestivalAdminToggle(compact: true),
       if (controller.canManualReconnect)
         TextButton(
           onPressed: controller.manualReconnect,
@@ -869,16 +895,18 @@ class _TableArea extends StatelessWidget {
     ];
     final ring = _SeatRing.split(clockwise);
     final crowded = clockwise.length >= 6;
+    final placeMarks = TablePlace.marks(view);
 
+    final palette = context.palette;
     return Container(
       margin: const EdgeInsets.fromLTRB(6, 4, 6, 4),
       decoration: BoxDecoration(
-        gradient: const RadialGradient(
-          colors: [Color(0xFF2E7D32), feltGreen, feltGreenDark],
-          stops: [0.0, 0.65, 1.0],
+        gradient: RadialGradient(
+          colors: [palette.feltHighlight, palette.felt, palette.feltDark],
+          stops: const [0.0, 0.65, 1.0],
         ),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0xFF5D4037), width: 4),
+        border: Border.all(color: palette.wood, width: 4),
         boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 16)],
       ),
       child: Stack(
@@ -912,7 +940,14 @@ class _TableArea extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           for (final opponent in ring.top)
-                            Expanded(child: _seat(view, opponent, crowded)),
+                            Expanded(
+                              child: _seat(
+                                view,
+                                opponent,
+                                crowded,
+                                placeMarks[opponent.playerId],
+                              ),
+                            ),
                         ],
                       ),
                     Expanded(
@@ -924,6 +959,7 @@ class _TableArea extends StatelessWidget {
                             ring.left.reversed.toList(),
                             crowded,
                             metrics.side,
+                            placeMarks,
                           ),
                           Expanded(
                             child: FittedBox(
@@ -935,11 +971,21 @@ class _TableArea extends StatelessWidget {
                               ),
                             ),
                           ),
-                          _sideColumn(view, ring.right, crowded, metrics.side),
+                          _sideColumn(
+                            view,
+                            ring.right,
+                            crowded,
+                            metrics.side,
+                            placeMarks,
+                          ),
                         ],
                       ),
                     ),
-                    _selfBadge(context, view),
+                    _selfBadge(
+                      context,
+                      view,
+                      placeMarks[controller.myPlayerId],
+                    ),
                   ],
                 );
               },
@@ -957,6 +1003,7 @@ class _TableArea extends StatelessWidget {
     List<OpponentView> seats,
     bool crowded,
     double width,
+    Map<String, int> placeMarks,
   ) {
     if (seats.isEmpty) return const SizedBox(width: 4);
     return SizedBox(
@@ -965,13 +1012,19 @@ class _TableArea extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final opponent in seats) _seat(view, opponent, crowded),
+          for (final opponent in seats)
+            _seat(view, opponent, crowded, placeMarks[opponent.playerId]),
         ],
       ),
     );
   }
 
-  Widget _seat(PlayerGameView view, OpponentView opponent, bool crowded) {
+  Widget _seat(
+    PlayerGameView view,
+    OpponentView opponent,
+    bool crowded,
+    int? place,
+  ) {
     return _OpponentSeat(
       controller: controller,
       opponent: opponent,
@@ -979,6 +1032,7 @@ class _TableArea extends StatelessWidget {
       isDealer: view.round?.dealer == opponent.playerId,
       isLeader: view.leader?.playerId == opponent.playerId,
       avatarRadius: crowded ? 16 : 20,
+      place: place,
     );
   }
 
@@ -1026,64 +1080,106 @@ class _TableArea extends StatelessWidget {
     );
   }
 
-  Widget _selfBadge(BuildContext context, PlayerGameView view) {
+  Widget _selfBadge(BuildContext context, PlayerGameView view, int? place) {
     final isMyTurn = view.currentTurn == controller.myPlayerId;
     final isDealer = view.round?.dealer == controller.myPlayerId;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: isMyTurn ? goldAccent : Colors.black.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-      ),
+    final isLeader = view.leader?.playerId == controller.myPlayerId;
+    // Match crowded opponent radius so the overall cap stays readable.
+    const avatarRadius = 16.0;
+    // Cap paints above the portrait; reserve space so it never underlaps the trick.
+    const capReserve = avatarRadius * 1.07;
+    return Padding(
+      padding: const EdgeInsets.only(top: capReserve),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Tooltip(
-            message: 'Tap to change avatar · long-press to cheer',
-            child: GestureDetector(
-              onTap: () => _showAvatarPickerSheet(context),
-              child: PlayerAvatar(
-                avatarId: view.ownAvatarId,
-                photoUrl: view.ownPhotoUrl,
-                nickname: controller.myNickname,
-                radius: 12,
-                highlight: isMyTurn,
-                boardRank: view.ownLadderRank,
-                signedIn: view.ownSignedIn,
-                flashMood: controller.avatarFlashes[controller.myPlayerId],
-                onLongPress: () => controller.sendAvatarFlash('cheer'),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Tooltip(
+                message: 'Tap to change avatar · long-press to cheer',
+                child: GestureDetector(
+                  onTap: () => _showAvatarPickerSheet(context),
+                  child: PlayerAvatar(
+                    avatarId: view.ownAvatarId,
+                    photoUrl: view.ownPhotoUrl,
+                    nickname: controller.myNickname,
+                    radius: avatarRadius,
+                    highlight: isMyTurn || isLeader,
+                    boardRank: view.ownLadderRank,
+                    signedIn: view.ownSignedIn,
+                    flashMood: controller.avatarFlashes[controller.myPlayerId],
+                    onLongPress: () => controller.sendAvatarFlash('cheer'),
+                  ),
+                ),
               ),
-            ),
+              if (isLeader)
+                const Positioned(
+                  left: -2,
+                  top: -2,
+                  child: Text('👑', style: TextStyle(fontSize: 14)),
+                ),
+            ],
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  seatLabel(controller.myNickname),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isMyTurn ? Colors.black : Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: ColoredBox(
+                color: isMyTurn
+                    ? goldAccent
+                    : Colors.black.withValues(alpha: 0.35),
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (place == 2 || place == 3)
+                        TablePlaceRail(place: place!),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                seatLabel(controller.myNickname),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isMyTurn
+                                      ? Colors.black
+                                      : Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              Text(
+                                [
+                                  if (isDealer) 'dealer',
+                                  if (view.ownBid != null)
+                                    'bid ${view.ownBid} · won ${view.ownTricksWon}',
+                                ].join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isMyTurn
+                                      ? Colors.black87
+                                      : Colors.white70,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                Text(
-                  [
-                    if (isDealer) 'dealer',
-                    if (view.ownBid != null)
-                      'bid ${view.ownBid} · won ${view.ownTricksWon}',
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isMyTurn ? Colors.black87 : Colors.white70,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -1149,6 +1245,7 @@ class _OpponentSeat extends StatelessWidget {
   final bool isDealer;
   final bool isLeader;
   final double avatarRadius;
+  final int? place;
 
   const _OpponentSeat({
     required this.controller,
@@ -1157,6 +1254,7 @@ class _OpponentSeat extends StatelessWidget {
     required this.isDealer,
     required this.isLeader,
     required this.avatarRadius,
+    this.place,
   });
 
   @override
@@ -1211,42 +1309,63 @@ class _OpponentSeat extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            decoration: BoxDecoration(
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: ColoredBox(
               color: Colors.black.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  seatLabel(opponent.nickname),
-                  maxLines: 1,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (place == 2 || place == 3) TablePlaceRail(place: place!),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              seatLabel(opponent.nickname),
+                              maxLines: 1,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              opponent.bid == null
+                                  ? '${opponent.cardCount} cards'
+                                  : 'bid ${opponent.bid}',
+                              maxLines: 1,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.white70,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (opponent.bid != null)
+                              Text(
+                                'won ${opponent.tricksWon}',
+                                maxLines: 1,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white70,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                Text(
-                  opponent.bid == null
-                      ? '${opponent.cardCount} cards'
-                      : 'bid ${opponent.bid}',
-                  maxLines: 1,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, color: Colors.white70),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (opponent.bid != null)
-                  Text(
-                    'won ${opponent.tricksWon}',
-                    maxLines: 1,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11, color: Colors.white70),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              ],
+              ),
             ),
           ),
         ],

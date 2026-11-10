@@ -4,9 +4,11 @@ import '../networking/api_client.dart';
 import '../screens/event_invite_screen.dart';
 import '../screens/event_manage_screen.dart';
 import '../screens/landing_screen.dart';
+import '../theme/judgement_palette.dart';
 import '../util/app_update.dart';
 import '../util/room_share.dart';
 import '../util/share_analytics.dart';
+import '../widgets/festive_overlay.dart';
 
 const feltGreen = Color(0xFF1B5E20);
 const feltGreenDark = Color(0xFF0D3311);
@@ -86,15 +88,13 @@ class JudgementApp extends StatelessWidget {
       title: 'Judgement',
       debugShowCheckedModeBanner: false,
       navigatorObservers: [homeRouteObserver],
-      theme: ThemeData(
+      theme: JudgementPalette.off.themeData.copyWith(
         colorScheme: scheme,
-        useMaterial3: true,
-        scaffoldBackgroundColor: feltGreenDark,
-        snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
-        cardTheme: const CardThemeData(surfaceTintColor: Colors.transparent),
       ),
       builder: (context, child) {
-        return AppUpdateLifecycle(child: child ?? const SizedBox.shrink());
+        return AppUpdateLifecycle(
+          child: FestivalHost(child: child ?? const SizedBox.shrink()),
+        );
       },
       home: home ?? initialHomeFromUri(Uri.base),
     );

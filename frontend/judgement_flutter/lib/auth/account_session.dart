@@ -25,6 +25,7 @@ class AccountSession extends ChangeNotifier {
   String? avatarId;
   String? photoUrl;
   String? tableNickname;
+  bool isAdmin = false;
 
   bool get isSignedIn => token != null && token!.isNotEmpty;
 
@@ -70,6 +71,7 @@ class AccountSession extends ChangeNotifier {
         avatarId: me.user.avatarId,
         photoUrl: me.user.photoUrl,
         tableNickname: me.nickname,
+        isAdmin: me.isAdmin,
       );
       await _persist();
       notifyListeners();
@@ -96,9 +98,24 @@ class AccountSession extends ChangeNotifier {
       avatarId: session.user.avatarId,
       photoUrl: session.user.photoUrl,
       tableNickname: session.nickname,
+      isAdmin: false,
     );
     await _persist();
     notifyListeners();
+    await _refreshAdmin();
+  }
+
+  Future<void> _refreshAdmin() async {
+    final bearer = token;
+    final expectedUser = userId;
+    if (bearer == null || bearer.isEmpty) return;
+    try {
+      final me = await (ApiClient()..token = bearer).getMe();
+      if (token != bearer || userId != expectedUser) return;
+      if (isAdmin == me.isAdmin) return;
+      isAdmin = me.isAdmin;
+      notifyListeners();
+    } catch (_) {}
   }
 
   Future<void> signOut() async {
@@ -122,6 +139,7 @@ class AccountSession extends ChangeNotifier {
     avatarId = null;
     photoUrl = null;
     tableNickname = null;
+    isAdmin = false;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(accountStorageKey);
@@ -137,6 +155,7 @@ class AccountSession extends ChangeNotifier {
     String? avatarId,
     String? photoUrl,
     required String tableNickname,
+    bool isAdmin = false,
   }) {
     this.token = token;
     this.sessionId = sessionId;
@@ -145,6 +164,15 @@ class AccountSession extends ChangeNotifier {
     this.avatarId = avatarId;
     this.photoUrl = photoUrl;
     this.tableNickname = tableNickname;
+    this.isAdmin = isAdmin;
+  }
+
+  /// Keep Join using the token the table just rotated, not the burned one.
+  void rememberRotatedToken(String next) {
+    if (!isSignedIn || token == next) return;
+    token = next;
+    notifyListeners();
+    _persist();
   }
 
   void rememberAvatar(String avatarId) {

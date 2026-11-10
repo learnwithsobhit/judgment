@@ -11,6 +11,7 @@ import 'package:judgement_flutter/networking/api_client.dart';
 import 'package:judgement_flutter/screens/table_screen.dart';
 import 'package:judgement_flutter/state/game_controller.dart';
 import 'package:judgement_flutter/util/seat_label.dart';
+import 'package:judgement_flutter/util/table_place.dart';
 import 'package:judgement_flutter/widgets/emote_bar.dart';
 import 'package:judgement_flutter/widgets/playing_card.dart';
 
@@ -20,6 +21,12 @@ PlayerGameView _playingView({
   required int opponents,
   required List<String> names,
   int? trickCount,
+  List<Map<String, dynamic>>? scores,
+  List<Map<String, dynamic>>? roundHistory,
+  Map<String, dynamic>? leader,
+  String? dealer,
+  Map<String, int>? ladderRanks,
+  int? ownLadderRank,
 }) {
   assert(names.length == opponents);
   return PlayerGameView.fromJson({
@@ -31,6 +38,7 @@ PlayerGameView _playingView({
     'own_bid': 2,
     'own_tricks_won': 1,
     'own_avatar_id': 'face_01',
+    if (ownLadderRank != null) 'own_ladder_rank': ownLadderRank,
     'opponents': [
       for (var i = 0; i < opponents; i++)
         {
@@ -42,6 +50,8 @@ PlayerGameView _playingView({
           'tricks_won': 10,
           'connection_status': 'connected',
           'avatar_id': 'face_02',
+          'ladder_rank':
+              ?ladderRanks?['00000000-0000-0000-0000-00000000000${i + 2}'],
         },
     ],
     'current_trick': [
@@ -60,16 +70,17 @@ PlayerGameView _playingView({
     'trump_card': {'suit': 'hearts', 'rank': 'ace'},
     'current_turn': _me,
     'bids': <dynamic>[],
-    'scores': <dynamic>[],
+    'scores': scores ?? <dynamic>[],
     'round': {
       'round_index': 0,
       'total_rounds': 12,
       'cards_per_player': 4,
-      'dealer': _me,
+      'dealer': dealer ?? _me,
       'tricks_completed': 0,
     },
     'legal_actions': {'legal_bids': <dynamic>[], 'playable_cards': <dynamic>[]},
-    'round_history': <dynamic>[],
+    'round_history': roundHistory ?? <dynamic>[],
+    if (leader != null) 'leader': leader,
   });
 }
 
@@ -79,6 +90,7 @@ Future<GameController> _pump(
   required List<String> names,
   required String myNickname,
   int? trickCount,
+  PlayerGameView? view,
 }) async {
   final controller = GameController(
     api: ApiClient(),
@@ -86,11 +98,9 @@ Future<GameController> _pump(
     myPlayerId: _me,
     myNickname: myNickname,
   );
-  controller.view = _playingView(
-    opponents: opponents,
-    names: names,
-    trickCount: trickCount,
-  );
+  controller.view =
+      view ??
+      _playingView(opponents: opponents, names: names, trickCount: trickCount);
   controller.gameStartedAt = DateTime.now().subtract(
     const Duration(minutes: 4, seconds: 12),
   );
@@ -414,4 +424,162 @@ void main() {
     expect(bidTen.top, greaterThan(bidZero.top + 20));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'phone 7-opponent table paints 2nd/3rd rails without moving 1st',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      const names = [
+        'Dharmendra Chaturvedi',
+        'S2',
+        'S3',
+        'S4',
+        'S5',
+        'S6',
+        'S7',
+      ];
+      const dharmendra = '00000000-0000-0000-0000-000000000002';
+      const second = '00000000-0000-0000-0000-000000000003';
+      const leader = '00000000-0000-0000-0000-000000000005';
+      await _pump(
+        tester,
+        opponents: 7,
+        names: names,
+        myNickname: 'You',
+        trickCount: 8,
+        view: _playingView(
+          opponents: 7,
+          names: names,
+          trickCount: 8,
+          dealer: dharmendra,
+          ladderRanks: const {dharmendra: 1},
+          leader: const {'player_id': leader, 'margin': 20},
+          scores: [
+            {'player_id': leader, 'total_score': 50},
+            {'player_id': dharmendra, 'total_score': 30},
+            {'player_id': second, 'total_score': 30},
+            {'player_id': _me, 'total_score': 8},
+            {
+              'player_id': '00000000-0000-0000-0000-000000000004',
+              'total_score': 6,
+            },
+            {
+              'player_id': '00000000-0000-0000-0000-000000000006',
+              'total_score': 4,
+            },
+            {
+              'player_id': '00000000-0000-0000-0000-000000000007',
+              'total_score': 2,
+            },
+            {
+              'player_id': '00000000-0000-0000-0000-000000000008',
+              'total_score': 1,
+            },
+          ],
+          roundHistory: [
+            {
+              'round_index': 0,
+              'entries': [
+                {'player_id': leader, 'bid': 2, 'tricks_won': 2, 'score': 50},
+              ],
+            },
+          ],
+        ),
+      );
+
+      expect(find.text('👑'), findsOneWidget);
+      expect(find.text('S4 ahead on round scores'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is TablePlaceRail && widget.place == 2,
+        ),
+        findsNWidgets(2),
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is TablePlaceRail && widget.place == 3,
+        ),
+        findsNothing,
+      );
+      expect(find.text('bid 10'), findsNWidgets(7));
+      expect(find.text('won 10'), findsNWidgets(7));
+      expect(find.text('D'), findsOneWidget);
+      expect(find.byTooltip('1st overall'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      for (final line in ['bid 10', 'won 10']) {
+        for (final bid in tester.renderObjectList<RenderParagraph>(
+          find.text(line),
+        )) {
+          expect(bid.didExceedMaxLines, isFalse);
+        }
+      }
+    },
+  );
+
+  testWidgets(
+    'self leader paints crown and own overall cap outside the chip clip',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      const names = ['Gagan', 'Ankit S', 'Dharmendra C', 'ashish'];
+      const second = '00000000-0000-0000-0000-000000000002';
+      const third = '00000000-0000-0000-0000-000000000003';
+      await _pump(
+        tester,
+        opponents: 4,
+        names: names,
+        myNickname: 'shobhit C',
+        trickCount: 2,
+        view: _playingView(
+          opponents: 4,
+          names: names,
+          trickCount: 2,
+          ownLadderRank: 1,
+          leader: const {'player_id': _me, 'margin': 12},
+          scores: [
+            {'player_id': _me, 'total_score': 40},
+            {'player_id': second, 'total_score': 28},
+            {'player_id': third, 'total_score': 20},
+            {
+              'player_id': '00000000-0000-0000-0000-000000000004',
+              'total_score': 10,
+            },
+            {
+              'player_id': '00000000-0000-0000-0000-000000000005',
+              'total_score': 4,
+            },
+          ],
+          roundHistory: [
+            {
+              'round_index': 0,
+              'entries': [
+                {'player_id': _me, 'bid': 2, 'tricks_won': 2, 'score': 40},
+              ],
+            },
+          ],
+        ),
+      );
+
+      expect(find.text('👑'), findsOneWidget);
+      expect(find.text('You’re ahead on round scores'), findsOneWidget);
+      expect(find.byTooltip('1st overall'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is TablePlaceRail && widget.place == 2,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is TablePlaceRail && widget.place == 3,
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

@@ -13,8 +13,9 @@ use judgement_protocol::{
     CreateRoomResponse, JoinRoomResponse, RestartGameResponse, RoomView, ServerMessage,
     StartGameResponse, PROTOCOL_VERSION,
 };
+use judgement_server::build_router;
 use judgement_server::restore::{bootstrap, bootstrap_with_reconnect_grace};
-use judgement_server::{build_router, state::AppState};
+use judgement_server::state::{AppState, DEFAULT_RECONNECT_GRACE};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -96,6 +97,15 @@ impl Client {
             }
         }
         panic!("no snapshot");
+    }
+
+    fn from_token(token: String) -> Self {
+        Self {
+            token,
+            player_id: PlayerId::new(),
+            ws: None,
+            last: None,
+        }
     }
 }
 
@@ -936,4 +946,242 @@ async fn grace_expiry_vacates_and_migrates_host() {
     assert!(saw_vacant, "expired grace must vacant the seat");
     assert!(new_host.is_some());
     assert_ne!(new_host.unwrap(), host_id);
+}
+
+#[test]
+fn default_reconnect_grace_is_thirty_seconds() {
+    assert_eq!(DEFAULT_RECONNECT_GRACE, Duration::from_secs(30));
+}
+
+async fn wait_for_peer_event(
+    client: &mut Client,
+    predicate: impl Fn(&ServerMessage) -> bool,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline {
+        let ws = client.ws.as_mut().unwrap();
+        if let Ok(Some(Ok(Message::Text(text)))) =
+            tokio::time::timeout(Duration::from_millis(100), ws.next()).await
+        {
+            let msg: ServerMessage = serde_json::from_str(&text).unwrap();
+            if let ServerMessage::StateSnapshot { view, .. } = &msg {
+                client.last = Some(view.clone());
+            }
+            if predicate(&msg) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[tokio::test]
+async fn same_account_new_session_resumes_grace_seat() {
+    let state =
+        bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
+            .await
+            .unwrap();
+    let addr = spawn_with(state.clone()).await;
+    let base = format!("http://{addr}");
+
+    let user_id = uuid::Uuid::new_v4();
+    let original = state.create_session_for_user("Shobhit".into(), user_id, None, None);
+    let mut clients = vec![
+        Client::from_token(original.token.clone()),
+        Client::guest(&base, "B").await,
+        Client::guest(&base, "C").await,
+        Client::guest(&base, "D").await,
+    ];
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    let original_player = clients[0].player_id;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    clients[0].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[0].ws = None;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let next = state.create_session_for_user("Shobhit".into(), user_id, None, None);
+    let http = reqwest::Client::new();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        format!("Bearer {}", next.token).parse().unwrap(),
+    );
+    let resp = http
+        .post(format!("{base}/api/v1/rooms/{code}/join"))
+        .headers(headers)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let joined: JoinRoomResponse = resp.json().await.unwrap();
+    assert_eq!(joined.player_id, original_player);
+
+    let claimed = wait_for_peer_event(&mut clients[1], |msg| {
+        matches!(
+            msg,
+            ServerMessage::SeatClaimed { player_id, .. } if *player_id == original_player
+        )
+    })
+    .await;
+    assert!(claimed, "same-account join should bind the original seat");
+}
+
+#[tokio::test]
+async fn live_connected_seat_is_not_stolen_by_another_session() {
+    let state =
+        bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
+            .await
+            .unwrap();
+    let addr = spawn_with(state.clone()).await;
+    let base = format!("http://{addr}");
+
+    let user_id = uuid::Uuid::new_v4();
+    let original = state.create_session_for_user("Shobhit".into(), user_id, None, None);
+    let mut clients = vec![
+        Client::from_token(original.token.clone()),
+        Client::guest(&base, "B").await,
+        Client::guest(&base, "C").await,
+        Client::guest(&base, "D").await,
+    ];
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    let next = state.create_session_for_user("Shobhit".into(), user_id, None, None);
+    let http = reqwest::Client::new();
+    let resp = http
+        .post(format!("{base}/api/v1/rooms/{code}/join"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", next.token),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 409);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("already in play on another device"),
+        "unexpected conflict: {message}"
+    );
+    assert!(clients[0].ws.is_some(), "live socket stays attached");
+    let _ = game_id;
+}
+
+#[tokio::test]
+async fn rest_leave_during_grace_vacates_immediately() {
+    let state =
+        bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
+            .await
+            .unwrap();
+    let addr = spawn_with(state.clone()).await;
+    let base = format!("http://{addr}");
+
+    let user_id = uuid::Uuid::new_v4();
+    let original = state.create_session_for_user("Shobhit".into(), user_id, None, None);
+    let mut clients = vec![
+        Client::from_token(original.token.clone()),
+        Client::guest(&base, "B").await,
+        Client::guest(&base, "C").await,
+        Client::guest(&base, "D").await,
+    ];
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    let vacant_player = clients[0].player_id;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    clients[0].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[0].ws = None;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let http = reqwest::Client::new();
+    let leave = http
+        .post(format!("{base}/api/v1/rooms/{code}/leave"))
+        .headers(clients[0].headers())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(leave.status(), 200, "body={}", leave.text().await.unwrap());
+
+    let vacant = wait_for_peer_event(&mut clients[1], |msg| {
+        matches!(
+            msg,
+            ServerMessage::SeatVacant { player_id, .. } if *player_id == vacant_player
+        )
+    })
+    .await;
+    assert!(vacant, "REST leave during grace must vacant at once");
+
+    let mut replacer = Client::guest(&base, "E").await;
+    let claimed: ClaimSeatResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/claim"))
+        .headers(replacer.headers())
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed.player_id, vacant_player);
+    replacer.player_id = claimed.player_id;
+}
+
+#[tokio::test]
+async fn owner_reclaims_own_vacant_seat_with_new_session() {
+    let state =
+        bootstrap_with_reconnect_grace(Arc::new(MemoryStore::new()), Duration::from_secs(2))
+            .await
+            .unwrap();
+    let addr = spawn_with(state.clone()).await;
+    let base = format!("http://{addr}");
+
+    let user_id = uuid::Uuid::new_v4();
+    let original = state.create_session_for_user("Shobhit".into(), user_id, None, None);
+    let mut clients = vec![
+        Client::from_token(original.token.clone()),
+        Client::guest(&base, "B").await,
+        Client::guest(&base, "C").await,
+        Client::guest(&base, "D").await,
+    ];
+    let (game_id, code) = start_four_player_game(&base, &mut clients).await;
+    let original_player = clients[0].player_id;
+    for client in &mut clients {
+        client.connect_ws(&base, game_id).await;
+    }
+
+    clients[0].ws.as_mut().unwrap().close(None).await.unwrap();
+    clients[0].ws = None;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let http = reqwest::Client::new();
+    let leave = http
+        .post(format!("{base}/api/v1/rooms/{code}/leave"))
+        .headers(clients[0].headers())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(leave.status(), 200, "body={}", leave.text().await.unwrap());
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let next = state.create_session_for_user("Shobhit".into(), user_id, None, None);
+    let joined: JoinRoomResponse = http
+        .post(format!("{base}/api/v1/rooms/{code}/join"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", next.token),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(joined.player_id, original_player);
 }

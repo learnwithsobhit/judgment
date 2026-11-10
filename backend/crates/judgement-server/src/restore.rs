@@ -216,7 +216,7 @@ fn resolve_host_player_id(
 /// Convenience for tests: build AppState and restore in one step.
 ///
 /// Uses **zero** reconnect grace so existing tests keep immediate vacant-on-drop
-/// (production [`AppState::new`] reads `RECONNECT_GRACE_SECONDS`, default 90).
+/// (production [`AppState::new`] reads `RECONNECT_GRACE_SECONDS`, default 30).
 pub async fn bootstrap(
     store: Arc<dyn GameStore>,
 ) -> Result<Arc<AppState>, judgement_persistence::PersistError> {

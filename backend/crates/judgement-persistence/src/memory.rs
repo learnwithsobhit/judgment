@@ -37,7 +37,8 @@ struct MemoryInner {
     users: HashMap<Uuid, StoredUser>,
     /// `(provider, subject)` so the same subject string on two providers
     /// stays two accounts.
-    identities: HashMap<(String, String), Uuid>,
+    identities: HashMap<(String, String), StoredIdentity>,
+    settings: HashMap<String, serde_json::Value>,
     stats: HashMap<Uuid, UserStatsRow>,
     /// (game_id, user_id) already applied. Survives delete_game.
     recorded: HashSet<(Uuid, Uuid)>,
@@ -48,6 +49,12 @@ struct MemoryInner {
     /// (game_id, voter, target) → points
     fair_play_ballots: HashMap<(Uuid, Uuid, Uuid), i16>,
     fair_play_stats: HashMap<Uuid, FairPlayStatsRow>,
+    availability: HashMap<Uuid, AvailabilityRow>,
+}
+
+struct AvailabilityRow {
+    until: chrono::DateTime<Utc>,
+    updated_at: chrono::DateTime<Utc>,
 }
 
 type SessionKey = uuid::Uuid;
@@ -446,10 +453,14 @@ impl GameStore for MemoryStore {
 
     async fn upsert_identity(&self, identity: &StoredIdentity) -> Result<(), PersistError> {
         let mut inner = self.inner.lock().unwrap();
-        inner.identities.insert(
-            (identity.provider.clone(), identity.subject.clone()),
-            identity.user_id,
-        );
+        let key = (identity.provider.clone(), identity.subject.clone());
+        let mut stored = identity.clone();
+        if stored.email.is_none() {
+            if let Some(existing) = inner.identities.get(&key) {
+                stored.email = existing.email.clone();
+            }
+        }
+        inner.identities.insert(key, stored);
         Ok(())
     }
 
@@ -462,7 +473,7 @@ impl GameStore for MemoryStore {
         Ok(inner
             .identities
             .get(&(provider.to_string(), subject.to_string()))
-            .and_then(|id| inner.users.get(id).cloned()))
+            .and_then(|identity| inner.users.get(&identity.user_id).cloned()))
     }
 
     async fn load_user(&self, user_id: Uuid) -> Result<Option<StoredUser>, PersistError> {
@@ -472,8 +483,11 @@ impl GameStore for MemoryStore {
     async fn delete_user(&self, user_id: Uuid) -> Result<(), PersistError> {
         let mut inner = self.inner.lock().unwrap();
         inner.users.remove(&user_id);
-        inner.identities.retain(|_, id| *id != user_id);
+        inner
+            .identities
+            .retain(|_, identity| identity.user_id != user_id);
         inner.stats.remove(&user_id);
+        inner.availability.remove(&user_id);
         inner.recorded.retain(|(_, uid)| *uid != user_id);
         for session in inner.sessions.values_mut() {
             if session.user_id == Some(user_id) {
@@ -689,6 +703,81 @@ impl GameStore for MemoryStore {
             rows.len()
         };
         Ok(rows.into_iter().take(limit).map(|(_, row)| row).collect())
+    }
+
+    async fn load_setting(&self, key: &str) -> Result<Option<serde_json::Value>, PersistError> {
+        Ok(self.inner.lock().unwrap().settings.get(key).cloned())
+    }
+
+    async fn upsert_setting(
+        &self,
+        key: &str,
+        value: serde_json::Value,
+    ) -> Result<(), PersistError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .settings
+            .insert(key.to_string(), value);
+        Ok(())
+    }
+
+    async fn user_emails(&self, user_id: Uuid) -> Result<Vec<String>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .identities
+            .values()
+            .filter(|identity| identity.user_id == user_id)
+            .filter_map(|identity| identity.email.clone())
+            .collect())
+    }
+
+    async fn set_availability(
+        &self,
+        user_id: Uuid,
+        until: chrono::DateTime<Utc>,
+    ) -> Result<(), PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.availability.insert(
+            user_id,
+            AvailabilityRow {
+                until,
+                updated_at: Utc::now(),
+            },
+        );
+        Ok(())
+    }
+
+    async fn clear_availability(&self, user_id: Uuid) -> Result<(), PersistError> {
+        self.inner.lock().unwrap().availability.remove(&user_id);
+        Ok(())
+    }
+
+    async fn list_available(
+        &self,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<Vec<StoredAvailablePlayer>, PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.availability.retain(|_, row| row.until > now);
+        let mut rows: Vec<_> = inner
+            .availability
+            .iter()
+            .filter_map(|(user_id, row)| {
+                let user = inner.users.get(user_id)?;
+                Some((
+                    row.updated_at,
+                    StoredAvailablePlayer {
+                        user_id: *user_id,
+                        display_name: user.display_name.clone(),
+                        avatar_id: user.avatar_id.clone(),
+                        photo_url: user.photo_url.clone(),
+                        available_until: row.until,
+                    },
+                ))
+            })
+            .collect();
+        rows.sort_by_key(|(updated_at, _)| *updated_at);
+        Ok(rows.into_iter().map(|(_, player)| player).collect())
     }
 }
 

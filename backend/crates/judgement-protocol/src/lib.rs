@@ -12,3 +12,18 @@ pub use ws::*;
 /// Bump only with a documented migration path (PLAN.md §29.2: never silently
 /// change protocol schemas).
 pub const PROTOCOL_VERSION: u16 = 1;
+
+/// Keep in sync with Flutter `festival_catalog.dart`.
+pub const FESTIVAL_IDS: &[&str] = &[
+    "off",
+    "diwali",
+    "christmas",
+    "holi",
+    "halloween",
+    "new_year",
+    "eid",
+];
+
+pub fn festival_id_allowed(id: &str) -> bool {
+    FESTIVAL_IDS.iter().any(|known| *known == id)
+}

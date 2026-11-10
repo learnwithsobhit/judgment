@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../app/app.dart';
+import '../theme/judgement_palette.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/social_share.dart';
@@ -122,10 +123,13 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: RadialGradient(
-                colors: [Color(0xFF2E7D32), feltGreenDark],
+                colors: [
+                  context.palette.feltHighlight,
+                  context.palette.feltDark,
+                ],
                 radius: 1.1,
               ),
             ),

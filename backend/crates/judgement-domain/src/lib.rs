@@ -13,9 +13,7 @@ pub mod score;
 
 pub use cards::{full_deck, Card, CardId, Rank, Suit};
 pub use errors::{GameError, TrickEvaluationError};
-pub use ids::{
-    ActionId, EventId, GameId, PlayerId, RoomId, RoundId, RsvpId, SessionId, TrickId,
-};
+pub use ids::{ActionId, EventId, GameId, PlayerId, RoomId, RoundId, RsvpId, SessionId, TrickId};
 pub use player::{ConnectionStatus, PlayerState};
 pub use rules::{
     max_cards_per_player, trump_rule_from_config, validate_trump_cycle, BiddingRule, GameRules,

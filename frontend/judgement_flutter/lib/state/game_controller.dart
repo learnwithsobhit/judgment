@@ -11,6 +11,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../networking/game_socket.dart';
@@ -65,7 +66,8 @@ class GameController extends ChangeNotifier {
   /// First drop in the current streak. Auto-retry until this window elapses.
   DateTime? _disconnectSince;
 
-  /// Matches server `RECONNECT_GRACE_SECONDS` (90). After this, show Retry.
+  /// Client auto-retry window. Longer than the server 30s seat hold so a
+  /// return just after the seat opens still reconnects by itself.
   static const reconnectGiveUpAfter = Duration(seconds: 90);
 
   /// Stop auto-reconnect after abort / intentional switch to a new game.
@@ -79,6 +81,9 @@ class GameController extends ChangeNotifier {
 
   /// Ignore re-entrant [connect] while one handshake is in flight.
   bool _connectInFlight = false;
+
+  /// Bumped on every [connect] so a close from a replaced socket is ignored.
+  int _socketGen = 0;
 
   /// Pending exponential-backoff reconnect timer (cancelled on new connect).
   Timer? _reconnectTimer;
@@ -129,8 +134,21 @@ class GameController extends ChangeNotifier {
       !_disposed &&
       !_suppressReconnect &&
       !gameAborted &&
-      !(view?.isFinished ?? false) &&
-      connection != GameConnectionState.connected;
+      !(view?.isFinished ?? false);
+
+  @visibleForTesting
+  void debugHandleMessage(ServerMessage message) => _handleMessage(message);
+
+  @visibleForTesting
+  int get debugSocketGen => _socketGen;
+
+  @visibleForTesting
+  bool get debugReconnectTimerArmed => _reconnectTimer != null;
+
+  @visibleForTesting
+  void debugHandleDisconnect({int? generation}) {
+    _handleDisconnect(generation ?? _socketGen);
+  }
 
   static const reconnectChromeDelay = Duration(milliseconds: 1500);
 
@@ -388,6 +406,7 @@ class GameController extends ChangeNotifier {
     _connectInFlight = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    final gen = ++_socketGen;
     // Close any prior channel first — avoids dual WS / orphan sockets.
     _closeSocket();
     connection = _reconnectAttempts == 0
@@ -402,19 +421,25 @@ class GameController extends ChangeNotifier {
       _disconnectSince = null;
       _connectInFlight = false;
       _notify();
+      _resendPendingAfterConnect();
       return;
     }
     try {
       final socket = await GameSocket.connect(
         api.gameSocketUri(gameId),
-        onDone: _handleDisconnect,
-        onError: (_) => _handleDisconnect(),
+        onDone: () => _handleDisconnect(gen),
+        onError: (_) => _handleDisconnect(gen),
       );
-      if (_disposed || _suppressReconnect) {
+      if (_disposed || _suppressReconnect || gen != _socketGen) {
         socket.close();
-        _connectInFlight = false;
+        if (gen == _socketGen) {
+          _connectInFlight = false;
+        }
         return;
       }
+      // This gen owns the socket: a close is a real disconnect, not the
+      // previous channel's onDone landing after handshake.
+      _connectInFlight = false;
       _socket = socket;
       _subscription = socket.messages.listen(_handleMessage);
       connection = GameConnectionState.connected;
@@ -426,10 +451,11 @@ class GameController extends ChangeNotifier {
       _sendAction({'type': 'request_state_sync'});
       _startKeepAlive();
       _notify();
-      _connectInFlight = false;
+      _resendPendingAfterConnect();
     } catch (_) {
+      if (gen != _socketGen) return;
       _connectInFlight = false;
-      _handleDisconnect();
+      _handleDisconnect(gen);
     }
   }
 
@@ -472,17 +498,17 @@ class GameController extends ChangeNotifier {
     await connect();
   }
 
-  void _handleDisconnect() {
+  void _handleDisconnect(int generation) {
     if (_disposed) return;
+    if (generation != _socketGen) return;
     _stopKeepAlive();
     // Closing the prior socket during [connect] must not schedule another reconnect.
     if (_connectInFlight) return;
-    // Unstick bid/play if the socket died before CommandAccepted.
-    pendingActionId = null;
     connection = GameConnectionState.disconnected;
     _connectionUnstableSince ??= DateTime.now();
     _notify();
     if (_suppressReconnect || gameAborted || (view?.isFinished ?? false)) {
+      _clearPendingCommand();
       return;
     }
     _disconnectSince ??= DateTime.now();
@@ -500,6 +526,9 @@ class GameController extends ChangeNotifier {
       _reconnectTimer = Timer(delay, () {
         if (!_disposed && !_suppressReconnect && !gameAborted) connect();
       });
+    } else {
+      _clearPendingCommand();
+      _notify();
     }
   }
 
@@ -619,6 +648,9 @@ class GameController extends ChangeNotifier {
       case TokenRotated(:final token):
         api.token = token;
         _persistReclaimStore();
+        if (countsForProfile) {
+          AccountSession.instance.rememberRotatedToken(token);
+        }
       case TableEventMessage(
         :final kind,
         :final from,
@@ -665,16 +697,23 @@ class GameController extends ChangeNotifier {
     }
   }
 
-  void leaveGame() {
+  Future<void> leaveGame() async {
     _intentionalLeave = true;
     _suppressReconnect = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _stopKeepAlive();
-    _sendCommand({'type': 'leave_game'});
+    _clearPendingCommand();
+    final code = roomCode ?? vacantRoomCode;
+    if (code != null) {
+      try {
+        await api.leaveRoom(code);
+      } catch (_) {}
+    }
+    _sendAction({'type': 'leave_game'});
   }
 
-  /// After foreground resume: keepalive if the socket is live, else reconnect.
+  /// After a call or tab return: drop any half-open socket and reconnect.
   Future<void> onAppResumed() async {
     if (_disposed ||
         _suppressReconnect ||
@@ -682,11 +721,7 @@ class GameController extends ChangeNotifier {
         (view?.isFinished ?? false)) {
       return;
     }
-    if (connection == GameConnectionState.connected &&
-        (_socket != null || debugPretendSocketOpen)) {
-      _socket?.sendKeepAlive();
-      return;
-    }
+    _clearPendingCommand();
     _reconnectAttempts = 0;
     _disconnectSince = null;
     await connect();
@@ -875,6 +910,17 @@ class GameController extends ChangeNotifier {
     }
 
     view = next;
+    if (connection == GameConnectionState.connected) {
+      final tableHeld = next.opponents.any(
+        (o) =>
+            o.connectionStatus == 'disconnected' ||
+            o.connectionStatus == 'vacant',
+      );
+      if (!tableHeld) {
+        pauseReason = null;
+        pauseUntil = null;
+      }
+    }
     if (next.isFinished) {
       _stopKeepAlive();
       _clearReclaimStore();
@@ -1086,6 +1132,15 @@ class GameController extends ChangeNotifier {
   void _sendCommand(Map<String, dynamic> action) {
     final v = view;
     if (v == null || pendingActionId != null) return;
+    final canSend =
+        connection == GameConnectionState.connected &&
+        (_socket != null || debugSkipNetworkConnect);
+    if (!canSend) {
+      lastRejection = 'Reconnecting — tap again';
+      lastRejectionCode = null;
+      _notify();
+      return;
+    }
     final actionId = _uuid.v4();
     pendingActionId = actionId;
     _pendingAction = Map<String, dynamic>.from(action);
@@ -1094,6 +1149,11 @@ class GameController extends ChangeNotifier {
     _resyncing = false;
     _notify();
     _send(actionId: actionId, stateVersion: v.stateVersion, action: action);
+  }
+
+  void _resendPendingAfterConnect() {
+    if (pendingActionId == null || _pendingAction == null) return;
+    _autoResendPending();
   }
 
   void _clearPendingCommand() {

@@ -145,7 +145,10 @@ impl Card {
     }
 
     pub fn id(self) -> CardId {
-        CardId { suit: self.suit, rank: self.rank }
+        CardId {
+            suit: self.suit,
+            rank: self.rank,
+        }
     }
 }
 
@@ -165,7 +168,10 @@ pub struct CardId {
 
 impl CardId {
     pub fn card(self) -> Card {
-        Card { suit: self.suit, rank: self.rank }
+        Card {
+            suit: self.suit,
+            rank: self.rank,
+        }
     }
 }
 
@@ -188,7 +194,10 @@ impl FromStr for CardId {
         let (rank, suit) = s
             .split_once("-of-")
             .ok_or_else(|| format!("invalid card id: {s}"))?;
-        Ok(CardId { suit: suit.parse()?, rank: rank.parse()? })
+        Ok(CardId {
+            suit: suit.parse()?,
+            rank: rank.parse()?,
+        })
     }
 }
 

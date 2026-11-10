@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:judgement_flutter/app/app.dart';
+import 'package:judgement_flutter/models/protocol.dart';
 import 'package:judgement_flutter/networking/api_client.dart';
+import 'package:judgement_flutter/theme/festival_controller.dart';
 import 'package:judgement_flutter/widgets/leaderboard_sheet.dart';
 import 'package:judgement_flutter/widgets/live_games_card.dart';
+import 'package:judgement_flutter/widgets/whos_free_card.dart';
 
 Future<void> _acceptLegal(WidgetTester tester) async {
   final checkbox = find.byType(Checkbox).first;
@@ -18,12 +21,19 @@ void main() {
     fairPlayLeaderboardLoad = () async =>
         const FairPlayLeaderboardReport(players: []);
     activeGamesLoad = () async => const [];
+    availabilityLoad = () async =>
+        const AvailabilityBoard(count: 0, ready: false, players: []);
+    festivalConfigLoad = () async => 'off';
+    FestivalController.instance.resetForTest();
   });
 
   tearDown(() {
     leaderboardLoad = () => ApiClient().getLeaderboard();
     fairPlayLeaderboardLoad = () => ApiClient().getFairPlayLeaderboard();
     activeGamesLoad = () => ApiClient().getActiveGames();
+    availabilityLoad = () => ApiClient().getAvailability();
+    festivalConfigLoad = () => ApiClient().getConfig();
+    FestivalController.instance.resetForTest();
   });
 
   testWidgets('landing screen renders create and join flows', (tester) async {
@@ -73,16 +83,36 @@ void main() {
     expect(find.text('Round schedule'), findsNothing);
   });
 
-  testWidgets('empty nickname shows validation feedback after consent',
-      (tester) async {
+  testWidgets('empty nickname shows validation feedback after consent', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(800, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(const JudgementApp());
     await _acceptLegal(tester);
-    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create room'));
+    await tester.ensureVisible(
+      find.widgetWithText(FilledButton, 'Create room'),
+    );
     await tester.tap(find.widgetWithText(FilledButton, 'Create room'));
     await tester.pump();
     expect(find.text('Pick a nickname first'), findsOneWidget);
   });
+
+  testWidgets(
+    'Create and Join stay up when the first availability load fails',
+    (tester) async {
+      availabilityLoad = () async => throw Exception('offline');
+      await tester.binding.setSurfaceSize(const Size(800, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(const JudgementApp());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.widgetWithText(FilledButton, 'Create room'), findsOneWidget);
+      expect(find.text('Join room'), findsWidgets);
+      expect(find.text('WHO\'S FREE'), findsNothing);
+    },
+  );
 }

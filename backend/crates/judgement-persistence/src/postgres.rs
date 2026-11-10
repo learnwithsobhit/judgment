@@ -1615,6 +1615,109 @@ impl GameStore for PostgresStore {
             })
             .collect())
     }
+
+    async fn load_setting(&self, key: &str) -> Result<Option<serde_json::Value>, PersistError> {
+        let row = sqlx::query("SELECT value FROM app_settings WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get::<serde_json::Value, _>("value")))
+    }
+
+    async fn upsert_setting(
+        &self,
+        key: &str,
+        value: serde_json::Value,
+    ) -> Result<(), PersistError> {
+        sqlx::query(
+            r#"
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES ($1, $2, now())
+            ON CONFLICT (key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = now()
+            "#,
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn user_emails(&self, user_id: Uuid) -> Result<Vec<String>, PersistError> {
+        let rows = sqlx::query(
+            "SELECT email FROM user_identities WHERE user_id = $1 AND email IS NOT NULL",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>("email"))
+            .collect())
+    }
+
+    async fn set_availability(
+        &self,
+        user_id: Uuid,
+        until: chrono::DateTime<Utc>,
+    ) -> Result<(), PersistError> {
+        sqlx::query(
+            r#"
+            INSERT INTO player_availability (user_id, available_until, updated_at)
+            VALUES ($1, $2, now())
+            ON CONFLICT (user_id) DO UPDATE SET
+                available_until = EXCLUDED.available_until,
+                updated_at = now()
+            "#,
+        )
+        .bind(user_id)
+        .bind(until)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn clear_availability(&self, user_id: Uuid) -> Result<(), PersistError> {
+        sqlx::query("DELETE FROM player_availability WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn list_available(
+        &self,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<Vec<StoredAvailablePlayer>, PersistError> {
+        sqlx::query("DELETE FROM player_availability WHERE available_until <= $1")
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT u.user_id, u.display_name, u.avatar_id, u.photo_url, a.available_until
+            FROM player_availability a
+            JOIN users u ON u.user_id = a.user_id
+            WHERE a.available_until > $1
+            ORDER BY a.updated_at ASC
+            "#,
+        )
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| StoredAvailablePlayer {
+                user_id: row.get("user_id"),
+                display_name: row.get("display_name"),
+                avatar_id: row.get("avatar_id"),
+                photo_url: row.get("photo_url"),
+                available_until: row.get("available_until"),
+            })
+            .collect())
+    }
 }
 
 fn user_from_row(row: sqlx::postgres::PgRow) -> StoredUser {

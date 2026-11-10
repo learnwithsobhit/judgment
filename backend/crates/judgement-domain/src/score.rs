@@ -126,7 +126,11 @@ mod tests {
     use super::*;
 
     fn entry(bid: u8, won: u8, score: i32) -> RoundScoreEntry {
-        RoundScoreEntry { bid, tricks_won: won, score }
+        RoundScoreEntry {
+            bid,
+            tricks_won: won,
+            score,
+        }
     }
 
     #[test]
