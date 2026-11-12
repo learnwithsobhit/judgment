@@ -124,7 +124,9 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     if (_liveTimer != null) return;
     _liveTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadLiveGames();
-      _loadAvailability(refreshWindow: true);
+      // Read-only refresh. Do not renew "I'm free" here — that raced with
+      // turning the switch off and kept re-enabling people on the home poll.
+      _loadAvailability();
     });
   }
 
@@ -141,24 +143,8 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     } catch (_) {}
   }
 
-  bool get _iAmFree {
-    final id = AccountSession.instance.userId;
-    final board = _availability;
-    if (id == null || id.isEmpty || board == null) return false;
-    return board.players.any((player) => player.userId == id);
-  }
-
-  Future<void> _loadAvailability({bool refreshWindow = false}) async {
+  Future<void> _loadAvailability() async {
     try {
-      if (refreshWindow &&
-          !_availabilitySaving &&
-          AccountSession.instance.isSignedIn &&
-          _iAmFree) {
-        try {
-          final api = ApiClient()..token = AccountSession.instance.token;
-          await api.setAvailability(true);
-        } catch (_) {}
-      }
       final board = await availabilityLoad();
       if (!mounted) return;
       setState(() => _availability = board);
@@ -268,7 +254,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
   // Room options (create mode, ADR 0003).
   int _maxPlayers = 6;
   bool _timerEnabled = false;
-  int _timerSeconds = 30;
+  int _timerSeconds = 20;
 
   /// null = revealed-card; otherwise a 4-suit cycle that repeats each round.
   List<String>? _trumpCycle = List<String>.from(defaultTrumpCycle);
@@ -658,7 +644,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           Wrap(
             spacing: 8,
             children: [
-              for (final seconds in const [15, 30, 60, 120])
+              for (final seconds in const [15, 20, 30, 60, 120])
                 ChoiceChip(
                   label: Text('${seconds}s'),
                   selected: _timerSeconds == seconds,
