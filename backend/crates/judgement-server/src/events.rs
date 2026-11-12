@@ -721,6 +721,7 @@ pub async fn open_lobby(
         round_schedule: round_schedule.clone(),
         dealer_total_restriction: false,
         open_start: false,
+        tournament_id: None,
     };
     let mut room_view = room.view();
     state

@@ -111,8 +111,8 @@ impl GameStore for PostgresStore {
             INSERT INTO rooms (
                 room_id, code, host_session_id, max_players, turn_timeout_seconds,
                 first_trump, trump_cycle, round_schedule, dealer_total_restriction,
-                open_start, phase, game_id, created_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                open_start, tournament_id, phase, game_id, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             ON CONFLICT (room_id) DO UPDATE SET
                 host_session_id = EXCLUDED.host_session_id,
                 max_players = EXCLUDED.max_players,
@@ -122,6 +122,7 @@ impl GameStore for PostgresStore {
                 round_schedule = EXCLUDED.round_schedule,
                 dealer_total_restriction = EXCLUDED.dealer_total_restriction,
                 open_start = EXCLUDED.open_start,
+                tournament_id = EXCLUDED.tournament_id,
                 phase = EXCLUDED.phase,
                 game_id = EXCLUDED.game_id
             "#,
@@ -136,6 +137,7 @@ impl GameStore for PostgresStore {
         .bind(serde_json::to_value(&room.round_schedule)?)
         .bind(room.dealer_total_restriction)
         .bind(room.open_start)
+        .bind(room.tournament_id)
         .bind(&room.phase)
         .bind(room.game_id.map(|g| g.0))
         .bind(room.created_at)
@@ -206,7 +208,7 @@ impl GameStore for PostgresStore {
             r#"
             SELECT room_id, code, host_session_id, max_players, turn_timeout_seconds,
                    first_trump, trump_cycle, round_schedule, dealer_total_restriction,
-                   open_start, phase, game_id, created_at
+                   open_start, tournament_id, phase, game_id, created_at
             FROM rooms
             "#,
         )
@@ -262,6 +264,7 @@ impl GameStore for PostgresStore {
                 round_schedule,
                 dealer_total_restriction: row.get("dealer_total_restriction"),
                 open_start: row.get("open_start"),
+                tournament_id: row.get("tournament_id"),
                 phase: row.get("phase"),
                 game_id: row.get::<Option<Uuid>, _>("game_id").map(GameId),
                 players,
@@ -1718,6 +1721,202 @@ impl GameStore for PostgresStore {
             })
             .collect())
     }
+
+    async fn upsert_tournament(
+        &self,
+        tournament: &StoredTournament,
+    ) -> Result<(), PersistError> {
+        sqlx::query(
+            r#"
+            INSERT INTO tournaments (
+                tournament_id, slug, title, blurb, format, status,
+                starts_at, ends_at, created_by, created_at, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            ON CONFLICT (tournament_id) DO UPDATE SET
+                slug = EXCLUDED.slug,
+                title = EXCLUDED.title,
+                blurb = EXCLUDED.blurb,
+                format = EXCLUDED.format,
+                status = EXCLUDED.status,
+                starts_at = EXCLUDED.starts_at,
+                ends_at = EXCLUDED.ends_at,
+                updated_at = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(tournament.tournament_id)
+        .bind(&tournament.slug)
+        .bind(&tournament.title)
+        .bind(&tournament.blurb)
+        .bind(&tournament.format)
+        .bind(tournament.status.as_str())
+        .bind(tournament.starts_at)
+        .bind(tournament.ends_at)
+        .bind(tournament.created_by)
+        .bind(tournament.created_at)
+        .bind(tournament.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn load_tournament(
+        &self,
+        id_or_slug: &str,
+    ) -> Result<Option<StoredTournament>, PersistError> {
+        let row = if let Ok(id) = Uuid::parse_str(id_or_slug) {
+            sqlx::query(
+                r#"
+                SELECT tournament_id, slug, title, blurb, format, status,
+                       starts_at, ends_at, created_by, created_at, updated_at
+                FROM tournaments WHERE tournament_id = $1
+                "#,
+            )
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT tournament_id, slug, title, blurb, format, status,
+                       starts_at, ends_at, created_by, created_at, updated_at
+                FROM tournaments WHERE slug = $1
+                "#,
+            )
+            .bind(id_or_slug)
+            .fetch_optional(&self.pool)
+            .await?
+        };
+        Ok(row.map(tournament_from_row))
+    }
+
+    async fn list_tournaments(&self) -> Result<Vec<StoredTournament>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT tournament_id, slug, title, blurb, format, status,
+                   starts_at, ends_at, created_by, created_at, updated_at
+            FROM tournaments
+            ORDER BY
+                CASE status WHEN 'live' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
+                updated_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(tournament_from_row).collect())
+    }
+
+    async fn load_tournament_standings(
+        &self,
+        tournament_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<LeaderboardRow>, PersistError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT user_id, display_name, avatar_id, photo_url, games, gold, silver, bronze,
+                   exact, rounds, score_points, medal_points
+            FROM (
+                SELECT u.user_id, u.display_name, u.avatar_id, u.photo_url,
+                       COUNT(*)::int AS games,
+                       COUNT(*) FILTER (WHERE r.finish_rank = 1)::int AS gold,
+                       COUNT(*) FILTER (WHERE r.finish_rank = 2)::int AS silver,
+                       COUNT(*) FILTER (WHERE r.finish_rank = 3)::int AS bronze,
+                       COALESCE(SUM(r.exact_bid_rounds), 0)::int AS exact,
+                       COALESCE(SUM(r.rounds_played), 0)::int AS rounds,
+                       COALESCE(SUM(r.total_score), 0)::bigint AS score_points,
+                       (COUNT(*) FILTER (WHERE r.finish_rank = 1)::bigint * 500
+                        + COUNT(*) FILTER (WHERE r.finish_rank = 2)::bigint * 100
+                        + COUNT(*) FILTER (WHERE r.finish_rank = 3)::bigint * 20) AS medal_points
+                FROM user_game_results r
+                JOIN users u ON u.user_id = r.user_id
+                WHERE r.counted AND r.tournament_id = $1
+                GROUP BY u.user_id, u.display_name, u.avatar_id, u.photo_url
+            ) board
+            ORDER BY medal_points DESC,
+                     gold DESC,
+                     silver DESC,
+                     bronze DESC,
+                     COALESCE(gold::bigint * 1000000 / NULLIF(games, 0), 0) DESC,
+                     COALESCE(exact::bigint * 1000000 / NULLIF(rounds, 0), 0) DESC,
+                     display_name ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(tournament_id)
+        .bind(if limit > 0 { limit } else { i64::MAX })
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let games: i32 = row.get("games");
+                let gold: i32 = row.get("gold");
+                let silver: i32 = row.get("silver");
+                let bronze: i32 = row.get("bronze");
+                let exact: i32 = row.get("exact");
+                let rounds: i32 = row.get("rounds");
+                let score_points: i64 = row.get("score_points");
+                LeaderboardRow {
+                    user_id: row.get("user_id"),
+                    display_name: row.get("display_name"),
+                    avatar_id: row.get("avatar_id"),
+                    photo_url: row.get("photo_url"),
+                    wins: gold,
+                    games,
+                    exact_percent: crate::stats::exact_percent(exact, rounds),
+                    average_score: crate::stats::average_score(score_points, games),
+                    gold,
+                    silver,
+                    bronze,
+                    medal_points: row.get("medal_points"),
+                    exact,
+                    rounds,
+                }
+            })
+            .collect())
+    }
+
+    async fn count_tournament_tables(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<i64, PersistError> {
+        let row = sqlx::query(
+            r#"
+            SELECT COUNT(DISTINCT game_id)::bigint AS tables
+            FROM user_game_results
+            WHERE counted AND tournament_id = $1
+            "#,
+        )
+        .bind(tournament_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>("tables"))
+    }
+
+    async fn delete_tournament(&self, tournament_id: Uuid) -> Result<bool, PersistError> {
+        // FK ON DELETE SET NULL clears rooms / user_game_results.tournament_id.
+        let result = sqlx::query("DELETE FROM tournaments WHERE tournament_id = $1")
+            .bind(tournament_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+}
+
+fn tournament_from_row(row: sqlx::postgres::PgRow) -> StoredTournament {
+    let status_raw: String = row.get("status");
+    StoredTournament {
+        tournament_id: row.get("tournament_id"),
+        slug: row.get("slug"),
+        title: row.get("title"),
+        blurb: row.get("blurb"),
+        format: row.get("format"),
+        status: TournamentStatus::parse(&status_raw).unwrap_or(TournamentStatus::Draft),
+        starts_at: row.get("starts_at"),
+        ends_at: row.get("ends_at"),
+        created_by: row.get("created_by"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
 }
 
 fn user_from_row(row: sqlx::postgres::PgRow) -> StoredUser {
@@ -1780,8 +1979,8 @@ async fn record_user_stats(
             r#"
             INSERT INTO user_game_results (
                 game_id, user_id, table_size, rounds_played, finish_rank,
-                total_score, exact_bid_rounds, tricks_missed, counted
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                total_score, exact_bid_rounds, tricks_missed, counted, tournament_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (game_id, user_id) DO NOTHING
             RETURNING user_id
             "#,
@@ -1795,6 +1994,7 @@ async fn record_user_stats(
         .bind(seat.exact_bid_rounds as i16)
         .bind(seat.tricks_missed)
         .bind(counted)
+        .bind(commit.tournament_id)
         .fetch_optional(&mut **tx)
         .await?;
         if inserted.is_none() {

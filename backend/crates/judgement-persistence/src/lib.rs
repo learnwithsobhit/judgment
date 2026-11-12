@@ -201,6 +201,33 @@ pub trait GameStore: Send + Sync {
         &self,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<StoredAvailablePlayer>, PersistError>;
+
+    async fn upsert_tournament(
+        &self,
+        tournament: &StoredTournament,
+    ) -> Result<(), PersistError>;
+
+    async fn load_tournament(
+        &self,
+        id_or_slug: &str,
+    ) -> Result<Option<StoredTournament>, PersistError>;
+
+    async fn list_tournaments(&self) -> Result<Vec<StoredTournament>, PersistError>;
+
+    /// Medal board for one tournament. Only counted finishes; same ordering as Top players.
+    async fn load_tournament_standings(
+        &self,
+        tournament_id: uuid::Uuid,
+        limit: i64,
+    ) -> Result<Vec<LeaderboardRow>, PersistError>;
+
+    async fn count_tournament_tables(
+        &self,
+        tournament_id: uuid::Uuid,
+    ) -> Result<i64, PersistError>;
+
+    /// Removes the event. Result/room FKs become null (Top players rows stay).
+    async fn delete_tournament(&self, tournament_id: uuid::Uuid) -> Result<bool, PersistError>;
 }
 
 /// Round / game completion events also warrant keeping an explicit historical

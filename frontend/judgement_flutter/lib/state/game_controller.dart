@@ -216,6 +216,12 @@ class GameController extends ChangeNotifier {
   /// Room code for share / end-game REST (set from lobby when known).
   String? roomCode;
 
+  /// Quiet result/lobby mark when the table was attached to a live event.
+  String? tournamentTitle;
+
+  /// Event start used with [tournamentTitle] so same-named nights stay distinct.
+  DateTime? tournamentStartsAt;
+
   /// Mid-game host flag (lobby `isHost` + `HostChanged`).
   bool amHost = false;
 

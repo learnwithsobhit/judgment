@@ -38,3 +38,9 @@ String formatEventWhenLocal(DateTime startsAt) {
   final mm = local.minute.toString().padLeft(2, '0');
   return '$wd $day $mon ${local.year} $hh:$mm';
 }
+
+/// Title plus local when — keeps same-named tournaments distinct in lists.
+String tournamentDisplayLabel(String title, DateTime? startsAt) {
+  if (startsAt == null) return title;
+  return '$title · ${formatEventWhenLocal(startsAt)}';
+}

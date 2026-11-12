@@ -79,6 +79,7 @@ pub async fn restore_from_store(
                     round_schedule: stored.round_schedule,
                     dealer_total_restriction: stored.dealer_total_restriction,
                     open_start: stored.open_start,
+                    tournament_id: stored.tournament_id,
                 },
             );
         }
@@ -173,6 +174,12 @@ fn spawn_restored_actor(
             .iter()
             .map(|player| (player.player_id, player.user_id))
             .collect(),
+        tournament_id: {
+            let rooms = state.rooms.lock().unwrap();
+            rooms
+                .get(&game.room_id)
+                .and_then(|r| r.tournament_id)
+        },
     });
 
     let players: HashMap<_, _> = game

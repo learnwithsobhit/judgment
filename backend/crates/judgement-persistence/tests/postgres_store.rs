@@ -90,6 +90,7 @@ async fn postgres_persists_and_restores_a_game() {
             round_schedule: Default::default(),
             dealer_total_restriction: false,
             open_start: false,
+            tournament_id: None,
             phase: "lobby".into(),
             game_id: None,
             players: seats,
@@ -134,6 +135,7 @@ async fn postgres_persists_and_restores_a_game() {
             round_result: None,
             game_result: None,
             pace: Vec::new(),
+            tournament_id: None,
         })
         .await
         .unwrap();

@@ -27,6 +27,7 @@ void main() {
     FestivalController.instance.resetForTest();
     festivalConfigLoad = () async => 'off';
     leaderboardLoad = () async => const LeaderboardReport(players: []);
+    tournamentListLoad = () async => const [];
     activeGamesLoad = () async => const [];
     availabilityLoad = () async =>
         const AvailabilityBoard(count: 0, ready: false, players: []);
@@ -224,6 +225,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Table look'), findsOneWidget);
     expect(find.text('Choose festival'), findsOneWidget);
+    expect(find.text('Tournaments'), findsOneWidget);
     expect(find.text('Sign out'), findsOneWidget);
   });
 
@@ -267,15 +269,20 @@ void main() {
     await tester.tap(find.text('Open profile'));
     await tester.pumpAndSettle();
     expect(find.text('Choose festival'), findsOneWidget);
+    expect(find.text('Tournaments'), findsOneWidget);
+    await tester.ensureVisible(find.text('Sign out'));
+    await tester.pumpAndSettle();
     expect(find.text('Sign out'), findsOneWidget);
     expect(
       tester.getRect(find.text('Sign out')).bottom,
       lessThanOrEqualTo(670),
     );
     expect(
-      tester.getRect(find.text('Choose festival')).bottom,
+      tester.getRect(find.text('Tournaments')).bottom,
       lessThan(tester.getRect(find.text('Sign out')).top),
     );
+    await tester.ensureVisible(find.text('Choose festival'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Choose festival'));
     await tester.pumpAndSettle();
     expect(find.text('Use this look'), findsOneWidget);

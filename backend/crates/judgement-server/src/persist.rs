@@ -40,6 +40,7 @@ pub fn stored_room(room: &Room) -> StoredRoom {
         round_schedule: room.round_schedule.clone(),
         dealer_total_restriction: room.dealer_total_restriction,
         open_start: room.open_start,
+        tournament_id: room.tournament_id,
         phase,
         game_id,
         players: room
@@ -91,6 +92,7 @@ pub fn command_commit_from(
     events: &[GameEvent],
     state: &InternalGameState,
     pace: &[StoredPlayerPace],
+    tournament_id: Option<uuid::Uuid>,
 ) -> CommandCommit {
     let round_result = events.iter().find_map(|event| match event {
         GameEvent::RoundCompleted { round_index } => {
@@ -123,5 +125,6 @@ pub fn command_commit_from(
         round_result,
         game_result,
         pace: pace.to_vec(),
+        tournament_id,
     }
 }

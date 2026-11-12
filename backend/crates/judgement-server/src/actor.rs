@@ -157,6 +157,8 @@ pub struct SpawnActor {
     pub seat_users: HashMap<PlayerId, Option<uuid::Uuid>>,
     /// Home-screen card. Written after accepted commands; cleared on finish.
     pub active_games: Arc<Mutex<HashMap<GameId, ActiveGame>>>,
+    /// Competitive event for finish stamps. None for untagged tables.
+    pub tournament_id: Option<uuid::Uuid>,
 }
 
 pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
@@ -207,6 +209,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         leaderboard: config.leaderboard,
         seat_users: config.seat_users,
         active_games: config.active_games,
+        tournament_id: config.tournament_id,
     };
     tokio::spawn(actor.run());
     tx
@@ -266,6 +269,7 @@ struct GameActor {
     leaderboard: Arc<Mutex<Arc<Vec<LeaderboardRow>>>>,
     seat_users: HashMap<PlayerId, Option<uuid::Uuid>>,
     active_games: Arc<Mutex<HashMap<GameId, ActiveGame>>>,
+    tournament_id: Option<uuid::Uuid>,
 }
 
 impl GameActor {
@@ -1451,6 +1455,7 @@ impl GameActor {
             self.engine.state(),
             &self.metrics,
             &self.stored_pace(),
+            self.tournament_id,
         )
         .await
         {
@@ -1489,6 +1494,7 @@ impl GameActor {
         state: &judgement_engine::InternalGameState,
         metrics: &Metrics,
         pace: &[StoredPlayerPace],
+        tournament_id: Option<uuid::Uuid>,
     ) -> bool {
         let Some(store) = store.clone() else {
             if events
@@ -1501,7 +1507,14 @@ impl GameActor {
             }
             return true;
         };
-        let commit = command_commit_from(game_id, action_id, events, state, pace);
+        let commit = command_commit_from(
+            game_id,
+            action_id,
+            events,
+            state,
+            pace,
+            tournament_id,
+        );
         let started = std::time::Instant::now();
         for attempt in 0..2u8 {
             let result = tokio::time::timeout(PERSIST_TIMEOUT, store.commit_command(&commit)).await;

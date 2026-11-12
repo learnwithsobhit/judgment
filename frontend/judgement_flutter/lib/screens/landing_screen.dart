@@ -12,6 +12,7 @@ import '../networking/api_client.dart';
 import '../state/game_controller.dart';
 import '../util/app_update.dart';
 import '../util/avatar_pack.dart';
+import '../util/event_share.dart';
 import '../util/legal_consent.dart';
 import '../util/room_rejoin.dart';
 import '../util/table_media_session.dart';
@@ -93,6 +94,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     _loadLatestGame();
     _loadLiveGames();
     _loadAvailability();
+    _loadLiveTournaments();
     _startLivePoll();
   }
 
@@ -206,6 +208,36 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
     } catch (_) {}
   }
 
+  Future<void> _loadLiveTournaments() async {
+    if (!AccountSession.instance.isSignedIn) {
+      if (!mounted) return;
+      setState(() {
+        _liveTournaments = const [];
+        _attachTournamentId = null;
+      });
+      return;
+    }
+    try {
+      final rows = await tournamentListLoad();
+      if (!mounted) return;
+      final live = rows.where((t) => t.isLive).toList();
+      setState(() {
+        _liveTournaments = live;
+        if (_attachTournamentId != null &&
+            !live.any((t) => t.tournamentId == _attachTournamentId)) {
+          _attachTournamentId = null;
+        }
+      });
+    } catch (_) {
+      // Attach is progressive disclosure — hide on failure; create still works.
+      if (!mounted) return;
+      setState(() {
+        _liveTournaments = const [];
+        _attachTournamentId = null;
+      });
+    }
+  }
+
   @override
   void dispose() {
     if (_watchingRoute) {
@@ -224,6 +256,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
   void _onAccount() {
     if (!mounted) return;
     final account = AccountSession.instance;
+    _loadLiveTournaments();
     setState(() {
       if (account.isSignedIn && _nickname.text.trim().isEmpty) {
         final nick = account.tableNickname?.trim() ?? '';
@@ -266,6 +299,10 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
   List<ManualRoundStep> _manualSteps = RoundSchedule.defaultManualForPlayers(
     6,
   ).steps!;
+
+  /// Live tournaments for the optional Event attach (signed-in create only).
+  List<TournamentSummary> _liveTournaments = const [];
+  String? _attachTournamentId;
 
   String? _scheduleValidationError() {
     if (!_manualSchedule) return null;
@@ -369,6 +406,7 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
           openStart: _setupOnly,
+          tournamentId: _attachTournamentId,
         );
         room = created.room;
         playerId = created.playerId;
@@ -432,6 +470,8 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                 myNickname: sessionNickname,
               )
               ..roomCode = room.code
+              ..tournamentTitle = room.tournamentTitle
+              ..tournamentStartsAt = room.tournamentStartsAt
               ..countsForProfile =
                   account.isSignedIn && api.token == account.token
               ..amHost = room.seats.any(
@@ -686,6 +726,40 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
             onChanged: (next) => setState(() => _trumpCycle = next),
           ),
         ],
+        if (AccountSession.instance.isSignedIn &&
+            _liveTournaments.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text('Event', style: labelStyle),
+          const SizedBox(height: 4),
+          DropdownButtonFormField<String?>(
+            value: _attachTournamentId,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('None'),
+              ),
+              for (final t in _liveTournaments)
+                DropdownMenuItem<String?>(
+                  value: t.tournamentId,
+                  child: Text(
+                    tournamentDisplayLabel(t.title, t.startsAt),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (value) => setState(() => _attachTournamentId = value),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Also counts on Top players.',
+            style: TextStyle(fontSize: 12, color: Colors.white54),
+          ),
+        ],
       ],
     );
   }
@@ -887,8 +961,13 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
                               ),
                             ],
                             selected: {_joining},
-                            onSelectionChanged: (selection) =>
-                                setState(() => _joining = selection.first),
+                            onSelectionChanged: (selection) {
+                              final next = selection.first;
+                              setState(() => _joining = next);
+                              if (!next) {
+                                _loadLiveTournaments();
+                              }
+                            },
                           ),
                         ],
                         const SizedBox(height: 20),

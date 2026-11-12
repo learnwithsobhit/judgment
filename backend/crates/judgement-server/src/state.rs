@@ -106,6 +106,8 @@ pub struct Room {
     pub dealer_total_restriction: bool,
     /// Creator is not seated. First joiner becomes host.
     pub open_start: bool,
+    /// Competitive event attached at create. Copied into the actor at start.
+    pub tournament_id: Option<uuid::Uuid>,
 }
 
 impl Room {
@@ -149,6 +151,9 @@ impl Room {
             round_schedule_summary: self.round_schedule.summary(self.max_players),
             dealer_total_restriction: self.dealer_total_restriction,
             open_start: self.open_start,
+            tournament_id: self.tournament_id.map(|id| id.to_string()),
+            tournament_title: None,
+            tournament_starts_at: None,
             seats,
         }
     }

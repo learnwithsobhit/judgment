@@ -839,6 +839,12 @@ class RoomView {
 
   /// Creator is not seated. The first joiner is host. Start still needs Ready.
   final bool openStart;
+
+  /// Competitive event attached at create. Survives only as a lobby mark until
+  /// finish stamps `user_game_results`.
+  final String? tournamentId;
+  final String? tournamentTitle;
+  final DateTime? tournamentStartsAt;
   final List<SeatView> seats;
 
   RoomView.fromJson(Map<String, dynamic> json)
@@ -861,9 +867,17 @@ class RoomView {
       dealerTotalRestriction =
           json['dealer_total_restriction'] as bool? ?? false,
       openStart = json['open_start'] as bool? ?? false,
+      tournamentId = json['tournament_id'] as String?,
+      tournamentTitle = json['tournament_title'] as String?,
+      tournamentStartsAt = _parseRoomTournamentStarts(json['tournament_starts_at']),
       seats = (json['seats'] as List)
           .map((s) => SeatView.fromJson(s as Map<String, dynamic>))
           .toList();
+}
+
+DateTime? _parseRoomTournamentStarts(Object? raw) {
+  if (raw is! String || raw.isEmpty) return null;
+  return DateTime.tryParse(raw);
 }
 
 // ---------------------------------------------------------------------------

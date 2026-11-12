@@ -12,6 +12,7 @@ void main() {
     leaderboardLoad = () async => const LeaderboardReport(players: []);
     fairPlayLeaderboardLoad = () async =>
         const FairPlayLeaderboardReport(players: []);
+    tournamentListLoad = () async => const [];
   });
 
   testWidgets('sheet switches between Top players and Fair play', (

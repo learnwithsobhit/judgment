@@ -12,6 +12,7 @@ import 'package:judgement_flutter/widgets/playing_card.dart';
 void main() {
   setUp(() {
     leaderboardLoad = () async => const LeaderboardReport(players: []);
+    tournamentListLoad = () async => const [];
     activeGamesLoad = () async => const [];
     availabilityLoad = () async =>
         const AvailabilityBoard(count: 0, ready: false, players: []);

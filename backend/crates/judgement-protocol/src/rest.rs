@@ -56,6 +56,9 @@ pub struct CreateRoomRequest {
     /// needs at least 3 ready players; the table does not have to be full.
     #[serde(default)]
     pub open_start: bool,
+    /// Attach this table to a live tournament. Guests should omit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +177,15 @@ pub struct RoomView {
     /// True when the creator is not playing. The first joiner is host.
     #[serde(default)]
     pub open_start: bool,
+    /// Competitive event this lobby/table is attached to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_id: Option<String>,
+    /// Display title when attached. Filled by routes when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_title: Option<String>,
+    /// Event start (UTC). Distinguishes same-named tournaments on lobby/result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_starts_at: Option<DateTime<Utc>>,
     pub seats: Vec<SeatView>,
 }
 
@@ -768,4 +780,62 @@ pub struct AvailabilityResponse {
     pub count: u32,
     pub ready: bool,
     pub players: Vec<AvailabilityPlayer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateTournamentRequest {
+    pub title: String,
+    #[serde(default)]
+    pub blurb: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starts_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<DateTime<Utc>>,
+    /// `draft` (default) or `live`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateTournamentRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blurb: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starts_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<DateTime<Utc>>,
+    /// `draft` | `live` | `closed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentSummary {
+    pub tournament_id: String,
+    pub slug: String,
+    pub title: String,
+    pub blurb: String,
+    pub format: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starts_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<DateTime<Utc>>,
+    pub finished_tables: i64,
+    /// Present on admin manage responses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_attached_rooms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentListResponse {
+    pub tournaments: Vec<TournamentSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentDetailResponse {
+    pub tournament: TournamentSummary,
+    pub players: Vec<LeaderboardEntry>,
 }

@@ -8,6 +8,7 @@ import '../auth/account_session.dart';
 import '../models/protocol.dart';
 import '../networking/api_client.dart';
 import '../state/game_controller.dart';
+import '../util/event_share.dart';
 import '../util/room_share.dart';
 import '../util/room_rejoin.dart';
 import '../util/game_reclaim_store.dart';
@@ -175,6 +176,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
             myNickname: widget.nickname,
           )
           ..roomCode = _room.code
+          ..tournamentTitle = _room.tournamentTitle
+          ..tournamentStartsAt = _room.tournamentStartsAt
           ..countsForProfile =
               AccountSession.instance.isSignedIn &&
               widget.api.token == AccountSession.instance.token
@@ -475,6 +478,19 @@ class _LobbyScreenState extends State<LobbyScreen> {
                               color: Colors.white54,
                             ),
                           ),
+                          if (_room.tournamentTitle != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              tournamentDisplayLabel(
+                                _room.tournamentTitle!,
+                                _room.tournamentStartsAt,
+                              ),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.white54,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 4),
                           _trumpSummaryWidget(_room),
                           const SizedBox(height: 8),

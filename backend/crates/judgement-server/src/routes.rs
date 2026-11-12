@@ -162,6 +162,9 @@ pub async fn create_room(
         .resolve_pattern(max_players, reveal_trump)
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
+    let (tournament_id, tournament_title, tournament_starts_at) =
+        resolve_create_tournament(&state, session.user_id, body.tournament_id).await?;
+
     let room_id = RoomId::new();
     let player_id = if body.open_start {
         None
@@ -203,14 +206,23 @@ pub async fn create_room(
         round_schedule,
         dealer_total_restriction: body.dealer_total_restriction,
         open_start: body.open_start,
+        tournament_id,
     };
     let mut view = room.view();
+    view.tournament_title = tournament_title;
+    view.tournament_starts_at = tournament_starts_at;
     state
         .store
         .upsert_room(&stored_room(&room))
         .await
         .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
     state.rooms.lock().unwrap().insert(room_id, room);
+    if tournament_id.is_some() {
+        state
+            .metrics
+            .tournament_attaches
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     crate::leaderboard::stamp_room_ladder_ranks(&state, &mut view);
 
     Ok(Json(CreateRoomResponse {
@@ -238,6 +250,7 @@ pub async fn get_room(
         room.view()
     };
     enrich_room_vacancy(&state, &mut view).await;
+    enrich_room_tournament(&state, &mut view).await;
     crate::leaderboard::stamp_room_ladder_ranks(&state, &mut view);
     Ok(Json(view))
 }
@@ -307,6 +320,7 @@ pub async fn join_room(
     };
     if let Some((mut room, player_id)) = already_seated {
         enrich_room_vacancy(&state, &mut room).await;
+        enrich_room_tournament(&state, &mut room).await;
         crate::leaderboard::stamp_room_ladder_ranks(&state, &mut room);
         return Ok(Json(JoinRoomResponse { room, player_id }));
     }
@@ -333,7 +347,16 @@ pub async fn join_room(
         }));
     }
 
-    let (view, player_id, snapshot) = {
+    enum LobbyJoin {
+        AlreadySeated { view: RoomView, player_id: PlayerId },
+        Joined {
+            view: RoomView,
+            player_id: PlayerId,
+            snapshot: StoredRoom,
+        },
+    }
+
+    let outcome = {
         let mut rooms = state.rooms.lock().unwrap();
         let room = rooms.get_mut(&room_id).ok_or(ApiError::NotFound("room"))?;
 
@@ -341,50 +364,65 @@ pub async fn join_room(
             return Err(ApiError::Conflict("the game has already started".into()));
         }
         if let Some(seat) = room.seat_of(session.id) {
-            let player_id = seat.player_id;
-            let view = room.view();
-            drop(rooms);
-            return Ok(Json(JoinRoomResponse {
-                room: with_ladder_ranks(&state, view),
-                player_id,
-            }));
-        }
-        if room.seats.len() as u8 >= room.max_players {
-            return Err(ApiError::Conflict(
-                "This table is full. Ask the host to open a seat, then use the same link.".into(),
-            ));
-        }
+            LobbyJoin::AlreadySeated {
+                view: room.view(),
+                player_id: seat.player_id,
+            }
+        } else {
+            if room.seats.len() as u8 >= room.max_players {
+                return Err(ApiError::Conflict(
+                    "This table is full. Ask the host to open a seat, then use the same link."
+                        .into(),
+                ));
+            }
 
-        let seat_number = (0..room.max_players)
-            .find(|n| !room.seats.iter().any(|s| s.seat == *n))
-            .expect("a free seat exists because the room is not full");
-        let player_id = PlayerId::new();
-        room.seats.push(RoomSeat {
-            session_id: session.id,
-            player_id,
-            nickname: session.nickname.clone(),
-            seat: seat_number,
-            ready: false,
-            joined_at: Utc::now(),
-            avatar_id: session.avatar_id.clone(),
-            photo_url: session.photo_url.clone(),
-        });
-        // Setup rooms keep the organizer as host_session until someone sits.
-        // The first seated player becomes host; later joins do not take it.
-        if room.open_start && room.seats.len() == 1 {
-            room.host_session = session.id;
+            let seat_number = (0..room.max_players)
+                .find(|n| !room.seats.iter().any(|s| s.seat == *n))
+                .expect("a free seat exists because the room is not full");
+            let player_id = PlayerId::new();
+            room.seats.push(RoomSeat {
+                session_id: session.id,
+                player_id,
+                nickname: session.nickname.clone(),
+                seat: seat_number,
+                ready: false,
+                joined_at: Utc::now(),
+                avatar_id: session.avatar_id.clone(),
+                photo_url: session.photo_url.clone(),
+            });
+            // Setup rooms keep the organizer as host_session until someone sits.
+            // The first seated player becomes host; later joins do not take it.
+            if room.open_start && room.seats.len() == 1 {
+                room.host_session = session.id;
+            }
+            LobbyJoin::Joined {
+                view: room.view(),
+                player_id,
+                snapshot: stored_room(room),
+            }
         }
-        (room.view(), player_id, stored_room(room))
     };
 
-    state
-        .store
-        .upsert_room(&snapshot)
-        .await
-        .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
+    let (mut view, player_id) = match outcome {
+        LobbyJoin::AlreadySeated { view, player_id } => (view, player_id),
+        LobbyJoin::Joined {
+            view,
+            player_id,
+            snapshot,
+        } => {
+            state
+                .store
+                .upsert_room(&snapshot)
+                .await
+                .map_err(|e| ApiError::Conflict(format!("persist room: {e}")))?;
+            (view, player_id)
+        }
+    };
 
+    view = with_ladder_ranks(&state, view);
+    enrich_room_tournament(&state, &mut view).await;
     Ok(Json(JoinRoomResponse {
-        room: with_ladder_ranks(&state, view),
+        room: view,
         player_id,
     }))
 }
@@ -494,6 +532,7 @@ async fn claim_seat_inner(
             .view()
     };
     enrich_room_vacancy(state, &mut view).await;
+    enrich_room_tournament(state, &mut view).await;
     crate::leaderboard::stamp_room_ladder_ranks(state, &mut view);
     Ok(ClaimSeatResponse {
         room: view,
@@ -1127,6 +1166,10 @@ async fn start_game_inner(
         leaderboard: state.leaderboard.clone(),
         seat_users,
         active_games: state.active_games.clone(),
+        tournament_id: {
+            let rooms = state.rooms.lock().unwrap();
+            rooms.get(&room_id).and_then(|r| r.tournament_id)
+        },
     });
     state
         .metrics
@@ -1468,5 +1511,59 @@ pub(crate) fn normalize_trump_config(
             Ok((Some(cycle), first))
         }
         None => Ok((None, first_trump)),
+    }
+}
+
+/// Guests never attach. Unknown / non-live tournaments reject for signed-in hosts.
+async fn resolve_create_tournament(
+    state: &AppState,
+    user_id: Option<uuid::Uuid>,
+    requested: Option<String>,
+) -> Result<
+    (
+        Option<uuid::Uuid>,
+        Option<String>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ),
+    ApiError,
+> {
+    let Some(raw) = requested.filter(|s| !s.trim().is_empty()) else {
+        return Ok((None, None, None));
+    };
+    if user_id.is_none() {
+        return Ok((None, None, None));
+    }
+    let Some(tournament) = state
+        .store
+        .load_tournament(raw.trim())
+        .await
+        .map_err(|e| ApiError::Conflict(format!("load tournament: {e}")))?
+    else {
+        return Err(ApiError::BadRequest("unknown tournament".into()));
+    };
+    if tournament.status != judgement_persistence::TournamentStatus::Live {
+        tracing::info!(
+            tournament_id = %tournament.tournament_id,
+            status = tournament.status.as_str(),
+            "reject tournament attach: not live"
+        );
+        return Err(ApiError::BadRequest(
+            "tournament is not live; attach only while the event is live".into(),
+        ));
+    }
+    Ok((
+        Some(tournament.tournament_id),
+        Some(tournament.title),
+        tournament.starts_at,
+    ))
+}
+
+async fn enrich_room_tournament(state: &AppState, view: &mut RoomView) {
+    let Some(ref id) = view.tournament_id else {
+        return;
+    };
+    if let Ok(Some(tournament)) = state.store.load_tournament(id).await {
+        view.tournament_title = Some(tournament.title);
+        view.tournament_starts_at = tournament.starts_at;
     }
 }

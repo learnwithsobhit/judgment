@@ -203,6 +203,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                 },
                 dealer_total_restriction: false,
                 open_start: false,
+            tournament_id: None,
             },
         );
         codes.insert(code.clone(), room_id);

@@ -98,6 +98,7 @@ class ApiClient {
     RoundSchedule? roundSchedule,
     bool dealerTotalRestriction = false,
     bool openStart = false,
+    String? tournamentId,
   }) async {
     final json = await _post('/api/v1/rooms', {
       'max_players': ?maxPlayers,
@@ -107,6 +108,7 @@ class ApiClient {
       'round_schedule': ?roundSchedule?.toJson(),
       'dealer_total_restriction': dealerTotalRestriction,
       if (openStart) 'open_start': true,
+      if (tournamentId != null) 'tournament_id': tournamentId,
     });
     return (
       room: RoomView.fromJson(json['room'] as Map<String, dynamic>),
@@ -488,6 +490,152 @@ class ApiClient {
       headers: _headers,
     );
     return FairPlayLeaderboardReport.fromJson(_decode(response));
+  }
+
+  /// Public. Live first, then recent closed. Drafts are omitted.
+  Future<List<TournamentSummary>> listTournaments() async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/tournaments'),
+      headers: const {'Content-Type': 'application/json'},
+    );
+    final json = _decode(response);
+    return (json['tournaments'] as List<dynamic>? ?? const [])
+        .map((row) => TournamentSummary.fromJson(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TournamentDetail> getTournament(String idOrSlug) async {
+    final response = await _http.get(
+      Uri.parse('$baseUrl/api/v1/tournaments/$idOrSlug'),
+      headers: const {'Content-Type': 'application/json'},
+    );
+    return TournamentDetail.fromJson(_decode(response));
+  }
+
+  Future<List<TournamentSummary>> adminListTournaments() async {
+    final json = await _get('/api/v1/admin/tournaments');
+    return (json['tournaments'] as List<dynamic>? ?? const [])
+        .map((row) => TournamentSummary.fromJson(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TournamentDetail> adminGetTournament(String idOrSlug) async {
+    final json = await _get('/api/v1/admin/tournaments/$idOrSlug');
+    return TournamentDetail.fromJson(json);
+  }
+
+  Future<TournamentSummary> createTournament({
+    required String title,
+    required DateTime startsAt,
+    String blurb = '',
+    String status = 'draft',
+  }) async {
+    final json = await _post('/api/v1/admin/tournaments', {
+      'title': title,
+      'blurb': blurb,
+      'status': status,
+      'starts_at': startsAt.toUtc().toIso8601String(),
+    });
+    return TournamentSummary.fromJson(json);
+  }
+
+  Future<TournamentSummary> updateTournament(
+    String idOrSlug, {
+    String? title,
+    String? blurb,
+    String? status,
+    DateTime? startsAt,
+  }) async {
+    final response = await _http.patch(
+      Uri.parse('$baseUrl/api/v1/admin/tournaments/$idOrSlug'),
+      headers: _headers,
+      body: jsonEncode({
+        if (title != null) 'title': title,
+        if (blurb != null) 'blurb': blurb,
+        if (status != null) 'status': status,
+        if (startsAt != null) 'starts_at': startsAt.toUtc().toIso8601String(),
+      }),
+    );
+    return TournamentSummary.fromJson(_decode(response));
+  }
+
+  Future<void> deleteTournament(String idOrSlug) async {
+    final response = await _http.delete(
+      Uri.parse('$baseUrl/api/v1/admin/tournaments/$idOrSlug'),
+      headers: _headers,
+    );
+    if (response.statusCode == 204 || response.statusCode == 200) {
+      return;
+    }
+    _decode(response);
+  }
+}
+
+class TournamentSummary {
+  const TournamentSummary({
+    required this.tournamentId,
+    required this.slug,
+    required this.title,
+    required this.blurb,
+    required this.format,
+    required this.status,
+    this.startsAt,
+    this.endsAt,
+    this.finishedTables = 0,
+    this.liveAttachedRooms,
+  });
+
+  final String tournamentId;
+  final String slug;
+  final String title;
+  final String blurb;
+  final String format;
+  final String status;
+  final DateTime? startsAt;
+  final DateTime? endsAt;
+  final int finishedTables;
+  final int? liveAttachedRooms;
+
+  bool get isLive => status == 'live';
+  bool get isDraft => status == 'draft';
+  bool get isClosed => status == 'closed';
+
+  factory TournamentSummary.fromJson(Map<String, dynamic> json) {
+    DateTime? parseDate(Object? raw) {
+      if (raw is! String || raw.isEmpty) return null;
+      return DateTime.tryParse(raw);
+    }
+
+    return TournamentSummary(
+      tournamentId: json['tournament_id'] as String,
+      slug: json['slug'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      blurb: json['blurb'] as String? ?? '',
+      format: json['format'] as String? ?? 'points',
+      status: json['status'] as String? ?? 'draft',
+      startsAt: parseDate(json['starts_at']),
+      endsAt: parseDate(json['ends_at']),
+      finishedTables: json['finished_tables'] as int? ?? 0,
+      liveAttachedRooms: json['live_attached_rooms'] as int?,
+    );
+  }
+}
+
+class TournamentDetail {
+  const TournamentDetail({required this.tournament, required this.players});
+
+  final TournamentSummary tournament;
+  final List<LeaderboardEntry> players;
+
+  factory TournamentDetail.fromJson(Map<String, dynamic> json) {
+    return TournamentDetail(
+      tournament: TournamentSummary.fromJson(
+        json['tournament'] as Map<String, dynamic>,
+      ),
+      players: (json['players'] as List<dynamic>? ?? const [])
+          .map((row) => LeaderboardEntry.fromJson(row as Map<String, dynamic>))
+          .toList(),
+    );
   }
 }
 

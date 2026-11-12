@@ -18,6 +18,7 @@ Future<void> _acceptLegal(WidgetTester tester) async {
 void main() {
   setUp(() {
     leaderboardLoad = () async => const LeaderboardReport(players: []);
+    tournamentListLoad = () async => const [];
     fairPlayLeaderboardLoad = () async =>
         const FairPlayLeaderboardReport(players: []);
     activeGamesLoad = () async => const [];

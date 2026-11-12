@@ -23,6 +23,7 @@ pub mod reaper;
 pub mod restore;
 pub mod routes;
 pub mod state;
+pub mod tournaments;
 pub mod ws;
 
 use std::sync::Arc;
@@ -57,6 +58,24 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/leaderboard", get(auth::get_leaderboard))
         .route("/api/v1/config", get(config::get_public_config))
         .route("/api/v1/admin/festival", patch(config::set_festival))
+        .route(
+            "/api/v1/tournaments",
+            get(tournaments::list_tournaments),
+        )
+        .route(
+            "/api/v1/tournaments/{id_or_slug}",
+            get(tournaments::get_tournament),
+        )
+        .route(
+            "/api/v1/admin/tournaments",
+            get(tournaments::admin_list_tournaments).post(tournaments::create_tournament),
+        )
+        .route(
+            "/api/v1/admin/tournaments/{id_or_slug}",
+            get(tournaments::admin_get_tournament)
+                .patch(tournaments::update_tournament)
+                .delete(tournaments::delete_tournament),
+        )
         .route("/api/v1/active-games", get(active_games::get_active_games))
         .route("/api/v1/availability", get(availability::get_availability))
         .route(

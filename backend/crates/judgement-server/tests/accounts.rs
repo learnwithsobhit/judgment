@@ -445,6 +445,7 @@ async fn leaderboard_includes_the_latest_counted_game() {
             exact_bid_rounds: 4,
             rounds_played: 8,
             total_score: 142,
+            tournament_id: None,
         },
         PulseFinish {
             game_id,
@@ -454,6 +455,7 @@ async fn leaderboard_includes_the_latest_counted_game() {
             exact_bid_rounds: 3,
             rounds_played: 8,
             total_score: 128,
+            tournament_id: None,
         },
     ]);
 

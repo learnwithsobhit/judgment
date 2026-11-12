@@ -101,6 +101,8 @@ pub async fn rate_limit_middleware(
         || path == "/api/v1/active-games"
         || path == "/api/v1/availability"
         || path == "/api/v1/config"
+        || path == "/api/v1/tournaments"
+        || path.starts_with("/api/v1/tournaments/")
     {
         state.http_limiter.config().board_max_per_window
     } else {

@@ -5,8 +5,9 @@ use judgement_domain::{
 };
 use judgement_engine::{GameEngine, GameEvent, GamePhase};
 use judgement_persistence::{
-    CommandCommit, GameResultRecord, GameStore, MemoryStore, NewGame, NewGamePlayer,
-    RoundResultRecord, StoredRoom, StoredRoomPlayer, StoredSession, StoredUser,
+    stats::PulseFinish, CommandCommit, GameResultRecord, GameStore, MemoryStore, NewGame,
+    NewGamePlayer, RoundResultRecord, StoredRoom, StoredRoomPlayer, StoredSession,
+    StoredTournament, StoredUser, TournamentStatus,
 };
 
 #[tokio::test]
@@ -57,6 +58,7 @@ async fn memory_store_finishes_game_and_records_history() {
             round_schedule: Default::default(),
             dealer_total_restriction: false,
             open_start: false,
+            tournament_id: None,
             phase: "lobby".into(),
             game_id: None,
             players: game_players
@@ -179,6 +181,7 @@ async fn action_committed_detects_durable_action_id() {
             round_schedule: Default::default(),
             dealer_total_restriction: false,
             open_start: false,
+            tournament_id: None,
             phase: "lobby".into(),
             game_id: None,
             players: game_players
@@ -347,6 +350,216 @@ async fn signed_in_finish_is_counted_once_and_survives_delete() {
     assert!(board[0].avatar_id.is_some());
 }
 
+#[tokio::test]
+async fn tournament_stamp_survives_delete_and_feeds_standings() {
+    let store = MemoryStore::new();
+    let now = Utc::now();
+    let tournament_id = uuid::Uuid::new_v4();
+    store
+        .upsert_tournament(&StoredTournament {
+            tournament_id,
+            slug: "friday-night".into(),
+            title: "Friday Night".into(),
+            blurb: "".into(),
+            format: "points".into(),
+            status: TournamentStatus::Live,
+            starts_at: None,
+            ends_at: None,
+            created_by: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .unwrap();
+    let listed = store.list_tournaments().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].slug, "friday-night");
+
+    let user_a = uuid::Uuid::new_v4();
+    let user_b = uuid::Uuid::new_v4();
+    for (user_id, name) in [(user_a, "Ada"), (user_b, "Bea")] {
+        store
+            .upsert_user(&StoredUser {
+                user_id,
+                display_name: name.into(),
+                avatar_id: None,
+                photo_url: None,
+                legal_version: None,
+                created_at: now,
+                updated_at: now,
+                last_seen_at: now,
+            })
+            .await
+            .unwrap();
+    }
+    let game_id = uuid::Uuid::new_v4();
+    store.seed_counted_finishes(vec![
+        PulseFinish {
+            game_id,
+            user_id: user_a,
+            finished_at: now,
+            finish_rank: 1,
+            exact_bid_rounds: 2,
+            rounds_played: 4,
+            total_score: 40,
+            tournament_id: Some(tournament_id),
+        },
+        PulseFinish {
+            game_id,
+            user_id: user_b,
+            finished_at: now,
+            finish_rank: 2,
+            exact_bid_rounds: 1,
+            rounds_played: 4,
+            total_score: 20,
+            tournament_id: Some(tournament_id),
+        },
+        PulseFinish {
+            game_id: uuid::Uuid::new_v4(),
+            user_id: user_a,
+            finished_at: now,
+            finish_rank: 1,
+            exact_bid_rounds: 1,
+            rounds_played: 3,
+            total_score: 30,
+            tournament_id: None,
+        },
+    ]);
+
+    let overall = store.load_leaderboard(10).await.unwrap();
+    assert_eq!(overall.len(), 2);
+    assert_eq!(overall[0].user_id, user_a);
+    assert_eq!(overall[0].gold, 2);
+
+    let standings = store
+        .load_tournament_standings(tournament_id, 50)
+        .await
+        .unwrap();
+    assert_eq!(standings.len(), 2);
+    assert_eq!(standings[0].user_id, user_a);
+    assert_eq!(standings[0].gold, 1);
+    assert_eq!(standings[0].medal_points, 500);
+    assert_eq!(standings[1].user_id, user_b);
+    assert_eq!(standings[1].medal_points, 100);
+    assert_eq!(
+        store.count_tournament_tables(tournament_id).await.unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn finish_commit_stamps_tournament_id_into_standings() {
+    let store = MemoryStore::new();
+    let now = Utc::now();
+    let tournament_id = uuid::Uuid::new_v4();
+    store
+        .upsert_tournament(&StoredTournament {
+            tournament_id,
+            slug: "live-stamp".into(),
+            title: "Live Stamp".into(),
+            blurb: "".into(),
+            format: "points".into(),
+            status: TournamentStatus::Live,
+            starts_at: None,
+            ends_at: None,
+            created_by: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .unwrap();
+    let users: Vec<_> = (0..3).map(|_| uuid::Uuid::new_v4()).collect();
+    for (i, user_id) in users.iter().enumerate() {
+        store
+            .upsert_user(&StoredUser {
+                user_id: *user_id,
+                display_name: format!("P{i}"),
+                avatar_id: None,
+                photo_url: None,
+                legal_version: None,
+                created_at: now,
+                updated_at: now,
+                last_seen_at: now,
+            })
+            .await
+            .unwrap();
+    }
+
+    let session_ids: Vec<_> = (0..3).map(|_| SessionId::new()).collect();
+    let players: Vec<PlayerState> = (0..3)
+        .map(|seat| PlayerState::human(PlayerId::new(), format!("P{seat}"), seat))
+        .collect();
+    let game_players: Vec<NewGamePlayer> = players
+        .iter()
+        .zip(session_ids.iter())
+        .zip(users.iter())
+        .map(|((p, &session_id), &user_id)| NewGamePlayer {
+            player_id: p.id,
+            session_id,
+            nickname: p.nickname.clone(),
+            seat: p.seat,
+            user_id: Some(user_id),
+        })
+        .collect();
+
+    let game_id = GameId::new();
+    let rules = GameRules {
+        trump_rule: TrumpRule::rotating_from(Suit::Clubs),
+        turn_timeout_seconds: None,
+        round_pattern: RoundPattern::Custom { rounds: vec![1] },
+        ..GameRules::mvp_for_players(3)
+    };
+    let mut engine = GameEngine::new_with_seed(7, game_id, rules.clone(), players).unwrap();
+    let events = engine.start_game().unwrap();
+    store
+        .create_game(&NewGame {
+            game_id,
+            room_id: RoomId::new(),
+            rules,
+            seed: Some(7),
+            players: game_players,
+            initial_state: engine.state().clone(),
+            initial_events: events,
+            start_action_id: ActionId::new(),
+        })
+        .await
+        .unwrap();
+
+    while !engine.is_finished() {
+        let action_id = ActionId::new();
+        let events = match engine.phase() {
+            GamePhase::Bidding => {
+                let turn = engine.state().current_round.as_ref().unwrap().current_turn;
+                let bid = engine.legal_bids(turn)[0];
+                engine.place_bid(turn, bid).unwrap()
+            }
+            GamePhase::Playing => {
+                let turn = engine.state().current_round.as_ref().unwrap().current_turn;
+                let card = engine.legal_cards(turn)[0];
+                engine.play_card(turn, card).unwrap()
+            }
+            GamePhase::RoundScoring => engine.advance_from_round_scoring().unwrap(),
+            other => panic!("unexpected phase {other:?}"),
+        };
+        let mut commit = to_commit(game_id, action_id, &events, engine.state());
+        commit.tournament_id = Some(tournament_id);
+        store.commit_command(&commit).await.unwrap();
+    }
+
+    store.delete_game(game_id).await.unwrap();
+    let standings = store
+        .load_tournament_standings(tournament_id, 50)
+        .await
+        .unwrap();
+    assert_eq!(standings.len(), 3);
+    assert_eq!(
+        store.count_tournament_tables(tournament_id).await.unwrap(),
+        1
+    );
+    let overall = store.load_leaderboard(10).await.unwrap();
+    assert_eq!(overall.len(), 3, "dual credit still feeds Top players");
+}
+
 fn to_commit(
     game_id: GameId,
     action_id: ActionId,
@@ -382,5 +595,6 @@ fn to_commit(
         round_result,
         game_result,
         pace: Vec::new(),
+        tournament_id: None,
     }
 }

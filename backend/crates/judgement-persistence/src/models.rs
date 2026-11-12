@@ -58,6 +58,9 @@ pub struct StoredRoom {
     /// Creator is not seated; first joiner becomes host.
     #[serde(default)]
     pub open_start: bool,
+    /// Live competitive event this lobby is attached to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tournament_id: Option<uuid::Uuid>,
     pub phase: String,
     pub game_id: Option<GameId>,
     pub players: Vec<StoredRoomPlayer>,
@@ -99,6 +102,50 @@ pub struct CommandCommit {
     /// Thinking time charged so far. Written with the command so a restart
     /// keeps the same fastest and slowest players.
     pub pace: Vec<StoredPlayerPace>,
+    /// Competitive event stamped onto finishes. Survives `delete_game`.
+    pub tournament_id: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TournamentStatus {
+    Draft,
+    Live,
+    Closed,
+}
+
+impl TournamentStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Live => "live",
+            Self::Closed => "closed",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "draft" => Some(Self::Draft),
+            "live" => Some(Self::Live),
+            "closed" => Some(Self::Closed),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredTournament {
+    pub tournament_id: uuid::Uuid,
+    pub slug: String,
+    pub title: String,
+    pub blurb: String,
+    pub format: String,
+    pub status: TournamentStatus,
+    pub starts_at: Option<DateTime<Utc>>,
+    pub ends_at: Option<DateTime<Utc>>,
+    pub created_by: Option<uuid::Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

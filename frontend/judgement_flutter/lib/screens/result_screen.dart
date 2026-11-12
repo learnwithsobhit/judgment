@@ -5,6 +5,7 @@ import '../app/app.dart';
 import '../theme/judgement_palette.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
+import '../util/event_share.dart';
 import '../util/social_share.dart';
 import '../widgets/pace_line.dart';
 import '../widgets/player_avatar.dart';
@@ -257,6 +258,17 @@ class _HeroBanner extends StatelessWidget {
             height: 1.2,
           ),
         ),
+        if (controller.tournamentTitle != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Recorded for ${tournamentDisplayLabel(controller.tournamentTitle!, controller.tournamentStartsAt)}.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.white.withValues(alpha: 0.55),
+            ),
+          ),
+        ],
         if (controller.gameElapsed != null) ...[
           const SizedBox(height: 10),
           Row(

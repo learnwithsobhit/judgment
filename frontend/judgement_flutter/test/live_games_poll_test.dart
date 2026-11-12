@@ -13,6 +13,7 @@ void main() {
 
   setUp(() {
     leaderboardLoad = () async => const LeaderboardReport(players: []);
+    tournamentListLoad = () async => const [];
     fairPlayLeaderboardLoad = () async =>
         const FairPlayLeaderboardReport(players: []);
     festivalConfigLoad = () async => 'off';

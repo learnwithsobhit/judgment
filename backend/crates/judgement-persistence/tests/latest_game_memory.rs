@@ -31,6 +31,7 @@ fn seat(
         exact_bid_rounds: 2,
         rounds_played: 8,
         total_score: score,
+        tournament_id: None,
     }
 }
 

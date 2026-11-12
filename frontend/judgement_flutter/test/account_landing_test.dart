@@ -74,6 +74,7 @@ void main() {
     availabilityLoad = () async =>
         const AvailabilityBoard(count: 0, ready: false, players: []);
     festivalConfigLoad = () async => 'off';
+    tournamentListLoad = () async => const [];
     FestivalController.instance.resetForTest();
   });
 
@@ -82,6 +83,7 @@ void main() {
     debugEmailSignInOverride = null;
     debugTelegramSignInOverride = null;
     leaderboardLoad = () => ApiClient().getLeaderboard();
+    tournamentListLoad = () => ApiClient().listTournaments();
     activeGamesLoad = () => ApiClient().getActiveGames();
     availabilityLoad = () => ApiClient().getAvailability();
     festivalConfigLoad = () => ApiClient().getConfig();
@@ -510,6 +512,7 @@ void main() {
     tester,
   ) async {
     leaderboardLoad = () async => const LeaderboardReport(players: []);
+    tournamentListLoad = () async => const [];
 
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: LeaderboardSheet())),

@@ -49,6 +49,9 @@ pub struct Metrics {
     pub soundboard_broadcast: AtomicU64,
     pub voice_notes_broadcast: AtomicU64,
     pub audio_rejected: AtomicU64,
+    pub tournament_creates: AtomicU64,
+    pub tournament_attaches: AtomicU64,
+    pub tournament_standings_reads: AtomicU64,
 }
 
 impl Metrics {
@@ -283,6 +286,21 @@ impl Metrics {
             "judgement_audio_rejected_total",
             "Soundboard/voice commands rejected (cooldown, size, mime, allow-list)",
             audio_rejected
+        );
+        counter!(
+            "judgement_tournament_creates_total",
+            "Admin tournament creates",
+            tournament_creates
+        );
+        counter!(
+            "judgement_tournament_attaches_total",
+            "Rooms attached to a live tournament at create",
+            tournament_attaches
+        );
+        counter!(
+            "judgement_tournament_standings_reads_total",
+            "Public tournament list/detail reads",
+            tournament_standings_reads
         );
 
         out.push_str(

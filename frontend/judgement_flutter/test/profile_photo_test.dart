@@ -275,6 +275,7 @@ void main() {
     _expectProfile(tester, find.byType(LiveGamesCard));
 
     leaderboardLoad = () async => report;
+    tournamentListLoad = () async => const [];
     fairPlayLeaderboardLoad = () async => FairPlayLeaderboardReport(
       players: [
         FairPlayLeaderboardEntry(

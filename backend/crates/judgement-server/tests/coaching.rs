@@ -68,6 +68,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             round_schedule: Default::default(),
             dealer_total_restriction: false,
             open_start: false,
+            tournament_id: None,
             phase: "in_game".into(),
             game_id: None,
             players: game_players
@@ -195,6 +196,7 @@ fn to_commit(
         round_result,
         game_result,
         pace: Vec::new(),
+        tournament_id: None,
     }
 }
 

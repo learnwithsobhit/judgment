@@ -5,15 +5,21 @@ import 'package:flutter/material.dart';
 
 import '../auth/account_session.dart';
 import '../networking/api_client.dart';
+import '../util/event_share.dart';
 import 'player_avatar.dart';
 import 'profile_sheet.dart';
 
 typedef LeaderboardLoad = Future<LeaderboardReport> Function();
 typedef FairPlayLeaderboardLoad = Future<FairPlayLeaderboardReport> Function();
+typedef TournamentListLoad = Future<List<TournamentSummary>> Function();
+typedef TournamentDetailLoad = Future<TournamentDetail> Function(String idOrSlug);
 
 LeaderboardLoad leaderboardLoad = () => ApiClient().getLeaderboard();
 FairPlayLeaderboardLoad fairPlayLeaderboardLoad = () =>
     ApiClient().getFairPlayLeaderboard();
+TournamentListLoad tournamentListLoad = () => ApiClient().listTournaments();
+TournamentDetailLoad tournamentDetailLoad = (id) =>
+    ApiClient().getTournament(id);
 
 class LeaderboardSheet extends StatefulWidget {
   const LeaderboardSheet({super.key});
@@ -26,8 +32,11 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
   late final Future<LeaderboardReport> _load = leaderboardLoad();
   late final Future<FairPlayLeaderboardReport> _fairPlayLoad =
       fairPlayLeaderboardLoad();
+  late final Future<List<TournamentSummary>> _tournaments = tournamentListLoad();
   late final Future<MeStats?> _place = _loadPlace();
   int _tab = 0;
+  String? _tournamentId;
+  Future<TournamentDetail?>? _tournamentDetail;
 
   Future<MeStats?> _loadPlace() async {
     if (!AccountSession.instance.isSignedIn) return null;
@@ -38,8 +47,31 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
     }
   }
 
+  String get _title => switch (_tab) {
+    0 => 'Top players',
+    1 => 'Fair play',
+    _ => 'Tournament',
+  };
+
+  String get _subtitle => switch (_tab) {
+    0 => 'Gold 500, silver 100, bronze 20, then gold%, then bid%',
+    1 => 'Highest average, then matches rated',
+    _ =>
+      'Medal points from tables in this event. Still counts on Top players.',
+  };
+
+  void _selectTournament(String? id) {
+    setState(() {
+      _tournamentId = id;
+      _tournamentDetail = id == null
+          ? null
+          : tournamentDetailLoad(id).then<TournamentDetail?>((d) => d);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 390;
     return LayoutBuilder(
       builder: (context, constraints) {
         return SizedBox(
@@ -50,25 +82,25 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    _tab == 0 ? 'Top players' : 'Fair play',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
+                  Text(_title, style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 4),
-                  Text(
-                    _tab == 0
-                        ? 'Gold 500, silver 100, bronze 20, then gold%, then bid%'
-                        : 'Highest average, then matches rated',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  Text(_subtitle, style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 10),
                   SegmentedButton<int>(
-                    segments: const [
-                      ButtonSegment(value: 0, label: Text('Top players')),
+                    segments: [
+                      ButtonSegment(
+                        value: 0,
+                        label: Text(narrow ? 'Top' : 'Top players'),
+                      ),
                       ButtonSegment(
                         value: 1,
-                        label: Text('Fair play'),
-                        icon: Icon(Icons.handshake_outlined, size: 16),
+                        label: Text(narrow ? 'Fair' : 'Fair play'),
+                        icon: const Icon(Icons.handshake_outlined, size: 16),
+                      ),
+                      ButtonSegment(
+                        value: 2,
+                        label: Text(narrow ? 'Event' : 'Tournament'),
+                        icon: const Icon(Icons.emoji_events_outlined, size: 16),
                       ),
                     ],
                     selected: {_tab},
@@ -78,15 +110,222 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
                   ),
                   const SizedBox(height: 12),
                   Expanded(
-                    child: _tab == 0
-                        ? _TopPlayersTab(load: _load, place: _place)
-                        : _FairPlayTab(load: _fairPlayLoad),
+                    child: switch (_tab) {
+                      0 => _TopPlayersTab(load: _load, place: _place),
+                      1 => _FairPlayTab(load: _fairPlayLoad),
+                      _ => _TournamentTab(
+                        listLoad: _tournaments,
+                        selectedId: _tournamentId,
+                        detailLoad: _tournamentDetail,
+                        onSelect: _selectTournament,
+                        place: _place,
+                      ),
+                    },
                   ),
-                  if (_tab == 0) const _BoardKey() else const _FairPlayKey(),
+                  if (_tab == 0)
+                    const _BoardKey()
+                  else if (_tab == 1)
+                    const _FairPlayKey()
+                  else
+                    const _BoardKey(),
                 ],
               ),
             ),
           ),
+        );
+      },
+    );
+  }
+}
+
+class _TournamentTab extends StatelessWidget {
+  const _TournamentTab({
+    required this.listLoad,
+    required this.selectedId,
+    required this.detailLoad,
+    required this.onSelect,
+    required this.place,
+  });
+
+  final Future<List<TournamentSummary>> listLoad;
+  final String? selectedId;
+  final Future<TournamentDetail?>? detailLoad;
+  final ValueChanged<String?> onSelect;
+  final Future<MeStats?> place;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<TournamentSummary>>(
+      future: listLoad,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return const Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Text('Couldn\'t load tournaments. You can still play.'),
+            ),
+          );
+        }
+        final all = snapshot.data ?? const <TournamentSummary>[];
+        final live = all.where((t) => t.isLive).toList();
+        final past = all.where((t) => t.isClosed).toList();
+        if (live.isEmpty && past.isEmpty) {
+          return const Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Text('No live tournament right now.'),
+            ),
+          );
+        }
+
+        final effectiveId =
+            selectedId ??
+            (live.length == 1
+                ? live.first.tournamentId
+                : selectedId);
+        if (selectedId == null && live.length == 1) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            onSelect(live.first.tournamentId);
+          });
+        }
+
+        final quiet = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(
+            context,
+          ).colorScheme.onSurface.withValues(alpha: 0.75),
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (live.length > 1)
+              DropdownButtonFormField<String>(
+                value: effectiveId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'Live event',
+                ),
+                items: [
+                  for (final t in live)
+                    DropdownMenuItem(
+                      value: t.tournamentId,
+                      child: Text(
+                        tournamentDisplayLabel(t.title, t.startsAt),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: onSelect,
+              )
+            else if (live.length == 1)
+              Text(
+                tournamentDisplayLabel(
+                  live.first.title,
+                  live.first.startsAt,
+                ),
+                style: Theme.of(context).textTheme.titleSmall,
+              )
+            else
+              Text('No live event', style: quiet),
+            if (past.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Past', style: quiet),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final t in past.take(6))
+                    ActionChip(
+                      label: Text(
+                        tournamentDisplayLabel(t.title, t.startsAt),
+                      ),
+                      onPressed: () => onSelect(t.tournamentId),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 8),
+            Expanded(
+              child: effectiveId == null
+                  ? Align(
+                      alignment: Alignment.topLeft,
+                      child: Text(
+                        live.isEmpty
+                            ? 'Pick a past event to see standings.'
+                            : 'Pick a live event.',
+                        style: quiet,
+                      ),
+                    )
+                  : FutureBuilder<TournamentDetail?>(
+                      future:
+                          detailLoad ??
+                          tournamentDetailLoad(
+                            effectiveId,
+                          ).then<TournamentDetail?>((d) => d),
+                      builder: (context, detailSnap) {
+                        if (detailSnap.connectionState !=
+                            ConnectionState.done) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        if (detailSnap.hasError || detailSnap.data == null) {
+                          return const Text('Couldn\'t load standings.');
+                        }
+                        final detail = detailSnap.data!;
+                        final rows = detail.players;
+                        if (rows.isEmpty) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Text(
+                              detail.tournament.isLive
+                                  ? 'Tables are still playing.'
+                                  : 'No counted finishes in this event.',
+                              style: quiet,
+                            ),
+                          );
+                        }
+                        return Column(
+                          children: [
+                            FutureBuilder<MeStats?>(
+                              future: place,
+                              builder: (context, placeSnap) {
+                                final stats = placeSnap.data;
+                                if (stats == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                final mine = rows
+                                    .where(
+                                      (r) =>
+                                          r.displayName == stats.displayName,
+                                    )
+                                    .toList();
+                                if (mine.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text(
+                                    'You are ${_ordinal(mine.first.rank)} in this event.',
+                                    style: quiet,
+                                  ),
+                                );
+                              },
+                            ),
+                            Expanded(child: _BoardTable(rows: rows)),
+                          ],
+                        );
+                      },
+                    ),
+            ),
+          ],
         );
       },
     );

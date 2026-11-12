@@ -205,6 +205,7 @@ pub struct PulseFinish {
     pub exact_bid_rounds: i32,
     pub rounds_played: i32,
     pub total_score: i32,
+    pub tournament_id: Option<Uuid>,
 }
 
 fn india() -> FixedOffset {
@@ -528,6 +529,7 @@ mod tests {
             exact_bid_rounds: exact,
             rounds_played: rounds,
             total_score: points,
+            tournament_id: None,
         }
     }
 

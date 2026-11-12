@@ -50,6 +50,7 @@ struct MemoryInner {
     fair_play_ballots: HashMap<(Uuid, Uuid, Uuid), i16>,
     fair_play_stats: HashMap<Uuid, FairPlayStatsRow>,
     availability: HashMap<Uuid, AvailabilityRow>,
+    tournaments: HashMap<Uuid, StoredTournament>,
 }
 
 struct AvailabilityRow {
@@ -779,6 +780,130 @@ impl GameStore for MemoryStore {
         rows.sort_by_key(|(updated_at, _)| *updated_at);
         Ok(rows.into_iter().map(|(_, player)| player).collect())
     }
+
+    async fn upsert_tournament(
+        &self,
+        tournament: &StoredTournament,
+    ) -> Result<(), PersistError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .tournaments
+            .insert(tournament.tournament_id, tournament.clone());
+        Ok(())
+    }
+
+    async fn load_tournament(
+        &self,
+        id_or_slug: &str,
+    ) -> Result<Option<StoredTournament>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        if let Ok(id) = Uuid::parse_str(id_or_slug) {
+            return Ok(inner.tournaments.get(&id).cloned());
+        }
+        Ok(inner
+            .tournaments
+            .values()
+            .find(|t| t.slug == id_or_slug)
+            .cloned())
+    }
+
+    async fn list_tournaments(&self) -> Result<Vec<StoredTournament>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let mut rows: Vec<_> = inner.tournaments.values().cloned().collect();
+        rows.sort_by(|a, b| {
+            use std::cmp::Ordering;
+            let rank = |s: TournamentStatus| match s {
+                TournamentStatus::Live => 0,
+                TournamentStatus::Draft => 1,
+                TournamentStatus::Closed => 2,
+            };
+            match rank(a.status).cmp(&rank(b.status)) {
+                Ordering::Equal => b.updated_at.cmp(&a.updated_at),
+                other => other,
+            }
+        });
+        Ok(rows)
+    }
+
+    async fn load_tournament_standings(
+        &self,
+        tournament_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<LeaderboardRow>, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(memory_tournament_board(&inner, tournament_id, limit))
+    }
+
+    async fn count_tournament_tables(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<i64, PersistError> {
+        let inner = self.inner.lock().unwrap();
+        let mut games = HashSet::new();
+        for finish in &inner.pulse {
+            if finish.tournament_id == Some(tournament_id) {
+                games.insert(finish.game_id);
+            }
+        }
+        Ok(games.len() as i64)
+    }
+
+    async fn delete_tournament(&self, tournament_id: Uuid) -> Result<bool, PersistError> {
+        let mut inner = self.inner.lock().unwrap();
+        let removed = inner.tournaments.remove(&tournament_id).is_some();
+        if removed {
+            for room in inner.rooms.values_mut() {
+                if room.tournament_id == Some(tournament_id) {
+                    room.tournament_id = None;
+                }
+            }
+            for finish in &mut inner.pulse {
+                if finish.tournament_id == Some(tournament_id) {
+                    finish.tournament_id = None;
+                }
+            }
+        }
+        Ok(removed)
+    }
+}
+
+fn memory_tournament_board(
+    inner: &MemoryInner,
+    tournament_id: Uuid,
+    limit: i64,
+) -> Vec<LeaderboardRow> {
+    let names = inner
+        .users
+        .iter()
+        .map(|(id, user)| (*id, user.display_name.clone()))
+        .collect();
+    let finishes: Vec<_> = inner
+        .pulse
+        .iter()
+        .filter(|f| f.tournament_id == Some(tournament_id))
+        .cloned()
+        .collect();
+    let medals = medals_from_finishes(&finishes, &names);
+    let mut rows: Vec<_> = medals
+        .into_iter()
+        .filter(|(user_id, _)| inner.users.contains_key(user_id))
+        .map(|(user_id, rec)| {
+            let user = inner.users.get(&user_id);
+            let avatar_id = user.and_then(|u| u.avatar_id.clone());
+            let photo_url = user.and_then(|u| u.photo_url.clone());
+            (user_id, avatar_id, photo_url, rec)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.3.key().cmp(&a.3.key()));
+    if limit > 0 {
+        rows.truncate(limit as usize);
+    }
+    rows.into_iter()
+        .map(|(user_id, avatar_id, photo_url, rec)| {
+            to_leaderboard_row(user_id, avatar_id, photo_url, &rec)
+        })
+        .collect()
 }
 
 fn game_totals_locked(inner: &MemoryInner, game_id: Uuid) -> Vec<FairPlayGameTotal> {
@@ -929,6 +1054,7 @@ fn record_finishes(
                 exact_bid_rounds: seat.exact_bid_rounds,
                 rounds_played: rounds,
                 total_score: seat.total_score,
+                tournament_id: commit.tournament_id,
             });
         }
     }
