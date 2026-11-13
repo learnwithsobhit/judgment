@@ -63,6 +63,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             host_session_id: session_ids[0],
             max_players: 4,
             turn_timeout_seconds: None,
+            bid_timeout_seconds: None,
             first_trump: Some(Suit::Clubs),
             trump_cycle: None,
             round_schedule: Default::default(),
@@ -93,6 +94,7 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
     let rules = GameRules {
         trump_rule: TrumpRule::rotating_from(Suit::Clubs),
         turn_timeout_seconds: None,
+        bid_timeout_seconds: None,
         round_pattern: RoundPattern::Custom { rounds: vec![1] },
         ..GameRules::mvp_for_players(4)
     };

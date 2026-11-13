@@ -17,14 +17,19 @@ Play-testing after Phase 4 surfaced three product requests:
 
 ## Decision
 
-### 1. Optional turn timer
+### 1. Optional play timer (and independent bidding timer)
 
-- `turn_timeout_seconds` becomes `Option<u16>` in `GameRules`, the room
-  configuration, and the REST protocol. **Omitted or `null` means no timer.**
-- With no timer the actor schedules no deadlines, sends no `TimerUpdated`
-  messages, and never auto-plays. Clients that receive no timer events simply
-  render no countdown (this already falls out of the Phase 4 UI).
-- When a timeout is provided it is clamped to `5..=300` seconds.
+- `turn_timeout_seconds` is the **play (card)** timer in `GameRules`, the room
+  configuration, and the REST protocol. **Omitted or `null` means no play
+  timer** — no play-phase deadlines and no auto-play.
+- `bid_timeout_seconds` is an independent **bidding** timer. Explicit `null`
+  disables auto-bid. On create/schedule, **omitting the key** (legacy clients)
+  mirrors `turn_timeout_seconds` so old “turn timer” behavior is preserved.
+  Restored `games.rules` JSON without the key uses the same mirror.
+- When either timeout is provided it is clamped to `5..=300` seconds.
+- UI presets: bidding `20/30/60/120` (default 30 when enabled); play
+  `15/20/30/60/120` (default 20 when enabled). Both off by default.
+- The actor arms deadlines per phase only; `TimerUpdated` shape is unchanged.
 
 ### 2. Table size 3–8
 

@@ -93,8 +93,10 @@ pub struct Room {
     pub status: RoomStatus,
     /// Table size chosen by the host, 3–8.
     pub max_players: u8,
-    /// `None` disables the turn timer (ADR 0003).
+    /// `None` disables the play (card) timer (ADR 0003).
     pub turn_timeout_seconds: Option<u16>,
+    /// `None` disables the bidding timer.
+    pub bid_timeout_seconds: Option<u16>,
     /// `None` ⇒ revealed-card trump; `Some` ⇒ rotation from this suit
     /// (or `trump_cycle[0]` when a custom cycle is set).
     pub first_trump: Option<Suit>,
@@ -145,6 +147,7 @@ impl Room {
             max_players: self.max_players,
             min_players: MIN_PLAYERS,
             turn_timeout_seconds: self.turn_timeout_seconds,
+            bid_timeout_seconds: self.bid_timeout_seconds,
             first_trump: self.first_trump,
             trump_cycle: self.trump_cycle.clone(),
             round_schedule: self.round_schedule.clone(),
@@ -193,6 +196,7 @@ pub struct ScheduledEvent {
     pub duration_minutes: u16,
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
+    pub bid_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
     pub trump_cycle: Option<Vec<Suit>>,
     pub round_schedule: RoundSchedule,

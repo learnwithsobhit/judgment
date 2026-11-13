@@ -1,6 +1,7 @@
 /// REST client for non-live operations (PLAN.md §13.1).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -14,6 +15,8 @@ const String apiBase = String.fromEnvironment(
 );
 
 String get wsBase => apiBase.replaceFirst(RegExp('^http'), 'ws');
+
+const Duration _httpTimeout = Duration(seconds: 12);
 
 class ApiException implements Exception {
   final int statusCode;
@@ -38,29 +41,70 @@ class ApiClient {
     if (token != null) 'Authorization': 'Bearer $token',
   };
 
+  /// Public board reads must not send a bearer — home polls often use the
+  /// same token bucket, and these endpoints are already public.
+  static const Map<String, String> _publicHeaders = {
+    'Content-Type': 'application/json',
+  };
+
   Future<Map<String, dynamic>> _post(String path, Object body) async {
-    final response = await _http.post(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers,
-      body: jsonEncode(body),
-    );
+    final response = await _http
+        .post(
+          Uri.parse('$baseUrl$path'),
+          headers: _headers,
+          body: jsonEncode(body),
+        )
+        .timeout(_httpTimeout);
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> _get(String path) async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers,
-    );
-    return _decode(response);
+    return _getWithHeaders(path, _headers);
+  }
+
+  Future<Map<String, dynamic>> _getPublic(String path) async {
+    return _getWithHeaders(path, _publicHeaders);
+  }
+
+  Future<Map<String, dynamic>> _getWithHeaders(
+    String path,
+    Map<String, String> headers, {
+    int retries = 1,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt <= retries; attempt++) {
+      try {
+        final response = await _http
+            .get(Uri.parse('$baseUrl$path'), headers: headers)
+            .timeout(_httpTimeout);
+        return _decode(response);
+      } on ApiException catch (error) {
+        lastError = error;
+        // One short backoff for rate-limit / transient conflict.
+        if (attempt >= retries ||
+            (error.statusCode != 429 && error.statusCode != 503)) {
+          rethrow;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 350 * (attempt + 1)));
+      } on TimeoutException {
+        lastError = ApiException(408, 'TIMEOUT', 'request timed out');
+        if (attempt >= retries) {
+          throw lastError;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 350 * (attempt + 1)));
+      }
+    }
+    throw lastError ?? ApiException(0, 'UNKNOWN', 'request failed');
   }
 
   Future<Map<String, dynamic>> _put(String path, Object body) async {
-    final response = await _http.put(
-      Uri.parse('$baseUrl$path'),
-      headers: _headers,
-      body: jsonEncode(body),
-    );
+    final response = await _http
+        .put(
+          Uri.parse('$baseUrl$path'),
+          headers: _headers,
+          body: jsonEncode(body),
+        )
+        .timeout(_httpTimeout);
     return _decode(response);
   }
 
@@ -86,13 +130,16 @@ class ApiClient {
     return session;
   }
 
-  /// [turnTimeoutSeconds] null ⇒ no turn timer.
+  /// [turnTimeoutSeconds] null ⇒ no play (card) timer.
+  /// [bidTimeoutSeconds] null ⇒ no bidding timer. Always sent so the server
+  /// does not legacy-mirror play when the key is omitted.
   /// Trump: omit both for revealed-card; [trumpCycle] (4 suits) for custom
   /// rotation; or legacy [firstTrump] alone for classic ♠♦♣♥ from that suit.
   /// [roundSchedule] null ⇒ automatic per-player card list.
   Future<({RoomView room, String? playerId, String? capacity})> createRoom({
     int? maxPlayers,
     int? turnTimeoutSeconds,
+    int? bidTimeoutSeconds,
     String? firstTrump,
     List<String>? trumpCycle,
     RoundSchedule? roundSchedule,
@@ -103,6 +150,7 @@ class ApiClient {
     final json = await _post('/api/v1/rooms', {
       'max_players': ?maxPlayers,
       'turn_timeout_seconds': ?turnTimeoutSeconds,
+      'bid_timeout_seconds': bidTimeoutSeconds,
       if (trumpCycle != null) 'trump_cycle': trumpCycle,
       if (trumpCycle == null) 'first_trump': ?firstTrump,
       'round_schedule': ?roundSchedule?.toJson(),
@@ -233,6 +281,7 @@ class ApiClient {
     required String timezone,
     int durationMinutes = 90,
     int? turnTimeoutSeconds,
+    int? bidTimeoutSeconds,
     String? firstTrump,
     List<String>? trumpCycle,
     RoundSchedule? roundSchedule,
@@ -243,6 +292,7 @@ class ApiClient {
       'timezone': timezone,
       'duration_minutes': durationMinutes,
       'turn_timeout_seconds': ?turnTimeoutSeconds,
+      'bid_timeout_seconds': bidTimeoutSeconds,
       if (trumpCycle != null) 'trump_cycle': trumpCycle,
       if (trumpCycle == null) 'first_trump': ?firstTrump,
       'round_schedule': ?roundSchedule?.toJson(),
@@ -405,28 +455,18 @@ class ApiClient {
   }
 
   Future<MeStats> getMeStats() async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/me/stats'),
-      headers: _headers,
-    );
-    return MeStats.fromJson(_decode(response));
+    final json = await _get('/api/v1/me/stats');
+    return MeStats.fromJson(json);
   }
 
   Future<LeaderboardReport> getLeaderboard() async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/leaderboard'),
-      headers: _headers,
-    );
-    return LeaderboardReport.fromJson(_decode(response));
+    final json = await _getPublic('/api/v1/leaderboard');
+    return LeaderboardReport.fromJson(json);
   }
 
   /// Public. Never sends a bearer token so a 401 cannot sign anyone out.
   Future<String> getConfig() async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/config'),
-      headers: const {'Content-Type': 'application/json'},
-    );
-    final json = _decode(response);
+    final json = await _getPublic('/api/v1/config');
     return json['festival_id'] as String? ?? 'off';
   }
 
@@ -441,11 +481,7 @@ class ApiClient {
   }
 
   Future<List<ActiveGame>> getActiveGames() async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/active-games'),
-      headers: _headers,
-    );
-    final json = _decode(response);
+    final json = await _get('/api/v1/active-games');
     return (json['games'] as List<dynamic>? ?? const [])
         .map((row) => ActiveGame.fromJson(row as Map<String, dynamic>))
         .toList();
@@ -453,11 +489,8 @@ class ApiClient {
 
   /// Public. Never sends a bearer token so a 401 cannot sign anyone out.
   Future<AvailabilityBoard> getAvailability() async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/availability'),
-      headers: const {'Content-Type': 'application/json'},
-    );
-    return AvailabilityBoard.fromJson(_decode(response));
+    final json = await _getPublic('/api/v1/availability');
+    return AvailabilityBoard.fromJson(json);
   }
 
   Future<AvailabilityBoard> setAvailability(bool available) async {
@@ -485,31 +518,21 @@ class ApiClient {
   }
 
   Future<FairPlayLeaderboardReport> getFairPlayLeaderboard() async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/fair-play/leaderboard'),
-      headers: _headers,
-    );
-    return FairPlayLeaderboardReport.fromJson(_decode(response));
+    final json = await _getPublic('/api/v1/fair-play/leaderboard');
+    return FairPlayLeaderboardReport.fromJson(json);
   }
 
   /// Public. Live first, then recent closed. Drafts are omitted.
   Future<List<TournamentSummary>> listTournaments() async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/tournaments'),
-      headers: const {'Content-Type': 'application/json'},
-    );
-    final json = _decode(response);
+    final json = await _getPublic('/api/v1/tournaments');
     return (json['tournaments'] as List<dynamic>? ?? const [])
         .map((row) => TournamentSummary.fromJson(row as Map<String, dynamic>))
         .toList();
   }
 
   Future<TournamentDetail> getTournament(String idOrSlug) async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl/api/v1/tournaments/$idOrSlug'),
-      headers: const {'Content-Type': 'application/json'},
-    );
-    return TournamentDetail.fromJson(_decode(response));
+    final json = await _getPublic('/api/v1/tournaments/$idOrSlug');
+    return TournamentDetail.fromJson(json);
   }
 
   Future<List<TournamentSummary>> adminListTournaments() async {

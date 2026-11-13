@@ -1,10 +1,87 @@
 //! REST request/response models for non-live operations (PLAN.md §13.1).
 
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use chrono::{DateTime, Utc};
 
 use judgement_domain::{EventId, GameId, PlayerId, RoomId, RoundSchedule, RsvpId, SessionId, Suit};
+
+/// Tri-state timeout for create bodies: key absent vs explicit null vs number.
+///
+/// - [`Unset`](Self::Unset) — field omitted (legacy clients) → mirror turn timer
+/// - [`Off`](Self::Off) — explicit `null` → bidding timer disabled
+/// - [`On`](Self::On) — seconds value (clamped by the server)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OptionalTimeout {
+    #[default]
+    Unset,
+    Off,
+    On(u16),
+}
+
+impl OptionalTimeout {
+    /// Resolve against the play/turn timeout for legacy omit-key clients.
+    pub fn resolve(self, turn_timeout_seconds: Option<u16>) -> Option<u16> {
+        match self {
+            Self::Unset => turn_timeout_seconds,
+            Self::Off => None,
+            Self::On(seconds) => Some(seconds),
+        }
+    }
+}
+
+impl Serialize for OptionalTimeout {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Unset => serializer.serialize_none(),
+            Self::Off => serializer.serialize_none(),
+            Self::On(seconds) => serializer.serialize_some(seconds),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for OptionalTimeout {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct OptVisitor;
+        impl<'de> Visitor<'de> for OptVisitor {
+            type Value = OptionalTimeout;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("null or an unsigned integer timeout in seconds")
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(OptionalTimeout::Off)
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(OptionalTimeout::Off)
+            }
+
+            fn visit_some<D: Deserializer<'de>>(
+                self,
+                deserializer: D,
+            ) -> Result<Self::Value, D::Error> {
+                let seconds = u16::deserialize(deserializer)?;
+                Ok(OptionalTimeout::On(seconds))
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                u16::try_from(v)
+                    .map(OptionalTimeout::On)
+                    .map_err(|_| E::custom("timeout seconds out of range"))
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                u16::try_from(v)
+                    .map(OptionalTimeout::On)
+                    .map_err(|_| E::custom("timeout seconds out of range"))
+            }
+        }
+        deserializer.deserialize_option(OptVisitor)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Guest sessions
@@ -32,10 +109,13 @@ pub struct CreateRoomRequest {
     /// Table size, 3–8. Defaults to 6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_players: Option<u8>,
-    /// Turn timer in seconds. **Omitted or `null` disables the timer**
-    /// (ADR 0003): no deadlines, no auto-play.
+    /// Play (card) timer in seconds. **Omitted or `null` disables** auto-play.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_timeout_seconds: Option<u16>,
+    /// Bidding timer. **Key absent** mirrors `turn_timeout_seconds` (legacy).
+    /// Explicit `null` disables bid auto-timeout. Number sets bid duration.
+    #[serde(default)]
+    pub bid_timeout_seconds: OptionalTimeout,
     /// Trump for round 1; later rounds follow the fixed rotation
     /// ♠ → ♦ → ♣ → ♥ (ADR 0003). Omitted ⇒ revealed-card trump each round.
     /// Ignored when `trump_cycle` is set (coerced to `cycle[0]`).
@@ -156,9 +236,12 @@ pub struct RoomView {
     pub game_id: Option<GameId>,
     pub max_players: u8,
     pub min_players: u8,
-    /// `None` means the room has no turn timer (ADR 0003).
+    /// `None` means the room has no play (card) timer (ADR 0003).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_timeout_seconds: Option<u16>,
+    /// `None` means the room has no bidding timer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bid_timeout_seconds: Option<u16>,
     /// `None` means revealed-card trump; `Some` means rotation from this suit
     /// (or `trump_cycle[0]` when a custom cycle is set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -367,6 +450,9 @@ pub struct CreateGameEventRequest {
     pub max_players: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_timeout_seconds: Option<u16>,
+    /// Bidding timer. Key absent mirrors turn; explicit null disables.
+    #[serde(default)]
+    pub bid_timeout_seconds: OptionalTimeout,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_trump: Option<Suit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -377,6 +463,36 @@ pub struct CreateGameEventRequest {
 
 fn default_duration_minutes() -> u16 {
     90
+}
+
+#[cfg(test)]
+mod optional_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn omit_null_and_number_are_distinct() {
+        #[derive(Deserialize)]
+        struct Body {
+            #[serde(default)]
+            bid_timeout_seconds: OptionalTimeout,
+            turn_timeout_seconds: Option<u16>,
+        }
+        let omit: Body = serde_json::from_str(r#"{"turn_timeout_seconds":30}"#).unwrap();
+        assert_eq!(omit.bid_timeout_seconds, OptionalTimeout::Unset);
+        assert_eq!(omit.bid_timeout_seconds.resolve(Some(30)), Some(30));
+
+        let off: Body =
+            serde_json::from_str(r#"{"turn_timeout_seconds":15,"bid_timeout_seconds":null}"#)
+                .unwrap();
+        assert_eq!(off.bid_timeout_seconds, OptionalTimeout::Off);
+        assert_eq!(off.bid_timeout_seconds.resolve(Some(15)), None);
+
+        let on: Body =
+            serde_json::from_str(r#"{"turn_timeout_seconds":15,"bid_timeout_seconds":60}"#)
+                .unwrap();
+        assert_eq!(on.bid_timeout_seconds, OptionalTimeout::On(60));
+        assert_eq!(on.bid_timeout_seconds.resolve(Some(15)), Some(60));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -400,6 +516,8 @@ pub struct GameEventPublicView {
     /// Fixed seat pool size (always 8); not a host-chosen table size.
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bid_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trump_cycle: Option<Vec<Suit>>,

@@ -216,14 +216,31 @@ void main() {
         'max_players': 8,
         'min_players': 3,
         'turn_timeout_seconds': null,
+        'bid_timeout_seconds': null,
         'first_trump': 'clubs',
         'seats': <dynamic>[],
       });
       expect(room.maxPlayers, 8);
       expect(room.minPlayers, 3);
       expect(room.turnTimeoutSeconds, isNull, reason: 'no timer configured');
+      expect(room.bidTimeoutSeconds, isNull);
+      expect(room.paceSummary, 'No timers');
       expect(room.firstTrump, 'clubs');
       expect(room.roundSchedule.mode, 'automatic');
+    });
+
+    test('pace summary covers independent timers', () {
+      final both = RoomView.fromJson({
+        'room_id': 'r1',
+        'code': 'ABC123',
+        'phase': 'lobby',
+        'max_players': 6,
+        'min_players': 3,
+        'turn_timeout_seconds': 20,
+        'bid_timeout_seconds': 30,
+        'seats': <dynamic>[],
+      });
+      expect(both.paceSummary, 'Bidding 30s · Play 20s');
     });
 
     test('parses manual round schedule summary', () {

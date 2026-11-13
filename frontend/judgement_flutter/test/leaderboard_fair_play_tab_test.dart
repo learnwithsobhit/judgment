@@ -42,4 +42,31 @@ void main() {
     expect(find.text('Highest average, then matches rated'), findsOneWidget);
     expect(find.text('No fair play ratings yet.'), findsOneWidget);
   });
+
+  testWidgets('failed board load offers Try again and recovers', (
+    tester,
+  ) async {
+    var calls = 0;
+    leaderboardLoad = () async {
+      calls += 1;
+      if (calls == 1) {
+        throw Exception('boom');
+      }
+      return const LeaderboardReport(players: []);
+    };
+
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: LeaderboardSheet())),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Couldn\'t load the board'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
+
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No ranked games yet.'), findsOneWidget);
+    expect(calls, 2);
+  });
 }

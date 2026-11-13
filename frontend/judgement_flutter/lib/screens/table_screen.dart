@@ -674,6 +674,14 @@ String _formatGameElapsed(Duration elapsed) {
   return '$minutes:$seconds';
 }
 
+String _timerPhaseHint(String phase) {
+  return switch (phase) {
+    'bidding' => 'Bid ',
+    'playing' => 'Play ',
+    _ => '',
+  };
+}
+
 class _TopBar extends StatelessWidget {
   final GameController controller;
   final bool showScoreboardButton;
@@ -728,7 +736,7 @@ class _TopBar extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         Text(
-          '${remainingSeconds}s',
+          '${_timerPhaseHint(view.phase)}${remainingSeconds}s',
           style: TextStyle(
             fontFeatures: const [FontFeature.tabularFigures()],
             color: remainingSeconds <= 10

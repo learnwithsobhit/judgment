@@ -122,6 +122,7 @@ impl ScheduledEvent {
             duration_minutes: self.duration_minutes,
             max_players: EVENT_SEAT_CAP,
             turn_timeout_seconds: self.turn_timeout_seconds,
+            bid_timeout_seconds: self.bid_timeout_seconds,
             first_trump: self.first_trump,
             trump_cycle: self.trump_cycle.clone(),
             round_schedule: self.round_schedule.clone(),
@@ -164,6 +165,7 @@ impl ScheduledEvent {
             duration_minutes: self.duration_minutes,
             max_players: self.max_players,
             turn_timeout_seconds: self.turn_timeout_seconds,
+            bid_timeout_seconds: self.bid_timeout_seconds,
             first_trump: self.first_trump,
             trump_cycle: self.trump_cycle.clone(),
             round_schedule: self.round_schedule.clone(),
@@ -200,6 +202,7 @@ impl ScheduledEvent {
             duration_minutes: stored.duration_minutes,
             max_players: stored.max_players,
             turn_timeout_seconds: stored.turn_timeout_seconds,
+            bid_timeout_seconds: stored.bid_timeout_seconds,
             first_trump: stored.first_trump,
             trump_cycle: stored.trump_cycle.and_then(|cycle| {
                 judgement_domain::validate_trump_cycle(&cycle)
@@ -344,6 +347,10 @@ pub async fn create_event(
     // Host no longer chooses table size; seat pool is always EVENT_SEAT_CAP.
     let _ = body.max_players;
     let turn_timeout_seconds = body.turn_timeout_seconds.map(|t| t.clamp(5, 300));
+    let bid_timeout_seconds = body
+        .bid_timeout_seconds
+        .resolve(turn_timeout_seconds)
+        .map(|t| t.clamp(5, 300));
     let round_schedule = body.round_schedule.unwrap_or_default();
     let (trump_cycle, first_trump) =
         crate::routes::normalize_trump_config(body.trump_cycle, body.first_trump)?;
@@ -375,6 +382,7 @@ pub async fn create_event(
         duration_minutes: body.duration_minutes,
         max_players: EVENT_SEAT_CAP,
         turn_timeout_seconds,
+        bid_timeout_seconds,
         first_trump,
         trump_cycle,
         round_schedule,
@@ -649,7 +657,15 @@ pub async fn open_lobby(
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    let (event_id, max_players, turn_timeout_seconds, first_trump, trump_cycle, round_schedule) = {
+    let (
+        event_id,
+        max_players,
+        turn_timeout_seconds,
+        bid_timeout_seconds,
+        first_trump,
+        trump_cycle,
+        round_schedule,
+    ) = {
         let events = state.events.lock().unwrap();
         let event = events
             .values()
@@ -682,6 +698,7 @@ pub async fn open_lobby(
             event.id,
             max_players,
             event.turn_timeout_seconds,
+            event.bid_timeout_seconds,
             event.first_trump,
             event.trump_cycle.clone(),
             event.round_schedule.clone(),
@@ -716,6 +733,7 @@ pub async fn open_lobby(
         status: RoomStatus::Lobby,
         max_players,
         turn_timeout_seconds,
+        bid_timeout_seconds,
         first_trump,
         trump_cycle,
         round_schedule: round_schedule.clone(),

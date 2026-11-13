@@ -79,13 +79,56 @@ impl Harness {
     }
 
     /// Create a room + five joiners, everyone ready, host starts with `seed`.
+    /// Omitting `bid_timeout_seconds` mirrors the play timer (legacy clients).
     async fn start_six_player_game(&mut self, turn_timeout_seconds: u16, seed: u64) {
+        self.start_six_player_game_with_timeouts(
+            Some(turn_timeout_seconds),
+            serde_json::Value::Null, // omit key via helper body builder
+            seed,
+            true,
+        )
+        .await;
+    }
+
+    /// `omit_bid_key`: when true, body has no `bid_timeout_seconds` (legacy mirror).
+    /// When false, `bid_timeout_json` is sent as-is (`null` or number).
+    async fn start_six_player_game_with_timeouts(
+        &mut self,
+        turn_timeout_seconds: Option<u16>,
+        bid_timeout_json: serde_json::Value,
+        seed: u64,
+        omit_bid_key: bool,
+    ) {
         let host = self.create_session("Host").await;
+        // Explicit descending 8→1 so command-count assertions stay stable
+        // (Automatic house lists are longer, e.g. 12 rounds for 6 players).
+        let mut body = serde_json::json!({
+            "turn_timeout_seconds": turn_timeout_seconds,
+            "round_schedule": {
+                "mode": "manual",
+                "steps": [
+                    {"cards": 8, "repeat": 1},
+                    {"cards": 7, "repeat": 1},
+                    {"cards": 6, "repeat": 1},
+                    {"cards": 5, "repeat": 1},
+                    {"cards": 4, "repeat": 1},
+                    {"cards": 3, "repeat": 1},
+                    {"cards": 2, "repeat": 1},
+                    {"cards": 1, "repeat": 1}
+                ]
+            }
+        });
+        if !omit_bid_key {
+            body
+                .as_object_mut()
+                .unwrap()
+                .insert("bid_timeout_seconds".into(), bid_timeout_json);
+        }
         let create: CreateRoomResponse = self
             .http
             .post(self.url("/api/v1/rooms"))
             .bearer_auth(&host.token)
-            .json(&serde_json::json!({ "turn_timeout_seconds": turn_timeout_seconds }))
+            .json(&body)
             .send()
             .await
             .unwrap()
@@ -535,7 +578,7 @@ async fn stale_clients_are_rejected_and_resynchronised() {
 async fn timer_expiry_applies_legal_automatic_actions() {
     let addr = spawn_server().await;
     let mut harness = Harness::new(addr).await;
-    // 1-second turns; nobody acts.
+    // 1-second turns; nobody acts. Bid key omitted → mirrors play timer.
     harness.start_six_player_game(1, 11).await;
     harness.connect_all().await;
 
@@ -558,4 +601,139 @@ async fn timer_expiry_applies_legal_automatic_actions() {
         view.state_version, 7,
         "start + six auto-bids, no duplicates from stale deadlines"
     );
+}
+
+#[tokio::test]
+async fn bid_timer_only_auto_bids_then_waits_in_playing() {
+    let addr = spawn_server().await;
+    let mut harness = Harness::new(addr).await;
+    harness
+        .start_six_player_game_with_timeouts(
+            None,
+            serde_json::json!(1),
+            12,
+            false,
+        )
+        .await;
+    harness.connect_all().await;
+    assert_eq!(harness.phase(), GamePhase::Bidding);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while harness.phase() != GamePhase::Playing {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "bid-only timer did not finish bidding"
+        );
+        harness.read_until_snapshot(0).await;
+    }
+    let version_at_playing = harness.clients[0].view.as_ref().unwrap().state_version;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Drain any stray messages without expecting auto-play.
+    let _ = tokio::time::timeout(Duration::from_millis(200), async {
+        harness.read_until_snapshot(0).await;
+    })
+    .await;
+    assert_eq!(
+        harness.phase(),
+        GamePhase::Playing,
+        "play timer off — must stay in Playing"
+    );
+    assert_eq!(
+        harness.clients[0].view.as_ref().unwrap().state_version,
+        version_at_playing,
+        "no auto-play without a play timer"
+    );
+}
+
+#[tokio::test]
+async fn play_timer_only_does_not_auto_bid() {
+    let addr = spawn_server().await;
+    let mut harness = Harness::new(addr).await;
+    harness
+        .start_six_player_game_with_timeouts(
+            Some(1),
+            serde_json::Value::Null,
+            13,
+            false,
+        )
+        .await;
+    harness.connect_all().await;
+    assert_eq!(harness.phase(), GamePhase::Bidding);
+    let version = harness.clients[0].view.as_ref().unwrap().state_version;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let _ = tokio::time::timeout(Duration::from_millis(200), async {
+        harness.read_until_snapshot(0).await;
+    })
+    .await;
+    assert_eq!(harness.phase(), GamePhase::Bidding);
+    assert_eq!(
+        harness.clients[0].view.as_ref().unwrap().state_version,
+        version,
+        "explicit bid_timeout null must not auto-bid"
+    );
+}
+
+#[tokio::test]
+async fn create_room_timeout_tri_state() {
+    let addr = spawn_server().await;
+    let http = reqwest::Client::new();
+    let base = format!("http://{addr}");
+    let guest: CreateGuestSessionResponse = http
+        .post(format!("{base}/api/v1/guest-sessions"))
+        .json(&serde_json::json!({ "nickname": "TimerHost" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let legacy: CreateRoomResponse = http
+        .post(format!("{base}/api/v1/rooms"))
+        .bearer_auth(&guest.token)
+        .json(&serde_json::json!({ "turn_timeout_seconds": 30 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(legacy.room.turn_timeout_seconds, Some(30));
+    assert_eq!(
+        legacy.room.bid_timeout_seconds,
+        Some(30),
+        "omit bid key mirrors turn"
+    );
+
+    let bid_off: CreateRoomResponse = http
+        .post(format!("{base}/api/v1/rooms"))
+        .bearer_auth(&guest.token)
+        .json(&serde_json::json!({
+            "turn_timeout_seconds": 15,
+            "bid_timeout_seconds": null
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(bid_off.room.turn_timeout_seconds, Some(15));
+    assert_eq!(bid_off.room.bid_timeout_seconds, None);
+
+    let independent: CreateRoomResponse = http
+        .post(format!("{base}/api/v1/rooms"))
+        .bearer_auth(&guest.token)
+        .json(&serde_json::json!({
+            "turn_timeout_seconds": 15,
+            "bid_timeout_seconds": 60
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(independent.room.turn_timeout_seconds, Some(15));
+    assert_eq!(independent.room.bid_timeout_seconds, Some(60));
 }

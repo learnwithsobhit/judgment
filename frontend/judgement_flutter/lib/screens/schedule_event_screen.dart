@@ -19,8 +19,10 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
   DateTime _startsAt = DateTime.now().toUtc().add(const Duration(hours: 24));
   String _timezone = 'Asia/Kolkata';
   int _durationMinutes = 90;
-  bool _timerEnabled = false;
-  final int _timerSeconds = 30;
+  bool _bidTimerEnabled = false;
+  int _bidTimerSeconds = 30;
+  bool _playTimerEnabled = false;
+  int _playTimerSeconds = 20;
   List<String>? _trumpCycle = List<String>.from(defaultTrumpCycle);
   bool _busy = false;
 
@@ -68,7 +70,8 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
         startsAt: _startsAt,
         timezone: _timezone,
         durationMinutes: _durationMinutes,
-        turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
+        turnTimeoutSeconds: _playTimerEnabled ? _playTimerSeconds : null,
+        bidTimeoutSeconds: _bidTimerEnabled ? _bidTimerSeconds : null,
         trumpCycle: _trumpCycle,
       );
       if (!mounted) return;
@@ -198,13 +201,67 @@ class _ScheduleEventScreenState extends State<ScheduleEventScreen> {
                       onChanged: (v) =>
                           setState(() => _durationMinutes = v.round()),
                     ),
+                    const Text('Pace', style: TextStyle(fontWeight: FontWeight.w600)),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
-                      title: const Text('Turn timer'),
-                      value: _timerEnabled,
-                      onChanged: (v) => setState(() => _timerEnabled = v),
+                      title: const Text('Bidding timer'),
+                      subtitle: Text(
+                        _bidTimerEnabled
+                            ? 'Auto-bids the lowest legal bid after $_bidTimerSeconds seconds'
+                            : 'No limit — bids wait for everyone',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      value: _bidTimerEnabled,
+                      onChanged: (v) => setState(() => _bidTimerEnabled = v),
                     ),
+                    if (_bidTimerEnabled)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final seconds in const [20, 30, 60, 120])
+                              ChoiceChip(
+                                label: Text('${seconds}s'),
+                                selected: _bidTimerSeconds == seconds,
+                                onSelected: (_) => setState(
+                                  () => _bidTimerSeconds = seconds,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Play timer'),
+                      subtitle: Text(
+                        _playTimerEnabled
+                            ? 'Auto-plays the lowest legal card after $_playTimerSeconds seconds'
+                            : 'No limit — nobody is auto-played',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      value: _playTimerEnabled,
+                      onChanged: (v) => setState(() => _playTimerEnabled = v),
+                    ),
+                    if (_playTimerEnabled)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final seconds in const [15, 20, 30, 60, 120])
+                              ChoiceChip(
+                                label: Text('${seconds}s'),
+                                selected: _playTimerSeconds == seconds,
+                                onSelected: (_) => setState(
+                                  () => _playTimerSeconds = seconds,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     const Text('Trump', style: TextStyle(fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),

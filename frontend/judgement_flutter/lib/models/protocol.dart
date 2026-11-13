@@ -826,8 +826,11 @@ class RoomView {
   final int maxPlayers;
   final int minPlayers;
 
-  /// Null means the room has no turn timer (ADR 0003).
+  /// Null means the room has no play (card) timer (ADR 0003).
   final int? turnTimeoutSeconds;
+
+  /// Null means the room has no bidding timer.
+  final int? bidTimeoutSeconds;
 
   /// Null means revealed-card trump; otherwise trump rotates from this suit
   /// (or `trumpCycle[0]` when a custom cycle is set).
@@ -847,6 +850,16 @@ class RoomView {
   final DateTime? tournamentStartsAt;
   final List<SeatView> seats;
 
+  /// Lobby / share line for Pace settings.
+  String get paceSummary {
+    final bid = bidTimeoutSeconds;
+    final play = turnTimeoutSeconds;
+    if (bid == null && play == null) return 'No timers';
+    if (bid == null) return 'No bidding timer · Play ${play}s';
+    if (play == null) return 'Bidding ${bid}s · No play timer';
+    return 'Bidding ${bid}s · Play ${play}s';
+  }
+
   RoomView.fromJson(Map<String, dynamic> json)
     : roomId = json['room_id'] as String,
       code = json['code'] as String,
@@ -855,6 +868,7 @@ class RoomView {
       maxPlayers = json['max_players'] as int,
       minPlayers = json['min_players'] as int,
       turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
+      bidTimeoutSeconds = json['bid_timeout_seconds'] as int?,
       firstTrump = json['first_trump'] as String?,
       trumpCycle = (json['trump_cycle'] as List?)
           ?.map((s) => s as String)
@@ -894,6 +908,7 @@ class GameEventPublicView {
   final int durationMinutes;
   final int maxPlayers;
   final int? turnTimeoutSeconds;
+  final int? bidTimeoutSeconds;
   final String? firstTrump;
   final List<String>? trumpCycle;
   final RoundSchedule roundSchedule;
@@ -920,6 +935,7 @@ class GameEventPublicView {
       durationMinutes = json['duration_minutes'] as int,
       maxPlayers = json['max_players'] as int? ?? 8,
       turnTimeoutSeconds = json['turn_timeout_seconds'] as int?,
+      bidTimeoutSeconds = json['bid_timeout_seconds'] as int?,
       firstTrump = json['first_trump'] as String?,
       trumpCycle = (json['trump_cycle'] as List?)
           ?.map((s) => s as String)

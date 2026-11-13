@@ -29,14 +29,21 @@ class LeaderboardSheet extends StatefulWidget {
 }
 
 class _LeaderboardSheetState extends State<LeaderboardSheet> {
-  late final Future<LeaderboardReport> _load = leaderboardLoad();
-  late final Future<FairPlayLeaderboardReport> _fairPlayLoad =
-      fairPlayLeaderboardLoad();
-  late final Future<List<TournamentSummary>> _tournaments = tournamentListLoad();
-  late final Future<MeStats?> _place = _loadPlace();
+  /// Lazy per-tab futures — avoid bursting all three board endpoints on open
+  /// (shared rate limits + sticky errors without Retry).
+  Future<LeaderboardReport>? _load;
+  Future<FairPlayLeaderboardReport>? _fairPlayLoad;
+  Future<List<TournamentSummary>>? _tournaments;
+  Future<MeStats?>? _place;
   int _tab = 0;
   String? _tournamentId;
   Future<TournamentDetail?>? _tournamentDetail;
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureTabLoaded(0);
+  }
 
   Future<MeStats?> _loadPlace() async {
     if (!AccountSession.instance.isSignedIn) return null;
@@ -45,6 +52,46 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
     } catch (_) {
       return null;
     }
+  }
+
+  void _ensureTabLoaded(int tab) {
+    switch (tab) {
+      case 0:
+        _load ??= leaderboardLoad();
+        _place ??= _loadPlace();
+      case 1:
+        _fairPlayLoad ??= fairPlayLeaderboardLoad();
+      default:
+        _tournaments ??= tournamentListLoad();
+        _place ??= _loadPlace();
+    }
+  }
+
+  void _reloadTop() {
+    setState(() {
+      _load = leaderboardLoad();
+      _place = _loadPlace();
+    });
+  }
+
+  void _reloadFairPlay() {
+    setState(() => _fairPlayLoad = fairPlayLeaderboardLoad());
+  }
+
+  void _reloadTournaments() {
+    setState(() {
+      _tournaments = tournamentListLoad();
+      _tournamentId = null;
+      _tournamentDetail = null;
+    });
+  }
+
+  void _reloadTournamentDetail() {
+    final id = _tournamentId;
+    if (id == null) return;
+    setState(() {
+      _tournamentDetail = tournamentDetailLoad(id).then<TournamentDetail?>((d) => d);
+    });
   }
 
   String get _title => switch (_tab) {
@@ -105,20 +152,33 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
                     ],
                     selected: {_tab},
                     onSelectionChanged: (next) {
-                      setState(() => _tab = next.first);
+                      final tab = next.first;
+                      setState(() {
+                        _tab = tab;
+                        _ensureTabLoaded(tab);
+                      });
                     },
                   ),
                   const SizedBox(height: 12),
                   Expanded(
                     child: switch (_tab) {
-                      0 => _TopPlayersTab(load: _load, place: _place),
-                      1 => _FairPlayTab(load: _fairPlayLoad),
+                      0 => _TopPlayersTab(
+                        load: _load!,
+                        place: _place!,
+                        onRetry: _reloadTop,
+                      ),
+                      1 => _FairPlayTab(
+                        load: _fairPlayLoad!,
+                        onRetry: _reloadFairPlay,
+                      ),
                       _ => _TournamentTab(
-                        listLoad: _tournaments,
+                        listLoad: _tournaments!,
                         selectedId: _tournamentId,
                         detailLoad: _tournamentDetail,
                         onSelect: _selectTournament,
-                        place: _place,
+                        onRetryList: _reloadTournaments,
+                        onRetryDetail: _reloadTournamentDetail,
+                        place: _place!,
                       ),
                     },
                   ),
@@ -138,12 +198,43 @@ class _LeaderboardSheetState extends State<LeaderboardSheet> {
   }
 }
 
+class _LoadError extends StatelessWidget {
+  const _LoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topLeft,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Try again'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TournamentTab extends StatelessWidget {
   const _TournamentTab({
     required this.listLoad,
     required this.selectedId,
     required this.detailLoad,
     required this.onSelect,
+    required this.onRetryList,
+    required this.onRetryDetail,
     required this.place,
   });
 
@@ -151,6 +242,8 @@ class _TournamentTab extends StatelessWidget {
   final String? selectedId;
   final Future<TournamentDetail?>? detailLoad;
   final ValueChanged<String?> onSelect;
+  final VoidCallback onRetryList;
+  final VoidCallback onRetryDetail;
   final Future<MeStats?> place;
 
   @override
@@ -162,12 +255,9 @@ class _TournamentTab extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return const Align(
-            alignment: Alignment.topLeft,
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('Couldn\'t load tournaments. You can still play.'),
-            ),
+          return _LoadError(
+            message: 'Couldn\'t load tournaments. You can still play.',
+            onRetry: onRetryList,
           );
         }
         final all = snapshot.data ?? const <TournamentSummary>[];
@@ -178,97 +268,69 @@ class _TournamentTab extends StatelessWidget {
             alignment: Alignment.topLeft,
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('No live tournament right now.'),
+              child: Text('No tournaments yet.'),
             ),
           );
         }
 
-        final effectiveId =
-            selectedId ??
-            (live.length == 1
-                ? live.first.tournamentId
-                : selectedId);
-        if (selectedId == null && live.length == 1) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            onSelect(live.first.tournamentId);
-          });
+        // Prefer the sole live event; otherwise the newest past result.
+        if (selectedId == null) {
+          final autoId = live.length == 1
+              ? live.first.tournamentId
+              : (live.isEmpty && past.length == 1
+                    ? past.first.tournamentId
+                    : null);
+          if (autoId != null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              onSelect(autoId);
+            });
+          }
         }
 
+        final scheme = Theme.of(context).colorScheme;
         final quiet = Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: Theme.of(
-            context,
-          ).colorScheme.onSurface.withValues(alpha: 0.75),
+          color: scheme.onSurface.withValues(alpha: 0.75),
         );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (live.length > 1)
-              DropdownButtonFormField<String>(
-                value: effectiveId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  labelText: 'Live event',
-                ),
-                items: [
-                  for (final t in live)
-                    DropdownMenuItem(
-                      value: t.tournamentId,
-                      child: Text(
-                        tournamentDisplayLabel(t.title, t.startsAt),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                onChanged: onSelect,
-              )
-            else if (live.length == 1)
-              Text(
-                tournamentDisplayLabel(
-                  live.first.title,
-                  live.first.startsAt,
-                ),
-                style: Theme.of(context).textTheme.titleSmall,
-              )
-            else
-              Text('No live event', style: quiet),
+            if (live.isNotEmpty) ...[
+              Text('Live', style: quiet),
+              const SizedBox(height: 6),
+              _EventPicker(
+                events: live,
+                selectedId: selectedId,
+                onSelect: onSelect,
+                live: true,
+              ),
+              if (past.isNotEmpty) const SizedBox(height: 12),
+            ],
             if (past.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text('Past', style: quiet),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  for (final t in past.take(6))
-                    ActionChip(
-                      label: Text(
-                        tournamentDisplayLabel(t.title, t.startsAt),
-                      ),
-                      onPressed: () => onSelect(t.tournamentId),
-                    ),
-                ],
+              Text(
+                live.isEmpty ? 'Events' : 'Past',
+                style: quiet,
+              ),
+              const SizedBox(height: 6),
+              _EventPicker(
+                events: past.take(8).toList(),
+                selectedId: selectedId,
+                onSelect: onSelect,
+                live: false,
               ),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Expanded(
-              child: effectiveId == null
+              child: selectedId == null || detailLoad == null
                   ? Align(
                       alignment: Alignment.topLeft,
                       child: Text(
-                        live.isEmpty
-                            ? 'Pick a past event to see standings.'
-                            : 'Pick a live event.',
+                        'Select an event to see standings.',
                         style: quiet,
                       ),
                     )
                   : FutureBuilder<TournamentDetail?>(
-                      future:
-                          detailLoad ??
-                          tournamentDetailLoad(
-                            effectiveId,
-                          ).then<TournamentDetail?>((d) => d),
+                      future: detailLoad,
                       builder: (context, detailSnap) {
                         if (detailSnap.connectionState !=
                             ConnectionState.done) {
@@ -277,49 +339,38 @@ class _TournamentTab extends StatelessWidget {
                           );
                         }
                         if (detailSnap.hasError || detailSnap.data == null) {
-                          return const Text('Couldn\'t load standings.');
-                        }
-                        final detail = detailSnap.data!;
-                        final rows = detail.players;
-                        if (rows.isEmpty) {
-                          return Align(
-                            alignment: Alignment.topLeft,
-                            child: Text(
-                              detail.tournament.isLive
-                                  ? 'Tables are still playing.'
-                                  : 'No counted finishes in this event.',
-                              style: quiet,
-                            ),
+                          return _LoadError(
+                            message: 'Couldn\'t load standings.',
+                            onRetry: onRetryDetail,
                           );
                         }
+                        final detail = detailSnap.data!;
+                        final event = detail.tournament;
+                        final rows = detail.players;
                         return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            FutureBuilder<MeStats?>(
-                              future: place,
-                              builder: (context, placeSnap) {
-                                final stats = placeSnap.data;
-                                if (stats == null) {
-                                  return const SizedBox.shrink();
-                                }
-                                final mine = rows
-                                    .where(
-                                      (r) =>
-                                          r.displayName == stats.displayName,
-                                    )
-                                    .toList();
-                                if (mine.isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text(
-                                    'You are ${_ordinal(mine.first.rank)} in this event.',
-                                    style: quiet,
-                                  ),
-                                );
-                              },
+                            _EventStandingsHeader(
+                              title: event.title,
+                              when: event.startsAt,
+                              live: event.isLive,
+                              place: place,
+                              rows: rows,
                             ),
-                            Expanded(child: _BoardTable(rows: rows)),
+                            const SizedBox(height: 8),
+                            Expanded(
+                              child: rows.isEmpty
+                                  ? Align(
+                                      alignment: Alignment.topLeft,
+                                      child: Text(
+                                        event.isLive
+                                            ? 'Tables are still playing.'
+                                            : 'No counted finishes in this event.',
+                                        style: quiet,
+                                      ),
+                                    )
+                                  : _BoardTable(rows: rows),
+                            ),
                           ],
                         );
                       },
@@ -332,11 +383,206 @@ class _TournamentTab extends StatelessWidget {
   }
 }
 
+/// One event chosen at a time — selected is filled; others stay tappable but muted.
+class _EventPicker extends StatelessWidget {
+  const _EventPicker({
+    required this.events,
+    required this.selectedId,
+    required this.onSelect,
+    required this.live,
+  });
+
+  final List<TournamentSummary> events;
+  final String? selectedId;
+  final ValueChanged<String?> onSelect;
+  final bool live;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasSelection = selectedId != null;
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final event in events)
+          Builder(
+            builder: (context) {
+              final selected = event.tournamentId == selectedId;
+              final muted = hasSelection && !selected;
+              final chip = ChoiceChip(
+                selected: selected,
+                showCheckmark: true,
+                avatar: selected
+                    ? null
+                    : Icon(
+                        live
+                            ? Icons.sensors
+                            : Icons.emoji_events_outlined,
+                        size: 16,
+                        color: muted
+                            ? scheme.onSurface.withValues(alpha: 0.35)
+                            : scheme.onSurface.withValues(alpha: 0.7),
+                      ),
+                label: Text(
+                  event.title,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                selectedColor: scheme.primaryContainer,
+                labelStyle: TextStyle(
+                  color: selected
+                      ? scheme.onPrimaryContainer
+                      : scheme.onSurface.withValues(
+                          alpha: muted ? 0.45 : 0.85,
+                        ),
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+                side: BorderSide(
+                  color: selected
+                      ? scheme.primary
+                      : scheme.outline.withValues(alpha: muted ? 0.25 : 0.45),
+                  width: selected ? 1.5 : 1,
+                ),
+                onSelected: (_) {
+                  if (!selected) onSelect(event.tournamentId);
+                },
+              );
+              return AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: muted ? 0.55 : 1,
+                child: chip,
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
+/// Names the event above the board so standings always read with context.
+class _EventStandingsHeader extends StatelessWidget {
+  const _EventStandingsHeader({
+    required this.title,
+    required this.when,
+    required this.live,
+    required this.place,
+    required this.rows,
+  });
+
+  final String title;
+  final DateTime? when;
+  final bool live;
+  final Future<MeStats?> place;
+  final List<LeaderboardEntry> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final quiet = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: scheme.onSurface.withValues(alpha: 0.7),
+    );
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: scheme.outline.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _EventStatusBadge(live: live),
+            ],
+          ),
+          if (when != null) ...[
+            const SizedBox(height: 2),
+            Text(formatEventWhenLocal(when!), style: quiet),
+          ],
+          FutureBuilder<MeStats?>(
+            future: place,
+            builder: (context, placeSnap) {
+              final stats = placeSnap.data;
+              if (stats == null || rows.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              final mine = rows
+                  .where((r) => r.displayName == stats.displayName)
+                  .toList();
+              if (mine.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'You are ${_ordinal(mine.first.rank)} in this event.',
+                  style: quiet?.copyWith(fontWeight: FontWeight.w500),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EventStatusBadge extends StatelessWidget {
+  const _EventStatusBadge({required this.live});
+
+  final bool live;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final label = live ? 'LIVE' : 'FINAL';
+    final bg = live
+        ? scheme.tertiaryContainer
+        : scheme.secondaryContainer;
+    final fg = live
+        ? scheme.onTertiaryContainer
+        : scheme.onSecondaryContainer;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+}
+
 class _TopPlayersTab extends StatelessWidget {
-  const _TopPlayersTab({required this.load, required this.place});
+  const _TopPlayersTab({
+    required this.load,
+    required this.place,
+    required this.onRetry,
+  });
 
   final Future<LeaderboardReport> load;
   final Future<MeStats?> place;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -347,12 +593,9 @@ class _TopPlayersTab extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return const Align(
-            alignment: Alignment.topLeft,
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('Couldn\'t load the board. You can still play.'),
-            ),
+          return _LoadError(
+            message: 'Couldn\'t load the board. You can still play.',
+            onRetry: onRetry,
           );
         }
         final report = snapshot.data ?? const LeaderboardReport(players: []);
@@ -380,9 +623,10 @@ class _TopPlayersTab extends StatelessWidget {
 }
 
 class _FairPlayTab extends StatelessWidget {
-  const _FairPlayTab({required this.load});
+  const _FairPlayTab({required this.load, required this.onRetry});
 
   final Future<FairPlayLeaderboardReport> load;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -393,12 +637,9 @@ class _FairPlayTab extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return const Align(
-            alignment: Alignment.topLeft,
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('Couldn\'t load fair play. You can still play.'),
-            ),
+          return _LoadError(
+            message: 'Couldn\'t load fair play. You can still play.',
+            onRetry: onRetry,
           );
         }
         final rows = snapshot.data?.players ?? const [];

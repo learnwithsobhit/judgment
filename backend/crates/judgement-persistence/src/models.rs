@@ -46,6 +46,9 @@ pub struct StoredRoom {
     pub host_session_id: SessionId,
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
+    /// Independent bidding timer; `None` = no auto-bid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bid_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
     /// Custom 4-suit trump cycle when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -203,6 +206,8 @@ pub struct StoredScheduledEvent {
     pub duration_minutes: u16,
     pub max_players: u8,
     pub turn_timeout_seconds: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bid_timeout_seconds: Option<u16>,
     pub first_trump: Option<Suit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trump_cycle: Option<Vec<Suit>>,

@@ -85,6 +85,7 @@ async fn postgres_persists_and_restores_a_game() {
             host_session_id: seats[0].session_id,
             max_players: 4,
             turn_timeout_seconds: None,
+            bid_timeout_seconds: None,
             first_trump: Some(Suit::Spades),
             trump_cycle: None,
             round_schedule: Default::default(),
@@ -103,6 +104,7 @@ async fn postgres_persists_and_restores_a_game() {
     let rules = GameRules {
         trump_rule: TrumpRule::rotating_from(Suit::Spades),
         turn_timeout_seconds: None,
+        bid_timeout_seconds: None,
         ..GameRules::mvp_for_players(4)
     };
     let mut engine = GameEngine::new_with_seed(99, game_id, rules.clone(), players).unwrap();

@@ -53,6 +53,7 @@ async fn memory_store_finishes_game_and_records_history() {
             host_session_id: session_ids[0],
             max_players: 4,
             turn_timeout_seconds: None,
+            bid_timeout_seconds: None,
             first_trump: Some(Suit::Clubs),
             trump_cycle: None,
             round_schedule: Default::default(),
@@ -83,6 +84,7 @@ async fn memory_store_finishes_game_and_records_history() {
     let rules = GameRules {
         trump_rule: TrumpRule::rotating_from(Suit::Clubs),
         turn_timeout_seconds: None,
+        bid_timeout_seconds: None,
         round_pattern: RoundPattern::Custom { rounds: vec![1] },
         ..GameRules::mvp_for_players(4)
     };
@@ -176,6 +178,7 @@ async fn action_committed_detects_durable_action_id() {
             host_session_id: session_ids[0],
             max_players: 4,
             turn_timeout_seconds: None,
+            bid_timeout_seconds: None,
             first_trump: Some(Suit::Clubs),
             trump_cycle: None,
             round_schedule: Default::default(),
@@ -206,6 +209,7 @@ async fn action_committed_detects_durable_action_id() {
     let rules = GameRules {
         trump_rule: TrumpRule::rotating_from(Suit::Clubs),
         turn_timeout_seconds: None,
+        bid_timeout_seconds: None,
         round_pattern: RoundPattern::Custom { rounds: vec![1] },
         ..GameRules::mvp_for_players(4)
     };
@@ -288,6 +292,7 @@ async fn signed_in_finish_is_counted_once_and_survives_delete() {
     let rules = GameRules {
         trump_rule: TrumpRule::rotating_from(Suit::Clubs),
         turn_timeout_seconds: None,
+        bid_timeout_seconds: None,
         round_pattern: RoundPattern::Custom { rounds: vec![1] },
         ..GameRules::mvp_for_players(4)
     };
@@ -506,6 +511,7 @@ async fn finish_commit_stamps_tournament_id_into_standings() {
     let rules = GameRules {
         trump_rule: TrumpRule::rotating_from(Suit::Clubs),
         turn_timeout_seconds: None,
+        bid_timeout_seconds: None,
         round_pattern: RoundPattern::Custom { rounds: vec![1] },
         ..GameRules::mvp_for_players(3)
     };

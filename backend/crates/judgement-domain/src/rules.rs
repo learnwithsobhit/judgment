@@ -380,17 +380,34 @@ pub struct GameRules {
     pub trump_rule: TrumpRule,
     pub bidding_rule: BiddingRule,
     pub scoring_rule: ScoringRule,
-    /// `None` disables the turn timer entirely (ADR 0003): no deadlines are
-    /// scheduled and the server never auto-plays.
+    /// `None` disables the **play** (card) timer (ADR 0003): no play-phase
+    /// deadlines and the server never auto-plays a card.
     pub turn_timeout_seconds: Option<u16>,
+    /// `None` disables the **bidding** timer. Independent of
+    /// [`Self::turn_timeout_seconds`]. When deserializing older `games.rules`
+    /// JSON that omits this key, callers should mirror turn via
+    /// [`Self::from_stored_json`].
+    #[serde(default)]
+    pub bid_timeout_seconds: Option<u16>,
     pub reconnect_grace_seconds: u16,
     pub allow_bots: bool,
 }
 
 impl GameRules {
+    /// Load rules from durable JSON. If `bid_timeout_seconds` was never
+    /// written (pre-feature games), bidding uses the same duration as play.
+    pub fn from_stored_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        let has_bid_key = value.get("bid_timeout_seconds").is_some();
+        let mut rules: Self = serde_json::from_value(value)?;
+        if !has_bid_key {
+            rules.bid_timeout_seconds = rules.turn_timeout_seconds;
+        }
+        Ok(rules)
+    }
+
     /// MVP configuration for the actual number of seated players (3–8):
     /// descending `max → 1` rounds, revealed-card trump, dealer restriction
-    /// off by default, 30-second timer.
+    /// off by default, 30-second bid and play timers.
     pub fn mvp_for_players(player_count: u8) -> Self {
         Self {
             min_players: MIN_PLAYERS,
@@ -400,6 +417,7 @@ impl GameRules {
             bidding_rule: BiddingRule::default(),
             scoring_rule: ScoringRule::default(),
             turn_timeout_seconds: Some(30),
+            bid_timeout_seconds: Some(30),
             // Engine/tests default: vacant immediately. Live games override via
             // `RECONNECT_GRACE_SECONDS` (default 30) at start — see ADR 0004.
             reconnect_grace_seconds: 0,
@@ -416,6 +434,29 @@ impl GameRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_stored_json_mirrors_turn_when_bid_key_absent() {
+        let mut value = serde_json::to_value(GameRules::mvp_for_players(4)).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("bid_timeout_seconds");
+        value["turn_timeout_seconds"] = serde_json::json!(45);
+        let rules = GameRules::from_stored_json(value).unwrap();
+        assert_eq!(rules.turn_timeout_seconds, Some(45));
+        assert_eq!(rules.bid_timeout_seconds, Some(45));
+    }
+
+    #[test]
+    fn from_stored_json_honors_explicit_null_bid() {
+        let mut value = serde_json::to_value(GameRules::mvp_for_players(4)).unwrap();
+        value["turn_timeout_seconds"] = serde_json::json!(20);
+        value["bid_timeout_seconds"] = serde_json::Value::Null;
+        let rules = GameRules::from_stored_json(value).unwrap();
+        assert_eq!(rules.turn_timeout_seconds, Some(20));
+        assert_eq!(rules.bid_timeout_seconds, None);
+    }
 
     #[test]
     fn max_cards_derivation() {

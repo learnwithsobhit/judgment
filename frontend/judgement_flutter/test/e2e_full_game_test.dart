@@ -16,6 +16,7 @@ const bool runE2E = bool.fromEnvironment('E2E');
 Future<void> playFullGame({
   required int playerCount,
   int? turnTimeoutSeconds,
+  int? bidTimeoutSeconds,
   String? firstTrump,
 }) async {
   final nicknames = [
@@ -29,13 +30,17 @@ Future<void> playFullGame({
   }
 
   // Host creates; the rest join by code; everyone readies up.
+  // Default bid timer to the play timer so timed e2e games still auto-bid.
+  final bidSeconds = bidTimeoutSeconds ?? turnTimeoutSeconds;
   final created = await apis.first.createRoom(
     maxPlayers: playerCount,
     turnTimeoutSeconds: turnTimeoutSeconds,
+    bidTimeoutSeconds: bidSeconds,
     firstTrump: firstTrump,
   );
   expect(created.room.maxPlayers, playerCount);
   expect(created.room.turnTimeoutSeconds, turnTimeoutSeconds);
+  expect(created.room.bidTimeoutSeconds, bidSeconds);
   expect(created.room.firstTrump, firstTrump);
 
   final playerIds = <String>[created.playerId!];

@@ -135,6 +135,8 @@ pub struct AbortedCleanup {
 pub struct SpawnActor {
     pub engine: GameEngine,
     pub turn_timeout: Option<Duration>,
+    /// Independent bidding-phase deadline. `None` = no auto-bid.
+    pub bid_timeout: Option<Duration>,
     pub reconnect_grace: Duration,
     pub store: Option<Arc<dyn GameStore>>,
     pub processed: HashMap<ActionId, u64>,
@@ -177,6 +179,7 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         grace_seq: 0,
         vacancy_seq: 0,
         turn_timeout: config.turn_timeout,
+        bid_timeout: config.bid_timeout,
         reconnect_grace: config.reconnect_grace,
         store: config.store,
         host_player_id: config.host_player_id,
@@ -236,6 +239,7 @@ struct GameActor {
     grace_seq: u64,
     vacancy_seq: u64,
     turn_timeout: Option<Duration>,
+    bid_timeout: Option<Duration>,
     reconnect_grace: Duration,
     metrics: Arc<Metrics>,
     store: Option<Arc<dyn GameStore>>,
@@ -1676,14 +1680,17 @@ impl GameActor {
         if self.paused {
             return;
         }
-        let Some(timeout) = self.turn_timeout else {
-            return;
-        };
-        if self.engine.is_finished()
-            || !matches!(self.engine.phase(), GamePhase::Bidding | GamePhase::Playing)
-        {
+        if self.engine.is_finished() {
             return;
         }
+        let timeout = match self.engine.phase() {
+            GamePhase::Bidding => self.bid_timeout,
+            GamePhase::Playing => self.turn_timeout,
+            _ => None,
+        };
+        let Some(timeout) = timeout else {
+            return;
+        };
 
         let deadline_id = self.deadline_seq;
         let tx = self.self_tx.clone();
@@ -1839,7 +1846,11 @@ impl GameActor {
         if self.paused {
             return None;
         }
-        let timeout = self.turn_timeout?;
+        let timeout = match self.engine.phase() {
+            GamePhase::Bidding => self.bid_timeout?,
+            GamePhase::Playing => self.turn_timeout?,
+            _ => return None,
+        };
         Some(TimerEvent {
             deadline_id: self.deadline_seq,
             remaining_ms: timeout.as_millis() as u64,

@@ -70,6 +70,7 @@ pub async fn restore_from_store(
                     status,
                     max_players: stored.max_players,
                     turn_timeout_seconds: stored.turn_timeout_seconds,
+                    bid_timeout_seconds: stored.bid_timeout_seconds,
                     first_trump: stored.first_trump,
                     trump_cycle: stored.trump_cycle.and_then(|cycle| {
                         judgement_domain::validate_trump_cycle(&cycle)
@@ -142,6 +143,10 @@ fn spawn_restored_actor(
         .rules
         .turn_timeout_seconds
         .map(|t| Duration::from_secs(t as u64));
+    let bid_timeout = game
+        .rules
+        .bid_timeout_seconds
+        .map(|t| Duration::from_secs(t as u64));
     let reconnect_grace = Duration::from_secs(game.rules.reconnect_grace_seconds as u64);
     let processed: HashMap<_, _> = game.processed_actions.into_iter().collect();
 
@@ -156,6 +161,7 @@ fn spawn_restored_actor(
     let commands = spawn_game_actor(SpawnActor {
         engine,
         turn_timeout,
+        bid_timeout,
         reconnect_grace,
         store: Some(state.store.clone()),
         processed,

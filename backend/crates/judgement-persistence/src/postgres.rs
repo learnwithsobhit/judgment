@@ -110,13 +110,14 @@ impl GameStore for PostgresStore {
             r#"
             INSERT INTO rooms (
                 room_id, code, host_session_id, max_players, turn_timeout_seconds,
-                first_trump, trump_cycle, round_schedule, dealer_total_restriction,
-                open_start, tournament_id, phase, game_id, created_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                bid_timeout_seconds, first_trump, trump_cycle, round_schedule,
+                dealer_total_restriction, open_start, tournament_id, phase, game_id, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
             ON CONFLICT (room_id) DO UPDATE SET
                 host_session_id = EXCLUDED.host_session_id,
                 max_players = EXCLUDED.max_players,
                 turn_timeout_seconds = EXCLUDED.turn_timeout_seconds,
+                bid_timeout_seconds = EXCLUDED.bid_timeout_seconds,
                 first_trump = EXCLUDED.first_trump,
                 trump_cycle = EXCLUDED.trump_cycle,
                 round_schedule = EXCLUDED.round_schedule,
@@ -132,6 +133,7 @@ impl GameStore for PostgresStore {
         .bind(room.host_session_id.0)
         .bind(room.max_players as i16)
         .bind(room.turn_timeout_seconds.map(|t| t as i16))
+        .bind(room.bid_timeout_seconds.map(|t| t as i16))
         .bind(room.first_trump.map(suit_to_db))
         .bind(serde_json::to_value(&room.trump_cycle)?)
         .bind(serde_json::to_value(&room.round_schedule)?)
@@ -207,8 +209,8 @@ impl GameStore for PostgresStore {
         let room_rows = sqlx::query(
             r#"
             SELECT room_id, code, host_session_id, max_players, turn_timeout_seconds,
-                   first_trump, trump_cycle, round_schedule, dealer_total_restriction,
-                   open_start, tournament_id, phase, game_id, created_at
+                   bid_timeout_seconds, first_trump, trump_cycle, round_schedule,
+                   dealer_total_restriction, open_start, tournament_id, phase, game_id, created_at
             FROM rooms
             "#,
         )
@@ -258,6 +260,9 @@ impl GameStore for PostgresStore {
                 max_players: row.get::<i16, _>("max_players") as u8,
                 turn_timeout_seconds: row
                     .get::<Option<i16>, _>("turn_timeout_seconds")
+                    .map(|t| t as u16),
+                bid_timeout_seconds: row
+                    .get::<Option<i16>, _>("bid_timeout_seconds")
                     .map(|t| t as u16),
                 first_trump: first_trump.as_deref().and_then(suit_from_db),
                 trump_cycle,
@@ -556,7 +561,7 @@ impl GameStore for PostgresStore {
             return Ok(None);
         };
 
-        let rules: GameRules = serde_json::from_value(row.get("rules"))?;
+        let rules = GameRules::from_stored_json(row.get("rules"))?;
         let seed: Option<i64> = row.get("seed");
 
         let Some(snapshot) = sqlx::query(
@@ -648,7 +653,7 @@ impl GameStore for PostgresStore {
             return Ok(None);
         };
 
-        let rules: GameRules = serde_json::from_value(row.get("rules"))?;
+        let rules = GameRules::from_stored_json(row.get("rules"))?;
         let status: String = row.get("status");
 
         let round_results = sqlx::query(
@@ -700,10 +705,10 @@ impl GameStore for PostgresStore {
             INSERT INTO scheduled_events (
                 event_id, slug, manage_token_hash, host_nickname, host_session_id,
                 title, starts_at, timezone, duration_minutes, max_players,
-                turn_timeout_seconds, first_trump, trump_cycle, round_schedule,
-                status, room_id, created_at, updated_at
+                turn_timeout_seconds, bid_timeout_seconds, first_trump, trump_cycle,
+                round_schedule, status, room_id, created_at, updated_at
             ) VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
             )
             ON CONFLICT (event_id) DO UPDATE SET
                 manage_token_hash = EXCLUDED.manage_token_hash,
@@ -713,6 +718,7 @@ impl GameStore for PostgresStore {
                 duration_minutes = EXCLUDED.duration_minutes,
                 max_players = EXCLUDED.max_players,
                 turn_timeout_seconds = EXCLUDED.turn_timeout_seconds,
+                bid_timeout_seconds = EXCLUDED.bid_timeout_seconds,
                 first_trump = EXCLUDED.first_trump,
                 trump_cycle = EXCLUDED.trump_cycle,
                 round_schedule = EXCLUDED.round_schedule,
@@ -732,6 +738,7 @@ impl GameStore for PostgresStore {
         .bind(event.duration_minutes as i16)
         .bind(event.max_players as i16)
         .bind(event.turn_timeout_seconds.map(|t| t as i16))
+        .bind(event.bid_timeout_seconds.map(|t| t as i16))
         .bind(event.first_trump.map(suit_to_db))
         .bind(serde_json::to_value(&event.trump_cycle)?)
         .bind(serde_json::to_value(&event.round_schedule)?)
@@ -777,8 +784,8 @@ impl GameStore for PostgresStore {
             r#"
             SELECT event_id, slug, manage_token_hash, host_nickname, host_session_id,
                    title, starts_at, timezone, duration_minutes, max_players,
-                   turn_timeout_seconds, first_trump, trump_cycle, round_schedule,
-                   status, room_id, created_at, updated_at
+                   turn_timeout_seconds, bid_timeout_seconds, first_trump, trump_cycle,
+                   round_schedule, status, room_id, created_at, updated_at
             FROM scheduled_events
             "#,
         )
@@ -833,6 +840,9 @@ impl GameStore for PostgresStore {
                 max_players: row.get::<i16, _>("max_players") as u8,
                 turn_timeout_seconds: row
                     .get::<Option<i16>, _>("turn_timeout_seconds")
+                    .map(|t| t as u16),
+                bid_timeout_seconds: row
+                    .get::<Option<i16>, _>("bid_timeout_seconds")
                     .map(|t| t as u16),
                 first_trump: first_trump.as_deref().and_then(suit_from_db),
                 trump_cycle,

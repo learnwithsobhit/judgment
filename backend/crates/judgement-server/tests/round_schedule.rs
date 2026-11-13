@@ -192,6 +192,7 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                 status: RoomStatus::Lobby,
                 max_players: 6,
                 turn_timeout_seconds: None,
+                bid_timeout_seconds: None,
                 first_trump: Some(judgement_domain::Suit::Spades),
                 trump_cycle: None,
                 round_schedule: RoundSchedule {

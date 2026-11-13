@@ -53,7 +53,9 @@ void main() {
     expect(find.text('Round schedule'), findsOneWidget);
     expect(find.text('Automatic'), findsOneWidget);
     expect(find.text('Manual'), findsOneWidget);
-    expect(find.text('Turn timer'), findsOneWidget);
+    expect(find.text('Pace'), findsOneWidget);
+    expect(find.text('Bidding timer'), findsOneWidget);
+    expect(find.text('Play timer'), findsOneWidget);
     expect(find.text('Trump'), findsOneWidget);
     expect(find.text('8,8,7,7,6,6,5,5,4,3,2,1'), findsOneWidget);
     expect(find.text('Default ♠♣♥♦'), findsOneWidget);

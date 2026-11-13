@@ -153,6 +153,10 @@ pub async fn create_room(
         )));
     }
     let turn_timeout_seconds = body.turn_timeout_seconds.map(|t| t.clamp(5, 300));
+    let bid_timeout_seconds = body
+        .bid_timeout_seconds
+        .resolve(turn_timeout_seconds)
+        .map(|t| t.clamp(5, 300));
 
     let round_schedule = body.round_schedule.unwrap_or_default();
     let (trump_cycle, first_trump) = normalize_trump_config(body.trump_cycle, body.first_trump)?;
@@ -201,6 +205,7 @@ pub async fn create_room(
         status: RoomStatus::Lobby,
         max_players,
         turn_timeout_seconds,
+        bid_timeout_seconds,
         first_trump,
         trump_cycle,
         round_schedule,
@@ -1021,6 +1026,7 @@ async fn start_game_inner(
         players,
         session_to_player,
         turn_timeout_seconds,
+        bid_timeout_seconds,
         first_trump,
         trump_cycle,
         round_schedule,
@@ -1078,6 +1084,7 @@ async fn start_game_inner(
             players,
             mapping,
             room.turn_timeout_seconds,
+            room.bid_timeout_seconds,
             room.first_trump,
             room.trump_cycle.clone(),
             room.round_schedule.clone(),
@@ -1100,6 +1107,7 @@ async fn start_game_inner(
         })?;
     let mut rules = GameRules {
         turn_timeout_seconds,
+        bid_timeout_seconds,
         trump_rule,
         round_pattern,
         ..GameRules::mvp_for_players(seated)
@@ -1109,6 +1117,7 @@ async fn start_game_inner(
     rules.reconnect_grace_seconds = u16::try_from(reconnect_grace.as_secs()).unwrap_or(u16::MAX);
     let rules_for_store = rules.clone();
     let turn_timeout = turn_timeout_seconds.map(|t| Duration::from_secs(t as u64));
+    let bid_timeout = bid_timeout_seconds.map(|t| Duration::from_secs(t as u64));
 
     let mut engine = match seed {
         Some(seed) => GameEngine::new_with_seed(seed, game_id, rules, players),
@@ -1152,6 +1161,7 @@ async fn start_game_inner(
     let commands = actor::spawn_game_actor(SpawnActor {
         engine,
         turn_timeout,
+        bid_timeout,
         reconnect_grace,
         store: Some(state.store.clone()),
         processed,

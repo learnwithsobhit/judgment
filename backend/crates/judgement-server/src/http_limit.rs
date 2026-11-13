@@ -22,8 +22,11 @@ pub struct HttpLimitConfig {
     pub window: Duration,
     /// Stricter limit for unauthenticated guest-session creation.
     pub guest_max_per_window: u32,
-    /// Public Top 10 reads. Lower than the authenticated API budget.
+    /// Leaderboard / fair-play / tournament list+detail.
+    /// Kept separate from home-screen polls so a 15s poll cannot starve the board.
     pub board_max_per_window: u32,
+    /// Landing polls: active-games, availability, config.
+    pub poll_max_per_window: u32,
 }
 
 impl Default for HttpLimitConfig {
@@ -32,7 +35,9 @@ impl Default for HttpLimitConfig {
             max_requests_per_window: env_u32("HTTP_RATE_LIMIT", 120),
             window: Duration::from_secs(u64::from(env_u32("HTTP_RATE_WINDOW_SECS", 60))),
             guest_max_per_window: env_u32("HTTP_GUEST_RATE_LIMIT", 20),
-            board_max_per_window: env_u32("HTTP_BOARD_RATE_LIMIT", 30),
+            // Was 30 and shared a bucket with home polls → intermittent board 429s.
+            board_max_per_window: env_u32("HTTP_BOARD_RATE_LIMIT", 60),
+            poll_max_per_window: env_u32("HTTP_POLL_RATE_LIMIT", 90),
         }
     }
 }
@@ -93,23 +98,38 @@ pub async fn rate_limit_middleware(
         return next.run(req).await;
     }
 
-    let key = client_key(req.headers());
-    let max = if path == "/api/v1/guest-sessions" {
-        state.http_limiter.config().guest_max_per_window
+    let client = client_key(req.headers());
+    // Prefix the key by traffic class so poll hits do not consume the board budget.
+    let (bucket, max) = if path == "/api/v1/guest-sessions" {
+        (
+            format!("guest:{client}"),
+            state.http_limiter.config().guest_max_per_window,
+        )
     } else if path == "/api/v1/leaderboard"
         || path == "/api/v1/fair-play/leaderboard"
-        || path == "/api/v1/active-games"
-        || path == "/api/v1/availability"
-        || path == "/api/v1/config"
         || path == "/api/v1/tournaments"
         || path.starts_with("/api/v1/tournaments/")
     {
-        state.http_limiter.config().board_max_per_window
+        (
+            format!("board:{client}"),
+            state.http_limiter.config().board_max_per_window,
+        )
+    } else if path == "/api/v1/active-games"
+        || path == "/api/v1/availability"
+        || path == "/api/v1/config"
+    {
+        (
+            format!("poll:{client}"),
+            state.http_limiter.config().poll_max_per_window,
+        )
     } else {
-        state.http_limiter.config().max_requests_per_window
+        (
+            format!("api:{client}"),
+            state.http_limiter.config().max_requests_per_window,
+        )
     };
 
-    if !state.http_limiter.check(&key, max) {
+    if !state.http_limiter.check(&bucket, max) {
         state
             .metrics
             .rate_limited
@@ -163,10 +183,29 @@ mod tests {
             window: Duration::from_secs(60),
             guest_max_per_window: 2,
             board_max_per_window: 2,
+            poll_max_per_window: 2,
         });
         assert!(limiter.check("a", 2));
         assert!(limiter.check("a", 2));
         assert!(!limiter.check("a", 2));
         assert!(limiter.check("b", 2));
+    }
+
+    #[test]
+    fn board_and_poll_buckets_are_independent() {
+        let limiter = HttpRateLimiter::new(HttpLimitConfig {
+            max_requests_per_window: 10,
+            window: Duration::from_secs(60),
+            guest_max_per_window: 2,
+            board_max_per_window: 2,
+            poll_max_per_window: 2,
+        });
+        assert!(limiter.check("board:ip:1", 2));
+        assert!(limiter.check("board:ip:1", 2));
+        assert!(!limiter.check("board:ip:1", 2));
+        // Poll traffic must not inherit the exhausted board bucket.
+        assert!(limiter.check("poll:ip:1", 2));
+        assert!(limiter.check("poll:ip:1", 2));
+        assert!(!limiter.check("poll:ip:1", 2));
     }
 }

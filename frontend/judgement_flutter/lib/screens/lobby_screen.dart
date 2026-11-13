@@ -465,9 +465,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                           ),
                           Text(
                             [
-                              _room.turnTimeoutSeconds == null
-                                  ? 'No turn timer'
-                                  : '${_room.turnTimeoutSeconds}s turn timer',
+                              _room.paceSummary,
                               _room.roundScheduleSummary,
                               _room.dealerTotalRestriction
                                   ? 'dealer bid restriction on'

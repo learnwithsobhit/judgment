@@ -286,8 +286,10 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
 
   // Room options (create mode, ADR 0003).
   int _maxPlayers = 6;
-  bool _timerEnabled = false;
-  int _timerSeconds = 20;
+  bool _playTimerEnabled = false;
+  int _playTimerSeconds = 20;
+  bool _bidTimerEnabled = false;
+  int _bidTimerSeconds = 30;
 
   /// null = revealed-card; otherwise a 4-suit cycle that repeats each round.
   List<String>? _trumpCycle = List<String>.from(defaultTrumpCycle);
@@ -401,7 +403,8 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
             : RoundSchedule.automatic();
         final created = await api.createRoom(
           maxPlayers: _maxPlayers,
-          turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
+          turnTimeoutSeconds: _playTimerEnabled ? _playTimerSeconds : null,
+          bidTimeoutSeconds: _bidTimerEnabled ? _bidTimerSeconds : null,
           trumpCycle: _trumpCycle,
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
@@ -420,7 +423,8 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
             : RoundSchedule.automatic();
         final created = await api.createRoom(
           maxPlayers: _maxPlayers,
-          turnTimeoutSeconds: _timerEnabled ? _timerSeconds : null,
+          turnTimeoutSeconds: _playTimerEnabled ? _playTimerSeconds : null,
+          bidTimeoutSeconds: _bidTimerEnabled ? _bidTimerSeconds : null,
           trumpCycle: _trumpCycle,
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
@@ -654,19 +658,66 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           _manualStepsEditor(),
         ],
         const SizedBox(height: 12),
+        Text('Pace', style: labelStyle),
+        const SizedBox(height: 4),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           dense: true,
-          title: Text('Turn timer', style: labelStyle),
+          title: Text('Bidding timer', style: labelStyle),
           subtitle: Text(
-            _timerEnabled
-                ? 'Auto-plays after $_timerSeconds seconds'
-                : 'No time limit — nobody is auto-played',
+            _bidTimerEnabled
+                ? 'Auto-bids the lowest legal bid after $_bidTimerSeconds seconds'
+                : 'No limit — bids wait for everyone',
             style: const TextStyle(fontSize: 12),
           ),
-          value: _timerEnabled,
-          onChanged: (value) => setState(() => _timerEnabled = value),
+          value: _bidTimerEnabled,
+          onChanged: (value) => setState(() => _bidTimerEnabled = value),
         ),
+        if (_bidTimerEnabled)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                for (final seconds in const [20, 30, 60, 120])
+                  ChoiceChip(
+                    label: Text('${seconds}s'),
+                    selected: _bidTimerSeconds == seconds,
+                    onSelected: (_) =>
+                        setState(() => _bidTimerSeconds = seconds),
+                  ),
+              ],
+            ),
+          ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text('Play timer', style: labelStyle),
+          subtitle: Text(
+            _playTimerEnabled
+                ? 'Auto-plays the lowest legal card after $_playTimerSeconds seconds'
+                : 'No limit — nobody is auto-played',
+            style: const TextStyle(fontSize: 12),
+          ),
+          value: _playTimerEnabled,
+          onChanged: (value) => setState(() => _playTimerEnabled = value),
+        ),
+        if (_playTimerEnabled)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                for (final seconds in const [15, 20, 30, 60, 120])
+                  ChoiceChip(
+                    label: Text('${seconds}s'),
+                    selected: _playTimerSeconds == seconds,
+                    onSelected: (_) =>
+                        setState(() => _playTimerSeconds = seconds),
+                  ),
+              ],
+            ),
+          ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           dense: true,
@@ -680,18 +731,6 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           value: _dealerTotalRestriction,
           onChanged: (value) => setState(() => _dealerTotalRestriction = value),
         ),
-        if (_timerEnabled)
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final seconds in const [15, 20, 30, 60, 120])
-                ChoiceChip(
-                  label: Text('${seconds}s'),
-                  selected: _timerSeconds == seconds,
-                  onSelected: (_) => setState(() => _timerSeconds = seconds),
-                ),
-            ],
-          ),
         const SizedBox(height: 12),
         Text('Trump', style: labelStyle),
         const SizedBox(height: 2),
