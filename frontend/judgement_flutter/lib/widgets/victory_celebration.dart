@@ -59,7 +59,15 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
   });
 
   @override
+  void initState() {
+    super.initState();
+    // Same create-room “Table sounds” gate as shuffle / card-place SFX.
+    widget.controller.playVictorySfx();
+  }
+
+  @override
   void dispose() {
+    widget.controller.stopVictorySfx();
     _dance.dispose();
     _cracker.dispose();
     super.dispose();

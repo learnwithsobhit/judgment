@@ -210,6 +210,8 @@ pub async fn create_room(
         trump_cycle,
         round_schedule,
         dealer_total_restriction: body.dealer_total_restriction,
+        dealer_shuffle_ritual: body.dealer_shuffle_ritual,
+        table_sfx: body.table_sfx,
         open_start: body.open_start,
         tournament_id,
     };
@@ -1031,6 +1033,8 @@ async fn start_game_inner(
         trump_cycle,
         round_schedule,
         dealer_total_restriction,
+        dealer_shuffle_ritual,
+        table_sfx,
         game_players,
     ) = {
         let rooms = state.rooms.lock().unwrap();
@@ -1089,6 +1093,8 @@ async fn start_game_inner(
             room.trump_cycle.clone(),
             room.round_schedule.clone(),
             room.dealer_total_restriction,
+            room.dealer_shuffle_ritual,
+            room.table_sfx,
             game_players,
         )
     };
@@ -1113,6 +1119,8 @@ async fn start_game_inner(
         ..GameRules::mvp_for_players(seated)
     };
     rules.bidding_rule.dealer_total_restriction = dealer_total_restriction;
+    rules.dealer_shuffle_ritual = dealer_shuffle_ritual;
+    rules.table_sfx = table_sfx;
     let reconnect_grace = state.reconnect_grace;
     rules.reconnect_grace_seconds = u16::try_from(reconnect_grace.as_secs()).unwrap_or(u16::MAX);
     let rules_for_store = rules.clone();

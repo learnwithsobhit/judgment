@@ -90,6 +90,8 @@ async fn postgres_persists_and_restores_a_game() {
             trump_cycle: None,
             round_schedule: Default::default(),
             dealer_total_restriction: false,
+            dealer_shuffle_ritual: false,
+            table_sfx: false,
             open_start: false,
             tournament_id: None,
             phase: "lobby".into(),

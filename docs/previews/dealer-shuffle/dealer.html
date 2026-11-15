@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=390, initial-scale=1" />
+  <title>Dealer shuffle preview</title>
+  <link rel="stylesheet" href="phone.css" />
+  <style>
+    body.solo { background: #070a09; }
+    .stage-ctas {
+      margin-top: 18px;
+      text-align: center;
+    }
+    .stage-ctas .caption { margin-bottom: 10px; }
+    .stage-ctas .btns {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .stage-ctas .btn {
+      min-width: 140px;
+      flex: 0 1 auto;
+    }
+    .phone.dealer-preview .action-band { display: none; }
+    .phone.dealer-preview .stage {
+      top: 48%;
+      width: 280px;
+    }
+  </style>
+</head>
+<body class="solo">
+  <div class="phone dealer-preview">
+    <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+    <div class="seats">
+      <div class="seat top-left"><div class="avatar">DC</div><div class="seat-name">Dharmendra</div></div>
+      <div class="seat top"><div class="avatar">SC</div><div class="seat-name">Shobhit</div></div>
+      <div class="seat top-right"><div class="avatar">CJ</div><div class="seat-name">Chandan</div></div>
+      <div class="seat left"><div class="avatar">GC</div><div class="seat-name">Gagan</div></div>
+      <div class="seat right"><div class="avatar">UC</div><div class="seat-name">Upavan</div></div>
+    </div>
+    <div class="stage">
+      <div class="deck">
+        <div class="card-back"></div><div class="card-back"></div>
+        <div class="card-back"></div><div class="card-back"></div>
+      </div>
+      <p class="status">Waiting for you to deal<br /><span class="meta">Shuffled ×2</span></p>
+      <div class="countdown dealer"><i></i></div>
+      <p class="meta" style="margin-top:8px">10s until auto-deal</p>
+      <div class="stage-ctas">
+        <div class="caption">Everyone can see this</div>
+        <div class="btns">
+          <button class="btn secondary" type="button">Shuffle again</button>
+          <button class="btn primary" type="button">Deal</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

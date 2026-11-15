@@ -90,6 +90,15 @@ pub struct LeaderView {
     pub margin: i32,
 }
 
+/// Present while `dealer_shuffle_ritual` holds the table in `Dealing`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShuffleRitualView {
+    pub shuffle_index: u32,
+    pub animation_seed: u64,
+    pub can_shuffle: bool,
+    pub can_deal: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerGameView {
     pub game_id: GameId,
@@ -133,6 +142,12 @@ pub struct PlayerGameView {
     /// locked tie-break fields (score, exact-bid rounds, tricks missed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_ranking: Option<Vec<RankedPlayer>>,
+    /// Dealer shuffle ritual controls (only while phase is `Dealing` and flag on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shuffle: Option<ShuffleRitualView>,
+    /// Host opted into local shuffle / card-place SFX at room create.
+    #[serde(default)]
+    pub table_sfx: bool,
 }
 
 /// Build the personalised view for `player_id` from authoritative state.
@@ -257,6 +272,19 @@ pub(crate) fn project_for(
             playable_cards,
         },
         final_ranking,
+        shuffle: (state.phase == GamePhase::Dealing && state.rules.dealer_shuffle_ritual).then(
+            || {
+                let is_dealer = player_id == state.dealer;
+                ShuffleRitualView {
+                    shuffle_index: state.shuffle_index,
+                    animation_seed: state.animation_seed,
+                    can_shuffle: is_dealer
+                        && state.shuffle_index < crate::engine::GameEngine::MAX_SHUFFLES_PER_ROUND,
+                    can_deal: is_dealer,
+                }
+            },
+        ),
+        table_sfx: state.rules.table_sfx,
     }
 }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/judgement_palette.dart';
 import '../auth/account_session.dart';
@@ -22,6 +23,8 @@ import '../widgets/exit_confirm_dialogs.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/share_sheet.dart';
 import 'table_screen.dart';
+
+const _dealerShuffleTipDismissedKey = 'dealer_shuffle_tip_dismissed';
 
 class LobbyScreen extends StatefulWidget {
   final ApiClient api;
@@ -49,6 +52,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   bool _navigatedToGame = false;
   bool _leaveDialogOpen = false;
   bool _leaving = false;
+  bool _showShuffleTip = false;
   String? _myAvatarId;
 
   @override
@@ -59,6 +63,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
         .map((s) => s.avatarId)
         .firstOrNull;
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    _loadShuffleTip();
     setGameExitGuard(true);
     // Mid-game reclaim may land here already in_game — enter table immediately.
     final gameId = _room.gameId;
@@ -74,6 +79,19 @@ class _LobbyScreenState extends State<LobbyScreen> {
     setGameExitGuard(false);
     _poll?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadShuffleTip() async {
+    if (!_room.dealerShuffleRitual) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_dealerShuffleTipDismissedKey) == true) return;
+    if (mounted) setState(() => _showShuffleTip = true);
+  }
+
+  Future<void> _dismissShuffleTip() async {
+    setState(() => _showShuffleTip = false);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_dealerShuffleTipDismissedKey, true);
   }
 
   Future<void> _refresh() async {
@@ -470,12 +488,46 @@ class _LobbyScreenState extends State<LobbyScreen> {
                               _room.dealerTotalRestriction
                                   ? 'dealer bid restriction on'
                                   : 'dealer may match total',
+                              if (_room.dealerShuffleRitual)
+                                'Dealer shuffle on',
                             ].join(' · '),
                             style: const TextStyle(
                               fontSize: 12,
                               color: Colors.white54,
                             ),
                           ),
+                          if (_showShuffleTip && _room.dealerShuffleRitual) ...[
+                            const SizedBox(height: 8),
+                            Material(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  10,
+                                  6,
+                                  4,
+                                  6,
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Expanded(
+                                      child: Text(
+                                        'Dealer will shuffle in view each round',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: _dismissShuffleTip,
+                                      child: const Text('Dismiss'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                           if (_room.tournamentTitle != null) ...[
                             const SizedBox(height: 4),
                             Text(

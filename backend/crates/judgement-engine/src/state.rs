@@ -87,6 +87,12 @@ pub struct InternalGameState {
     /// Thinking time charged to each seat, in milliseconds.
     #[serde(default)]
     pub thinking_ms: HashMap<PlayerId, u64>,
+    /// Ritual shuffle count for the current dealing phase (0 when idle).
+    #[serde(default)]
+    pub shuffle_index: u32,
+    /// Cosmetic sync seed for client shuffle animation (not card authority).
+    #[serde(default)]
+    pub animation_seed: u64,
 }
 
 impl InternalGameState {

@@ -31,6 +31,7 @@ import '../widgets/player_avatar.dart';
 import '../widgets/playing_card.dart';
 import '../widgets/scoreboard.dart';
 import '../widgets/share_sheet.dart';
+import '../widgets/shuffle_stage.dart';
 import '../widgets/victory_celebration.dart';
 import 'fair_play_screen.dart';
 import 'result_screen.dart';
@@ -678,6 +679,7 @@ String _timerPhaseHint(String phase) {
   return switch (phase) {
     'bidding' => 'Bid ',
     'playing' => 'Play ',
+    'dealing' => 'Deal ',
     _ => '',
   };
 }
@@ -698,7 +700,10 @@ class _TopBar extends StatelessWidget {
     final view = controller.view!;
     final round = view.round;
 
-    final remaining = controller.turnDeadline?.difference(DateTime.now());
+    final showTimer = controller.showsPhaseTimer;
+    final remaining = showTimer
+        ? controller.turnDeadline?.difference(DateTime.now())
+        : null;
     final remainingSeconds = remaining == null
         ? null
         : (remaining.inMilliseconds / 1000).ceil().clamp(0, 999);
@@ -728,7 +733,7 @@ class _TopBar extends StatelessWidget {
       if (view.trump != null) ...[const SizedBox(width: 8), _trumpChip(view)],
     ];
     final tools = <Widget>[
-      if (remainingSeconds != null && !view.isFinished) ...[
+      if (remainingSeconds != null) ...[
         Icon(
           Icons.timer_outlined,
           size: 18,
@@ -972,11 +977,16 @@ class _TableArea extends StatelessWidget {
                           Expanded(
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
-                              child: _TrickArea(
-                                controller: controller,
-                                cardWidth: metrics.cardWidth,
-                                columns: metrics.columns,
-                              ),
+                              child: view.isShuffleRitual
+                                  ? ShuffleStage(
+                                      controller: controller,
+                                      cardWidth: metrics.cardWidth,
+                                    )
+                                  : _TrickArea(
+                                      controller: controller,
+                                      cardWidth: metrics.cardWidth,
+                                      columns: metrics.columns,
+                                    ),
                             ),
                           ),
                           _sideColumn(
@@ -1039,6 +1049,8 @@ class _TableArea extends StatelessWidget {
       isTurn: view.currentTurn == opponent.playerId,
       isDealer: view.round?.dealer == opponent.playerId,
       isLeader: view.leader?.playerId == opponent.playerId,
+      pulseDealer: view.isShuffleRitual &&
+          view.round?.dealer == opponent.playerId,
       avatarRadius: crowded ? 16 : 20,
       place: place,
     );
@@ -1252,6 +1264,7 @@ class _OpponentSeat extends StatelessWidget {
   final bool isTurn;
   final bool isDealer;
   final bool isLeader;
+  final bool pulseDealer;
   final double avatarRadius;
   final int? place;
 
@@ -1261,6 +1274,7 @@ class _OpponentSeat extends StatelessWidget {
     required this.isTurn,
     required this.isDealer,
     required this.isLeader,
+    this.pulseDealer = false,
     required this.avatarRadius,
     this.place,
   });
@@ -1270,6 +1284,20 @@ class _OpponentSeat extends StatelessWidget {
     final disconnected =
         opponent.connectionStatus == 'disconnected' ||
         opponent.connectionStatus == 'vacant';
+    final dealerBadge = isDealer
+        ? CircleAvatar(
+            radius: 9,
+            backgroundColor: goldAccent,
+            child: const Text(
+              'D',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          )
+        : null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       child: Column(
@@ -1291,22 +1319,13 @@ class _OpponentSeat extends StatelessWidget {
                 onLongPress: () =>
                     controller.sendReaction('👏', target: opponent.playerId),
               ),
-              if (isDealer)
-                const Positioned(
+              if (dealerBadge != null)
+                Positioned(
                   right: -2,
                   top: -2,
-                  child: CircleAvatar(
-                    radius: 9,
-                    backgroundColor: goldAccent,
-                    child: Text(
-                      'D',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
+                  child: pulseDealer
+                      ? _SoftPulseOnce(child: dealerBadge)
+                      : dealerBadge,
                 ),
               if (isLeader)
                 const Positioned(
@@ -1539,7 +1558,14 @@ class _ActionArea extends StatelessWidget {
     final pending = controller.pendingActionId != null;
     final Widget body;
 
-    if (view.phase == 'bidding' && controller.isMyTurn) {
+    if (view.isShuffleRitual) {
+      final ritual = view.shuffle!;
+      if (ritual.canDeal || ritual.canShuffle) {
+        body = ShuffleRitualActions(controller: controller);
+      } else {
+        body = const SizedBox(height: 4);
+      }
+    } else if (view.phase == 'bidding' && controller.isMyTurn) {
       final cards = view.round?.cardsPerPlayer ?? 0;
       final legal = view.legalActions.legalBids.toSet();
       final isDealer = view.round?.dealer == controller.myPlayerId;
@@ -1606,9 +1632,51 @@ class _ActionArea extends StatelessWidget {
             ? 'Your turn — pick a card'
             : 'Waiting for $turnName to play…',
       'round_scoring' || 'game_scoring' => 'Scoring…',
-      'dealing' || 'round_setup' => 'Dealing…',
+      'dealing' => view.isShuffleRitual ? null : 'Dealing…',
+      'round_setup' => 'Dealing…',
       _ => null,
     };
+  }
+}
+
+/// Soft one-shot pulse on the dealer badge when the shuffle phase begins.
+class _SoftPulseOnce extends StatefulWidget {
+  final Widget child;
+
+  const _SoftPulseOnce({required this.child});
+
+  @override
+  State<_SoftPulseOnce> createState() => _SoftPulseOnceState();
+}
+
+class _SoftPulseOnceState extends State<_SoftPulseOnce>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  )..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) return widget.child;
+    return ScaleTransition(
+      scale: Tween(begin: 1.0, end: 1.18).animate(
+        CurvedAnimation(parent: _c, curve: Curves.easeOut),
+      ),
+      child: FadeTransition(
+        opacity: TweenSequence<double>([
+          TweenSequenceItem(tween: Tween(begin: 1, end: 0.55), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: 0.55, end: 1), weight: 1),
+        ]).animate(_c),
+        child: widget.child,
+      ),
+    );
   }
 }
 
@@ -1736,6 +1804,11 @@ class _HandArea extends StatelessWidget {
     final playable = view.legalActions.playableCards.toSet();
     final myTurnToPlay = view.phase == 'playing' && controller.isMyTurn;
     final pending = controller.pendingActionId != null;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final revealUntil = controller.dealRevealUntil;
+    final revealing = !reduceMotion &&
+        revealUntil != null &&
+        DateTime.now().isBefore(revealUntil);
 
     final hand = [...view.ownHand]
       ..sort((a, b) {
@@ -1747,6 +1820,10 @@ class _HandArea extends StatelessWidget {
       });
 
     final cardWidth = MediaQuery.sizeOf(context).width < 600 ? 52.0 : 64.0;
+    // Cap total deal-out ~1.2s (plan); stagger across the hand.
+    final stepMs = hand.isEmpty
+        ? 0
+        : (1200 / hand.length).floor().clamp(40, 80);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
@@ -1755,35 +1832,118 @@ class _HandArea extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            for (final card in hand)
+            for (var i = 0; i < hand.length; i++)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: PlayingCardWidget(
-                  card: card,
-                  width: cardWidth,
-                  highlighted: myTurnToPlay && playable.contains(card.id),
-                  disabled: myTurnToPlay && !playable.contains(card.id),
-                  onTap: pending
-                      ? null
-                      : () {
-                          final blocked = controller.cardBlockedReason(card);
-                          if (blocked == null) {
-                            controller.playCard(card.id);
-                          } else {
-                            ScaffoldMessenger.of(context)
-                              ..hideCurrentSnackBar()
-                              ..showSnackBar(
-                                SnackBar(
-                                  content: Text(blocked),
-                                  duration: const Duration(seconds: 2),
-                                ),
-                              );
-                          }
-                        },
+                child: _DealRevealCard(
+                  revealing: revealing,
+                  delay: Duration(milliseconds: stepMs * i),
+                  child: PlayingCardWidget(
+                    card: hand[i],
+                    width: cardWidth,
+                    highlighted: myTurnToPlay && playable.contains(hand[i].id),
+                    disabled: myTurnToPlay && !playable.contains(hand[i].id),
+                    onTap: pending
+                        ? null
+                        : () {
+                            final blocked =
+                                controller.cardBlockedReason(hand[i]);
+                            if (blocked == null) {
+                              controller.playCard(hand[i].id);
+                            } else {
+                              ScaffoldMessenger.of(context)
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(
+                                  SnackBar(
+                                    content: Text(blocked),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                            }
+                          },
+                  ),
                 ),
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Short settle after ritual Deal — stagger fade/slide, never blocks play.
+class _DealRevealCard extends StatefulWidget {
+  final Widget child;
+  final bool revealing;
+  final Duration delay;
+
+  const _DealRevealCard({
+    required this.child,
+    required this.revealing,
+    required this.delay,
+  });
+
+  @override
+  State<_DealRevealCard> createState() => _DealRevealCardState();
+}
+
+class _DealRevealCardState extends State<_DealRevealCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 280),
+  );
+  bool _started = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.revealing) {
+      _c.value = 0;
+      Future<void>.delayed(widget.delay, () {
+        if (mounted) {
+          _started = true;
+          _c.forward();
+        }
+      });
+    } else {
+      _c.value = 1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _DealRevealCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.revealing && !oldWidget.revealing && !_started) {
+      _c.value = 0;
+      Future<void>.delayed(widget.delay, () {
+        if (mounted) {
+          _started = true;
+          _c.forward();
+        }
+      });
+    } else if (!widget.revealing && _c.value < 1) {
+      _c.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final curved = CurvedAnimation(parent: _c, curve: Curves.easeOut);
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.12),
+          end: Offset.zero,
+        ).animate(curved),
+        child: widget.child,
       ),
     );
   }

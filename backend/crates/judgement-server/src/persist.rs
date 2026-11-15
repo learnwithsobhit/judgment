@@ -40,6 +40,8 @@ pub fn stored_room(room: &Room) -> StoredRoom {
         trump_cycle: room.trump_cycle.clone(),
         round_schedule: room.round_schedule.clone(),
         dealer_total_restriction: room.dealer_total_restriction,
+        dealer_shuffle_ritual: room.dealer_shuffle_ritual,
+        table_sfx: room.table_sfx,
         open_start: room.open_start,
         tournament_id: room.tournament_id,
         phase,

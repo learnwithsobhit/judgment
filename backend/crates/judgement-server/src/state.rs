@@ -106,6 +106,10 @@ pub struct Room {
     pub round_schedule: RoundSchedule,
     /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
     pub dealer_total_restriction: bool,
+    /// Dealer shuffle ritual before each deal (default off).
+    pub dealer_shuffle_ritual: bool,
+    /// Local shuffle / card-place SFX (default off).
+    pub table_sfx: bool,
     /// Creator is not seated. First joiner becomes host.
     pub open_start: bool,
     /// Competitive event attached at create. Copied into the actor at start.
@@ -153,6 +157,8 @@ impl Room {
             round_schedule: self.round_schedule.clone(),
             round_schedule_summary: self.round_schedule.summary(self.max_players),
             dealer_total_restriction: self.dealer_total_restriction,
+            dealer_shuffle_ritual: self.dealer_shuffle_ritual,
+            table_sfx: self.table_sfx,
             open_start: self.open_start,
             tournament_id: self.tournament_id.map(|id| id.to_string()),
             tournament_title: None,

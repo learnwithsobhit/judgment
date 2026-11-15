@@ -68,6 +68,8 @@ async fn finish_one_round_game(store: &MemoryStore) -> (GameId, PlayerId, String
             trump_cycle: None,
             round_schedule: Default::default(),
             dealer_total_restriction: false,
+            dealer_shuffle_ritual: false,
+            table_sfx: false,
             open_start: false,
             tournament_id: None,
             phase: "in_game".into(),

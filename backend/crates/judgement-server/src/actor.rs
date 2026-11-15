@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 
@@ -35,9 +35,30 @@ pub const VACANCY_TTL: Duration = Duration::from_secs(10 * 60);
 /// Delay before peers see a reconnect pause banner (silent sub-3s blips).
 pub const PAUSE_BANNER_DELAY: Duration = Duration::from_secs(3);
 
+/// Minimum bid/play time restored after a table freeze (disconnect / vacant).
+/// Resume uses `max(paused_remaining, floor)` capped at the configured timeout
+/// so a rejoin never leaves an unplayable sliver of time.
+pub const RECONNECT_TIMER_FLOOR: Duration = Duration::from_secs(15);
+
 /// Pause after the last trick of a round so clients can hold the reveal
 /// (~1.6s) before the next deal or game-over screen.
 pub const ROUND_REVEAL_DELAY: Duration = Duration::from_millis(1800);
+
+/// Soft auto-deal after entering the dealer shuffle ritual.
+pub const SHUFFLE_SOFT_DEAL: Duration = Duration::from_secs(12);
+/// Extra time granted after each reshuffle (capped by hard limit).
+pub const SHUFFLE_EXTEND: Duration = Duration::from_secs(4);
+/// Absolute max time in the ritual before forced deal.
+pub const SHUFFLE_HARD_CAP: Duration = Duration::from_secs(30);
+/// Min gap between ShuffleDeck accepts (anti-spam / animation lock).
+pub const SHUFFLE_MIN_INTERVAL: Duration = Duration::from_millis(800);
+
+enum TurnTimerMode {
+    /// New seat / new action — use the configured bid or play timeout.
+    Fresh,
+    /// After reconnect grace / vacancy claim — continue the frozen remainder.
+    ResumePaused,
+}
 
 #[derive(Debug)]
 pub enum ActorMessage {
@@ -206,6 +227,11 @@ pub fn spawn_game_actor(config: SpawnActor) -> mpsc::Sender<ActorMessage> {
         metrics: config.metrics,
         last_emote_at: HashMap::new(),
         last_audio_at: HashMap::new(),
+        last_shuffle_at: None,
+        shuffle_phase_started: None,
+        shuffle_deal_at: None,
+        action_deadline_at: None,
+        paused_turn_remaining: None,
         on_host_changed: config.on_host_changed,
         on_aborted: config.on_aborted,
         on_finished: config.on_finished,
@@ -267,6 +293,16 @@ struct GameActor {
     last_emote_at: HashMap<PlayerId, u64>,
     /// Rate-limit soundboard + voice notes (shared bucket per player).
     last_audio_at: HashMap<PlayerId, u64>,
+    /// Ritual: last accepted ShuffleDeck (spam / animation lock).
+    last_shuffle_at: Option<Instant>,
+    /// Ritual: when the current dealing phase began.
+    shuffle_phase_started: Option<Instant>,
+    /// Ritual: wall-clock auto-deal deadline.
+    shuffle_deal_at: Option<Instant>,
+    /// Bid/play: wall-clock when the current seat's timer fires.
+    action_deadline_at: Option<Instant>,
+    /// Bid/play remaining frozen while paused (resume must not restart full window).
+    paused_turn_remaining: Option<Duration>,
     on_host_changed: Option<Arc<dyn Fn(PlayerId) + Send + Sync>>,
     on_aborted: Option<Arc<dyn Fn(AbortedCleanup) + Send + Sync>>,
     on_finished: Option<Arc<dyn Fn(GameId) + Send + Sync>>,
@@ -280,6 +316,15 @@ impl GameActor {
     async fn run(mut self) {
         self.publish_active_game();
         self.sync_pace_clock();
+        // StartGame may already be in ritual Dealing before the actor loop runs.
+        if self.engine.phase() == GamePhase::Dealing
+            && self.engine.state().rules.dealer_shuffle_ritual
+        {
+            let now = Instant::now();
+            self.shuffle_phase_started = Some(now);
+            self.shuffle_deal_at = Some(now + SHUFFLE_SOFT_DEAL);
+            self.last_shuffle_at = Some(now);
+        }
         self.schedule_deadline();
         self.schedule_round_reveal_advance();
 
@@ -527,6 +572,7 @@ impl GameActor {
         self.recompute_pause();
         if !was_paused && self.paused {
             self.settle_open_pace(false);
+            self.freeze_action_deadline();
         }
 
         // Cancel turn / round-reveal timers while paused.
@@ -662,9 +708,32 @@ impl GameActor {
         self.recompute_pause();
         if !was_paused && self.paused {
             self.settle_open_pace(false);
+            self.freeze_action_deadline();
         }
         self.deadline_seq += 1;
         self.round_advance_seq += 1;
+        // Vacant dealer mid-ritual: commit deal immediately. Soft deadlines are
+        // held while paused, so a timer path would never fire and the table
+        // would wedge until vacancy TTL ends the game.
+        if player_id == self.engine.state().dealer
+            && self.engine.phase() == GamePhase::Dealing
+            && self.engine.state().rules.dealer_shuffle_ritual
+        {
+            let previous = self.engine.state().clone();
+            match self.engine.auto_deal_cards() {
+                Ok(events) => {
+                    let action_id = ActionId::new();
+                    if self
+                        .persist_with_uncertainty(action_id, &events, previous)
+                        .await
+                    {
+                        self.processed.insert(action_id, self.engine.version());
+                        self.after_engine_events(&events);
+                    }
+                }
+                Err(error) => tracing::error!(%error, "vacant-dealer auto-deal rejected"),
+            }
+        }
         let name = self.nickname_of(player_id);
         self.pause_banner_visible = true;
         self.broadcast(ServerMessage::GamePaused {
@@ -874,8 +943,16 @@ impl GameActor {
 
     fn resume_timers(&mut self) {
         self.sync_pace_clock();
-        self.schedule_deadline();
+        self.schedule_deadline_with(TurnTimerMode::ResumePaused);
         self.schedule_round_reveal_advance();
+    }
+
+    /// Capture remaining bid/play time before pause cancels the wall deadline.
+    fn freeze_action_deadline(&mut self) {
+        if let Some(at) = self.action_deadline_at.take() {
+            self.paused_turn_remaining =
+                Some(at.saturating_duration_since(Instant::now()));
+        }
     }
 
     fn recompute_pause(&mut self) {
@@ -1122,6 +1199,22 @@ impl GameActor {
         let result = match &envelope.action {
             ClientCommand::PlaceBid { bid } => self.engine.place_bid(player_id, *bid),
             ClientCommand::PlayCard { card_id } => self.engine.play_card(player_id, *card_id),
+            ClientCommand::ShuffleDeck => {
+                if !self.allow_shuffle_now() {
+                    // Animation / spam lock — ack so the client clears pendingActionId
+                    // (a silent drop left Deal blocked until reconnect).
+                    self.send_to(
+                        player_id,
+                        ServerMessage::CommandAccepted {
+                            action_id,
+                            new_state_version: current_version,
+                        },
+                    );
+                    return;
+                }
+                self.engine.reshuffle_deck(player_id)
+            }
+            ClientCommand::DealCards => self.engine.deal_cards(player_id),
             ClientCommand::Ready | ClientCommand::Unready | ClientCommand::StartGame => {
                 self.reject(player_id, Some(action_id), RejectReason::UnsupportedCommand);
                 return;
@@ -1675,23 +1768,113 @@ impl GameActor {
             .collect()
     }
 
+    fn allow_shuffle_now(&mut self) -> bool {
+        match self.last_shuffle_at {
+            Some(at) if at.elapsed() < SHUFFLE_MIN_INTERVAL => false,
+            _ => {
+                self.last_shuffle_at = Some(Instant::now());
+                true
+            }
+        }
+    }
+
+    fn note_shuffle_phase_timers(&mut self, events: &[GameEvent]) {
+        let ritual = self.engine.state().rules.dealer_shuffle_ritual;
+        if !ritual {
+            self.shuffle_phase_started = None;
+            self.shuffle_deal_at = None;
+            return;
+        }
+        let now = Instant::now();
+        if events
+            .iter()
+            .any(|e| matches!(e, GameEvent::ShuffleReady { .. }))
+        {
+            self.shuffle_phase_started = Some(now);
+            self.shuffle_deal_at = Some(now + SHUFFLE_SOFT_DEAL);
+            self.last_shuffle_at = Some(now);
+        }
+        if events
+            .iter()
+            .any(|e| matches!(e, GameEvent::DeckShuffled { .. }))
+        {
+            let hard = self
+                .shuffle_phase_started
+                .unwrap_or(now)
+                .checked_add(SHUFFLE_HARD_CAP)
+                .unwrap_or(now + SHUFFLE_HARD_CAP);
+            let soft = now + SHUFFLE_EXTEND;
+            self.shuffle_deal_at = Some(soft.min(hard).max(now + Duration::from_millis(500)));
+        }
+        if events
+            .iter()
+            .any(|e| matches!(e, GameEvent::CardsDealt { .. }))
+        {
+            self.shuffle_phase_started = None;
+            self.shuffle_deal_at = None;
+        }
+    }
+
+    fn shuffle_deal_remaining(&self) -> Option<Duration> {
+        let at = self.shuffle_deal_at?;
+        Some(at.saturating_duration_since(Instant::now()))
+    }
+
+    fn action_deadline_remaining(&self) -> Option<Duration> {
+        let at = self.action_deadline_at?;
+        Some(at.saturating_duration_since(Instant::now()))
+    }
+
     fn schedule_deadline(&mut self) {
+        self.schedule_deadline_with(TurnTimerMode::Fresh);
+    }
+
+    fn schedule_deadline_with(&mut self, mode: TurnTimerMode) {
         self.deadline_seq += 1;
         if self.paused {
             return;
         }
         if self.engine.is_finished() {
+            self.action_deadline_at = None;
+            self.paused_turn_remaining = None;
             return;
         }
         let timeout = match self.engine.phase() {
-            GamePhase::Bidding => self.bid_timeout,
-            GamePhase::Playing => self.turn_timeout,
-            _ => None,
+            GamePhase::Bidding => self.bid_or_play_timeout(mode, self.bid_timeout),
+            GamePhase::Playing => self.bid_or_play_timeout(mode, self.turn_timeout),
+            GamePhase::Dealing if self.engine.state().rules.dealer_shuffle_ritual => {
+                self.paused_turn_remaining = None;
+                self.action_deadline_at = None;
+                // Soft window may have elapsed while paused (reconnect grace).
+                // Re-arm a short fuse so resume cannot leave the table wedged.
+                if self.shuffle_deal_at.is_none() {
+                    self.shuffle_deal_at = Some(Instant::now() + SHUFFLE_SOFT_DEAL);
+                }
+                let rem = self
+                    .shuffle_deal_remaining()
+                    .unwrap_or(Duration::ZERO);
+                Some(if rem.is_zero() {
+                    Duration::from_millis(100)
+                } else {
+                    rem
+                })
+            }
+            _ => {
+                self.paused_turn_remaining = None;
+                self.action_deadline_at = None;
+                None
+            }
         };
         let Some(timeout) = timeout else {
+            self.action_deadline_at = None;
             return;
         };
+        if timeout.is_zero() {
+            self.action_deadline_at = None;
+            return;
+        }
 
+        self.action_deadline_at = Some(Instant::now() + timeout);
         let deadline_id = self.deadline_seq;
         let tx = self.self_tx.clone();
         tokio::spawn(async move {
@@ -1703,10 +1886,52 @@ impl GameActor {
         }
     }
 
+    fn bid_or_play_timeout(
+        &mut self,
+        mode: TurnTimerMode,
+        configured: Option<Duration>,
+    ) -> Option<Duration> {
+        match mode {
+            TurnTimerMode::ResumePaused => {
+                if let Some(rem) = self.paused_turn_remaining.take() {
+                    return Some(resume_action_timeout(rem, configured));
+                }
+                configured
+            }
+            TurnTimerMode::Fresh => {
+                self.paused_turn_remaining = None;
+                configured
+            }
+        }
+    }
+
     async fn handle_timeout(&mut self, deadline_id: u64) {
         if deadline_id != self.deadline_seq || self.engine.is_finished() || self.paused {
             return;
         }
+
+        if self.engine.phase() == GamePhase::Dealing
+            && self.engine.state().rules.dealer_shuffle_ritual
+        {
+            let previous = self.engine.state().clone();
+            match self.engine.auto_deal_cards() {
+                Ok(events) => {
+                    let action_id = ActionId::new();
+                    if !self
+                        .persist_with_uncertainty(action_id, &events, previous)
+                        .await
+                    {
+                        return;
+                    }
+                    self.processed.insert(action_id, self.engine.version());
+                    self.broadcast_snapshots();
+                    self.after_engine_events(&events);
+                }
+                Err(error) => tracing::error!(%error, "shuffle auto-deal rejected"),
+            }
+            return;
+        }
+
         let Some(current) = self
             .engine
             .state()
@@ -1757,6 +1982,7 @@ impl GameActor {
     }
 
     fn after_engine_events(&mut self, events: &[GameEvent]) {
+        self.note_shuffle_phase_timers(events);
         self.sync_pace_clock();
         self.schedule_deadline();
         if events
@@ -1847,8 +2073,10 @@ impl GameActor {
             return None;
         }
         let timeout = match self.engine.phase() {
-            GamePhase::Bidding => self.bid_timeout?,
-            GamePhase::Playing => self.turn_timeout?,
+            GamePhase::Bidding | GamePhase::Playing => self.action_deadline_remaining()?,
+            GamePhase::Dealing if self.engine.state().rules.dealer_shuffle_ritual => {
+                self.shuffle_deal_remaining()?
+            }
             _ => return None,
         };
         Some(TimerEvent {
@@ -2030,4 +2258,67 @@ fn is_transient_persist(error: &PersistError) -> bool {
         || msg.contains("pool timed out")
         || msg.contains("pool closed")
         || msg.contains("timed out")
+}
+
+/// After pause, restore remaining bid/play time with a reconnect floor.
+///
+/// `max(remaining, min(RECONNECT_TIMER_FLOOR, configured))` capped at
+/// `configured`. When timers are off (`configured` is `None`), keep the
+/// frozen remainder (or a tiny fuse if it was already zero).
+fn resume_action_timeout(remaining: Duration, configured: Option<Duration>) -> Duration {
+    match configured {
+        Some(cap) if !cap.is_zero() => {
+            let floor = RECONNECT_TIMER_FLOOR.min(cap);
+            remaining.max(floor).min(cap)
+        }
+        _ => {
+            if remaining.is_zero() {
+                Duration::from_millis(100)
+            } else {
+                remaining
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod resume_timer_tests {
+    use super::*;
+
+    #[test]
+    fn resume_keeps_remainder_above_floor() {
+        let rem = Duration::from_secs(18);
+        let out = resume_action_timeout(rem, Some(Duration::from_secs(30)));
+        assert_eq!(out, Duration::from_secs(18));
+    }
+
+    #[test]
+    fn resume_raises_short_remainder_to_floor() {
+        let rem = Duration::from_secs(3);
+        let out = resume_action_timeout(rem, Some(Duration::from_secs(30)));
+        assert_eq!(out, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn resume_raises_zero_remainder_to_floor() {
+        let out = resume_action_timeout(Duration::ZERO, Some(Duration::from_secs(30)));
+        assert_eq!(out, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn resume_floor_never_exceeds_configured_timeout() {
+        let rem = Duration::from_secs(3);
+        let out = resume_action_timeout(rem, Some(Duration::from_secs(10)));
+        assert_eq!(out, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn resume_without_configured_timeout_keeps_remainder() {
+        let rem = Duration::from_secs(4);
+        assert_eq!(resume_action_timeout(rem, None), rem);
+        assert_eq!(
+            resume_action_timeout(Duration::ZERO, None),
+            Duration::from_millis(100)
+        );
+    }
 }

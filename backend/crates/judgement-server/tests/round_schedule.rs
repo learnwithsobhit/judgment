@@ -203,6 +203,8 @@ async fn start_rejects_schedule_invalid_for_seated_count() {
                     }]),
                 },
                 dealer_total_restriction: false,
+                dealer_shuffle_ritual: false,
+                table_sfx: false,
                 open_start: false,
             tournament_id: None,
             },

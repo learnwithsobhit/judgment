@@ -291,6 +291,10 @@ class PlayerGameView {
   final PublicRoundState? round;
   final LegalActions legalActions;
   final List<RankedPlayer>? finalRanking;
+  final ShuffleRitualView? shuffle;
+
+  /// Host enabled local table SFX at room create (shuffle, card place, victory bed).
+  final bool tableSfx;
 
   PlayerGameView.fromJson(Map<String, dynamic> json)
     : gameId = json['game_id'] as String,
@@ -344,9 +348,27 @@ class PlayerGameView {
           ? null
           : (json['final_ranking'] as List)
                 .map((r) => RankedPlayer.fromJson(r as Map<String, dynamic>))
-                .toList();
+                .toList(),
+      shuffle = json['shuffle'] == null
+          ? null
+          : ShuffleRitualView.fromJson(json['shuffle'] as Map<String, dynamic>),
+      tableSfx = json['table_sfx'] as bool? ?? false;
 
   bool get isFinished => phase == 'finished';
+  bool get isShuffleRitual => shuffle != null && phase == 'dealing';
+}
+
+class ShuffleRitualView {
+  final int shuffleIndex;
+  final int animationSeed;
+  final bool canShuffle;
+  final bool canDeal;
+
+  ShuffleRitualView.fromJson(Map<String, dynamic> json)
+    : shuffleIndex = json['shuffle_index'] as int? ?? 1,
+      animationSeed = json['animation_seed'] as int? ?? 0,
+      canShuffle = json['can_shuffle'] as bool? ?? false,
+      canDeal = json['can_deal'] as bool? ?? false;
 }
 
 // ---------------------------------------------------------------------------
@@ -839,6 +861,10 @@ class RoomView {
   final RoundSchedule roundSchedule;
   final String roundScheduleSummary;
   final bool dealerTotalRestriction;
+  final bool dealerShuffleRitual;
+
+  /// Local shuffle / card-place SFX (default off).
+  final bool tableSfx;
 
   /// Creator is not seated. The first joiner is host. Start still needs Ready.
   final bool openStart;
@@ -854,10 +880,16 @@ class RoomView {
   String get paceSummary {
     final bid = bidTimeoutSeconds;
     final play = turnTimeoutSeconds;
-    if (bid == null && play == null) return 'No timers';
-    if (bid == null) return 'No bidding timer · Play ${play}s';
-    if (play == null) return 'Bidding ${bid}s · No play timer';
-    return 'Bidding ${bid}s · Play ${play}s';
+    final base = () {
+      if (bid == null && play == null) return 'No timers';
+      if (bid == null) return 'No bidding timer · Play ${play}s';
+      if (play == null) return 'Bidding ${bid}s · No play timer';
+      return 'Bidding ${bid}s · Play ${play}s';
+    }();
+    var line = base;
+    if (dealerShuffleRitual) line = '$line · Dealer shuffle on';
+    if (tableSfx) line = '$line · Table sounds on';
+    return line;
   }
 
   RoomView.fromJson(Map<String, dynamic> json)
@@ -880,6 +912,8 @@ class RoomView {
           (json['round_schedule_summary'] as String?) ?? 'Automatic',
       dealerTotalRestriction =
           json['dealer_total_restriction'] as bool? ?? false,
+      dealerShuffleRitual = json['dealer_shuffle_ritual'] as bool? ?? false,
+      tableSfx = json['table_sfx'] as bool? ?? false,
       openStart = json['open_start'] as bool? ?? false,
       tournamentId = json['tournament_id'] as String?,
       tournamentTitle = json['tournament_title'] as String?,

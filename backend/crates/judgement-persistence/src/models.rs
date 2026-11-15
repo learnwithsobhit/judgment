@@ -58,6 +58,12 @@ pub struct StoredRoom {
     pub round_schedule: RoundSchedule,
     #[serde(default)]
     pub dealer_total_restriction: bool,
+    /// Dealer shuffle ritual before each deal (default off).
+    #[serde(default)]
+    pub dealer_shuffle_ritual: bool,
+    /// Local shuffle / card-place SFX (default off).
+    #[serde(default)]
+    pub table_sfx: bool,
     /// Creator is not seated; first joiner becomes host.
     #[serde(default)]
     pub open_start: bool,

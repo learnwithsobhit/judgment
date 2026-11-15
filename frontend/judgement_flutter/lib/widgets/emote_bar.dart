@@ -65,7 +65,7 @@ class _EmoteBarState extends State<EmoteBar> {
                 IconButton(
                   tooltip: 'Soundboard',
                   onPressed: () {
-                    unawaited(widget.controller.audio.unlock());
+                    unawaited(widget.controller.unlockTableAudio());
                     setState(() {
                       _soundsOpen = !_soundsOpen;
                       if (_soundsOpen) _expanded = false;
@@ -112,9 +112,6 @@ class _EmoteBarState extends State<EmoteBar> {
                   onPressed: () {
                     final next = !widget.controller.muteReactions;
                     widget.controller.setMuteTableNoise(next);
-                    if (!next) {
-                      unawaited(widget.controller.audio.unlock());
-                    }
                   },
                   icon: Icon(
                     widget.controller.muteReactions
@@ -136,7 +133,7 @@ class _EmoteBarState extends State<EmoteBar> {
                 ),
                 onPressed: () async {
                   // Await unlock so the first clip plays inside this gesture.
-                  await widget.controller.audio.unlock();
+                  await widget.controller.unlockTableAudio();
                   widget.controller.audioQueueFullHint = null;
                   if (mounted) setState(() {});
                 },
@@ -173,8 +170,7 @@ class _EmoteBarState extends State<EmoteBar> {
                         backgroundColor: Colors.black38,
                         labelStyle: const TextStyle(color: Colors.white),
                         onPressed: () {
-                          unawaited(widget.controller.audio.unlock());
-                          widget.controller.sendSoundboard(clip.id);
+                          unawaited(widget.controller.sendSoundboard(clip.id));
                           setState(() => _localHint = null);
                         },
                       ),
@@ -289,7 +285,7 @@ class _EmoteBarState extends State<EmoteBar> {
           setState(() {});
         }
       });
-      unawaited(widget.controller.audio.unlock());
+      unawaited(widget.controller.unlockTableAudio());
     } catch (error) {
       final msg = error.toString().toLowerCase();
       final denied = msg.contains('permission') ||

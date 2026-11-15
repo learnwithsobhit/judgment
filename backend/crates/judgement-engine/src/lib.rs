@@ -16,7 +16,7 @@ pub use engine::GameEngine;
 pub use events::GameEvent;
 pub use projection::{
     CompletedTrickView, LeaderView, LegalActionView, OpponentView, PlayerGameView, PlayerScore,
-    PublicBid, PublicRoundState, RoundScoreLine, RoundScoreView,
+    PublicBid, PublicRoundState, RoundScoreLine, RoundScoreView, ShuffleRitualView,
 };
 pub use scoring::{scoring_strategy_for, ExactBidScoring, ScoringContext, ScoringStrategy};
 pub use shuffle::{DeckShuffler, SecureShuffler, SeededShuffler};

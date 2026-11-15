@@ -297,6 +297,8 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
 
   /// Classic Oh Hell: dealer cannot make totals equal tricks (default off).
   bool _dealerTotalRestriction = false;
+  bool _dealerShuffleRitual = false;
+  bool _tableSfx = false;
   bool _setupOnly = false;
   List<ManualRoundStep> _manualSteps = RoundSchedule.defaultManualForPlayers(
     6,
@@ -408,6 +410,8 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           trumpCycle: _trumpCycle,
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
+          dealerShuffleRitual: _dealerShuffleRitual,
+          tableSfx: _tableSfx,
           openStart: _setupOnly,
           tournamentId: _attachTournamentId,
         );
@@ -428,6 +432,8 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           trumpCycle: _trumpCycle,
           roundSchedule: schedule,
           dealerTotalRestriction: _dealerTotalRestriction,
+          dealerShuffleRitual: _dealerShuffleRitual,
+          tableSfx: _tableSfx,
           openStart: _setupOnly,
         );
         room = created.room;
@@ -730,6 +736,32 @@ class _LandingScreenState extends State<LandingScreen> with RouteAware {
           ),
           value: _dealerTotalRestriction,
           onChanged: (value) => setState(() => _dealerTotalRestriction = value),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text('Dealer shuffle', style: labelStyle),
+          subtitle: Text(
+            _dealerShuffleRitual
+                ? 'On — everyone watches the shuffle; dealer deals when ready'
+                : 'Off — cards deal automatically each round',
+            style: const TextStyle(fontSize: 12),
+          ),
+          value: _dealerShuffleRitual,
+          onChanged: (value) => setState(() => _dealerShuffleRitual = value),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text('Table sounds', style: labelStyle),
+          subtitle: Text(
+            _tableSfx
+                ? 'On — shuffle and card-play sounds at the table'
+                : 'Off — no shuffle or card-play sounds (default)',
+            style: const TextStyle(fontSize: 12),
+          ),
+          value: _tableSfx,
+          onChanged: (value) => setState(() => _tableSfx = value),
         ),
         const SizedBox(height: 12),
         Text('Trump', style: labelStyle),

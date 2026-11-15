@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dealer shuffle — UI preview</title>
+  <style>
+    :root {
+      --felt: #0e1512;
+      --felt-mid: #152019;
+      --ink: #e8efe9;
+      --muted: rgba(232, 239, 233, 0.62);
+      --quiet: rgba(232, 239, 233, 0.42);
+      --line: rgba(232, 239, 233, 0.14);
+      --accent: #3d6b52;
+      --accent-soft: #2a4a39;
+      --gold: #d4b06a;
+      --card-back: #1a3a4a;
+      --card-back-edge: #0d2430;
+      --danger-soft: transparent;
+      --phone-w: 390px;
+      --phone-h: 780px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+      background: #070a09;
+      color: var(--ink);
+      padding: 32px 24px 64px;
+    }
+    h1 {
+      font-weight: 600;
+      font-size: 1.25rem;
+      letter-spacing: 0.01em;
+      margin: 0 0 8px;
+    }
+    .lead {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0 0 28px;
+      max-width: 52rem;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      align-items: flex-start;
+    }
+    .shot {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .shot label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--quiet);
+    }
+    .phone {
+      width: var(--phone-w);
+      height: var(--phone-h);
+      border-radius: 28px;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(ellipse at 50% 35%, #1a2820 0%, var(--felt) 55%, #0a100e 100%);
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    }
+    .status-bar {
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 18px 0;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .content { padding: 8px 18px 18px; height: calc(100% - 28px); display: flex; flex-direction: column; }
+
+    /* —— Create / Pace —— */
+    .pace-screen { background: #121614; }
+    .pace-screen .content { gap: 6px; }
+    .screen-title { font-size: 1.35rem; font-weight: 600; margin: 12px 0 4px; }
+    .section {
+      margin-top: 22px;
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .tile {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .tile h3 { margin: 0; font-size: 0.95rem; font-weight: 600; }
+    .tile p { margin: 4px 0 0; font-size: 0.78rem; color: var(--muted); line-height: 1.35; max-width: 240px; }
+    .switch {
+      width: 46px; height: 28px; border-radius: 14px;
+      background: #3a4240; position: relative; flex-shrink: 0; margin-top: 2px;
+    }
+    .switch.on { background: var(--accent); }
+    .switch::after {
+      content: "";
+      position: absolute; top: 3px; left: 3px;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: #fff; transition: left 0.2s;
+    }
+    .switch.on::after { left: 21px; }
+    .tile.highlight h3 { color: var(--ink); }
+    .tile.highlight p { color: rgba(232, 239, 233, 0.78); }
+
+    /* —— Table shared —— */
+    .seats { position: absolute; inset: 48px 12px 150px; pointer-events: none; }
+    .seat {
+      position: absolute;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      width: 72px;
+    }
+    .seat.top { top: 0; left: 50%; transform: translateX(-50%); }
+    .seat.left { left: 4px; top: 38%; }
+    .seat.right { right: 4px; top: 38%; }
+    .seat.top-left { top: 8%; left: 10%; }
+    .seat.top-right { top: 8%; right: 10%; }
+    .avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: linear-gradient(145deg, #2c3a34, #1a2420);
+      border: 1.5px solid var(--line);
+      display: grid; place-items: center;
+      font-size: 0.7rem; color: var(--muted); font-weight: 600;
+    }
+    .seat.dealer .avatar {
+      border-color: var(--gold);
+      box-shadow: 0 0 0 2px rgba(212, 176, 106, 0.25);
+    }
+    .seat-name { font-size: 0.65rem; color: var(--muted); max-width: 70px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dealer-tag { font-size: 0.55rem; color: var(--gold); letter-spacing: 0.04em; }
+
+    .stage {
+      position: absolute;
+      left: 50%; top: 46%;
+      transform: translate(-50%, -50%);
+      width: 220px;
+      text-align: center;
+    }
+    .deck {
+      width: 72px; height: 100px;
+      margin: 0 auto 14px;
+      position: relative;
+    }
+    .card-back {
+      position: absolute; inset: 0;
+      border-radius: 7px;
+      background:
+        linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.06) 50%, transparent 60%),
+        repeating-linear-gradient(45deg, var(--card-back-edge) 0 2px, var(--card-back) 2px 8px);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.4);
+    }
+    .card-back:nth-child(1) { transform: translate(0,0) rotate(-2deg); }
+    .card-back:nth-child(2) { transform: translate(2px,-2px) rotate(1.5deg); }
+    .card-back:nth-child(3) { transform: translate(-3px,1px) rotate(-4deg); }
+    .card-back:nth-child(4) { transform: translate(4px,-1px) rotate(3deg); z-index: 2; }
+    .deck.washing .card-back:nth-child(1) { transform: translate(-18px, 4px) rotate(-18deg); }
+    .deck.washing .card-back:nth-child(2) { transform: translate(16px, -6px) rotate(14deg); }
+    .deck.washing .card-back:nth-child(3) { transform: translate(-8px, -10px) rotate(-8deg); }
+    .deck.washing .card-back:nth-child(4) { transform: translate(10px, 8px) rotate(10deg); }
+
+    .status {
+      font-size: 0.82rem;
+      font-weight: 500;
+      line-height: 1.35;
+      color: var(--ink);
+      margin: 0 0 8px;
+    }
+    .meta { font-size: 0.72rem; color: var(--muted); font-weight: 400; }
+    .countdown {
+      margin-top: 10px;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.1);
+      overflow: hidden;
+    }
+    .countdown > i {
+      display: block; height: 100%; width: 66%;
+      background: rgba(232, 239, 233, 0.45);
+      border-radius: 2px;
+    }
+    .countdown.dealer > i { width: 78%; }
+
+    .action-band {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: 12px 16px 22px;
+      background: linear-gradient(to top, rgba(8,12,10,0.95), rgba(8,12,10,0.55) 70%, transparent);
+    }
+    .caption {
+      text-align: center;
+      font-size: 0.7rem;
+      color: var(--quiet);
+      margin-bottom: 10px;
+    }
+    .btns { display: flex; gap: 10px; }
+    .btn {
+      flex: 1;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 12px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-family: inherit;
+    }
+    .btn.secondary {
+      background: rgba(255,255,255,0.06);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    .btn.primary {
+      background: var(--accent);
+      color: #f2faf5;
+    }
+    .hand-slot {
+      text-align: center;
+      font-size: 0.7rem;
+      color: var(--quiet);
+      padding: 8px 0 4px;
+    }
+    .spectator .action-band { opacity: 0.35; }
+    .spectator .btns { display: none; }
+    .spectator .caption { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Dealer shuffle — UI preview</h1>
+  <p class="lead">Premium table-game mockups for sign-off before implementation. Host toggle default off in product; create preview shows the ON state copy.</p>
+
+  <div class="row">
+    <!-- A: Create -->
+    <div class="shot" id="shot-create">
+      <label>A · Create room · Pace</label>
+      <div class="phone pace-screen">
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="content">
+          <div class="screen-title">Table settings</div>
+          <div class="section">PACE</div>
+          <div class="tile">
+            <div>
+              <h3>Bidding timer</h3>
+              <p>Off — bids wait for everyone</p>
+            </div>
+            <div class="switch" aria-hidden="true"></div>
+          </div>
+          <div class="tile">
+            <div>
+              <h3>Play timer</h3>
+              <p>Off — nobody is auto-played</p>
+            </div>
+            <div class="switch" aria-hidden="true"></div>
+          </div>
+          <div class="tile highlight">
+            <div>
+              <h3>Dealer shuffle</h3>
+              <p>On — everyone watches the shuffle; dealer deals when ready</p>
+            </div>
+            <div class="switch on" aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B: Spectator -->
+    <div class="shot" id="shot-spectator">
+      <label>B · Table · Spectator</label>
+      <div class="phone spectator">
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="seats">
+          <div class="seat top-left"><div class="avatar">DC</div><div class="seat-name">Dharmendra</div></div>
+          <div class="seat top dealer"><div class="avatar">P</div><div class="seat-name">Priya</div><div class="dealer-tag">dealer</div></div>
+          <div class="seat top-right"><div class="avatar">CJ</div><div class="seat-name">Chandan</div></div>
+          <div class="seat left"><div class="avatar">GC</div><div class="seat-name">Gagan</div></div>
+          <div class="seat right"><div class="avatar">UC</div><div class="seat-name">Upavan</div></div>
+        </div>
+        <div class="stage">
+          <div class="deck washing">
+            <div class="card-back"></div>
+            <div class="card-back"></div>
+            <div class="card-back"></div>
+            <div class="card-back"></div>
+          </div>
+          <p class="status">Round 3 · Priya is shuffling</p>
+          <div class="countdown"><i></i></div>
+          <p class="meta" style="margin-top:8px">8s · everyone can see this</p>
+        </div>
+        <div class="action-band">
+          <div class="hand-slot">Your hand deals after the shuffle</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C: Dealer -->
+    <div class="shot" id="shot-dealer">
+      <label>C · Table · Dealer (you)</label>
+      <div class="phone">
+        <div class="status-bar"><span>9:41</span><span>●●●</span></div>
+        <div class="seats">
+          <div class="seat top-left"><div class="avatar">DC</div><div class="seat-name">Dharmendra</div></div>
+          <div class="seat top"><div class="avatar">SC</div><div class="seat-name">Shobhit</div></div>
+          <div class="seat top-right"><div class="avatar">CJ</div><div class="seat-name">Chandan</div></div>
+          <div class="seat left"><div class="avatar">GC</div><div class="seat-name">Gagan</div></div>
+          <div class="seat right"><div class="avatar">UC</div><div class="seat-name">Upavan</div></div>
+        </div>
+        <div class="stage">
+          <div class="deck">
+            <div class="card-back"></div>
+            <div class="card-back"></div>
+            <div class="card-back"></div>
+            <div class="card-back"></div>
+          </div>
+          <p class="status">Waiting for you to deal<br /><span class="meta">Shuffled ×2</span></p>
+          <div class="countdown dealer"><i></i></div>
+          <p class="meta" style="margin-top:8px">10s until auto-deal</p>
+        </div>
+        <div class="action-band">
+          <div class="caption">Everyone can see this</div>
+          <div class="btns">
+            <button class="btn secondary" type="button">Shuffle again</button>
+            <button class="btn primary" type="button">Deal</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

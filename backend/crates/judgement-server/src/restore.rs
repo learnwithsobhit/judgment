@@ -79,6 +79,8 @@ pub async fn restore_from_store(
                     }),
                     round_schedule: stored.round_schedule,
                     dealer_total_restriction: stored.dealer_total_restriction,
+                    dealer_shuffle_ritual: stored.dealer_shuffle_ritual,
+                    table_sfx: stored.table_sfx,
                     open_start: stored.open_start,
                     tournament_id: stored.tournament_id,
                 },

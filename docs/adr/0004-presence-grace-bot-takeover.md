@@ -1,6 +1,6 @@
 # ADR 0004 — Phase 6 presence, grace, vacant seat, end, and restart
 
-**Status:** Amended (2026-08-13)  
+**Status:** Amended (2026-11-14)  
 **Amends:** PLAN.md §15 disconnect policy details.  
 **Supersedes:** live bot takeover after grace/leave.
 
@@ -61,6 +61,11 @@
     `{"type":"keep_alive"}` text frame every 10s so proxies that ignore Ping
     still see traffic. Keepalive is writer-local (no actor, no
     `state_version`). Clients ignore it.
+14. **Bid/play timer on resume:** freeze remaining time while paused; on
+    `GameResumed` restore
+    `max(paused_remaining, min(15s, configured_timeout))` capped at the
+    configured bid/turn timeout (`RECONNECT_TIMER_FLOOR`). Avoids rejoining
+    into an unplayable sliver without granting a full fresh timer every time.
 
 ## Consequences
 

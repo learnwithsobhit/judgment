@@ -15,6 +15,20 @@ pub enum GameEvent {
         cards_per_player: u8,
         dealer: PlayerId,
     },
+    /// Ritual on: pending deck is ready; hands are still empty.
+    ShuffleReady {
+        round_index: usize,
+        dealer: PlayerId,
+        cards_per_player: u8,
+        shuffle_index: u32,
+        animation_seed: u64,
+    },
+    /// Dealer reshuffled the pending deck (ritual on).
+    DeckShuffled {
+        round_index: usize,
+        shuffle_index: u32,
+        animation_seed: u64,
+    },
     CardsDealt {
         round_index: usize,
     },

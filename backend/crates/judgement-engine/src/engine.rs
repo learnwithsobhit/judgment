@@ -71,6 +71,8 @@ impl GameEngine {
             current_round: None,
             score_table: ScoreTable::default(),
             thinking_ms: HashMap::new(),
+            shuffle_index: 0,
+            animation_seed: 0,
         };
         Ok(Self { state, shuffler })
     }
@@ -437,48 +439,20 @@ impl GameEngine {
     // Internal transitions
     // ------------------------------------------------------------------
 
+    /// Max dealer reshuffles per round (ritual on). Soft UX + anti-spam.
+    pub const MAX_SHUFFLES_PER_ROUND: u32 = 20;
+
     fn begin_round(&mut self, round_index: usize) -> Vec<GameEvent> {
         self.state.phase = GamePhase::RoundSetup;
         let cards_per_player = self.state.rules.round_pattern.rounds()[round_index];
         let dealer = self.state.dealer;
-
-        // Deal from a freshly shuffled deck, one card at a time, starting
-        // clockwise-left of the dealer.
-        self.state.phase = GamePhase::Dealing;
-        let mut deck = full_deck();
-        self.shuffler.shuffle_deck(&mut deck);
-
         let seat_order = self.seat_order_from(self.state.next_clockwise(dealer));
-        let mut hands: HashMap<PlayerId, Vec<Card>> =
-            seat_order.iter().map(|&p| (p, Vec::new())).collect();
-        for _ in 0..cards_per_player {
-            for &player in &seat_order {
-                hands.get_mut(&player).expect("hand exists").push(
-                    deck.pop().expect("deck has enough cards for the deal"),
-                );
-            }
-        }
-
-        // Trump for the round (ADR 0003): either reveal an undealt card, or
-        // follow the fixed rotation from the chosen first trump.
-        let (trump, trump_card) = match &self.state.rules.trump_rule {
-            TrumpRule::RevealUndealtCard => {
-                let card = deck.pop().expect("at least one undealt card remains");
-                (Some(card.suit), Some(card))
-            }
-            TrumpRule::FixedSequence { suits } => {
-                (Some(suits[round_index % suits.len()]), None)
-            }
-            // Remaining trump rules are not offered by any room configuration.
-            _ => (None, None),
-        };
-        self.state.deck = deck;
-        self.state.trump = trump;
-        self.state.trump_card = trump_card;
-
-        // Bidding starts clockwise-left of the dealer and ends with the dealer.
         let bidding_order = seat_order.clone();
         let first_bidder = bidding_order[0];
+
+        // Empty hands until deal commits (ritual) or filled immediately (off).
+        let hands: HashMap<PlayerId, Vec<Card>> =
+            seat_order.iter().map(|&p| (p, Vec::new())).collect();
         self.state.current_round = Some(RoundState {
             round_index,
             cards_per_player,
@@ -487,17 +461,179 @@ impl GameEngine {
             hands,
             current_trick: Vec::new(),
             completed_tricks: Vec::new(),
-            current_turn: first_bidder,
+            current_turn: if self.state.rules.dealer_shuffle_ritual {
+                dealer
+            } else {
+                first_bidder
+            },
             tricks_won: HashMap::new(),
         });
+        self.state.trump = None;
+        self.state.trump_card = None;
+        self.state.phase = GamePhase::Dealing;
+
+        let mut events = vec![GameEvent::RoundStarted {
+            round_index,
+            cards_per_player,
+            dealer,
+        }];
+
+        self.prepare_pending_deck(1);
+        if self.state.rules.dealer_shuffle_ritual {
+            events.push(GameEvent::ShuffleReady {
+                round_index,
+                dealer,
+                cards_per_player,
+                shuffle_index: self.state.shuffle_index,
+                animation_seed: self.state.animation_seed,
+            });
+            events
+        } else {
+            // Instant path restores first-bidder as current turn inside commit.
+            if let Some(round) = self.state.current_round.as_mut() {
+                round.current_turn = first_bidder;
+            }
+            events.extend(self.commit_pending_deal());
+            events
+        }
+    }
+
+    fn prepare_pending_deck(&mut self, shuffle_index: u32) {
+        let mut deck = full_deck();
+        self.shuffler.shuffle_deck(&mut deck);
+        self.state.deck = deck;
+        self.state.shuffle_index = shuffle_index;
+        // Cosmetic only — clients sync motion; card order is `state.deck`.
+        self.state.animation_seed = self
+            .state
+            .version
+            .wrapping_mul(1_000_003)
+            .wrapping_add(u64::from(shuffle_index))
+            .wrapping_add(0x9e37_79b9_7f4a_7c15);
+    }
+
+    /// Dealer reshuffles the pending deck while phase is `Dealing` (ritual on).
+    pub fn reshuffle_deck(&mut self, player_id: PlayerId) -> Result<Vec<GameEvent>, GameError> {
+        if self.state.phase != GamePhase::Dealing || !self.state.rules.dealer_shuffle_ritual {
+            return Err(GameError::WrongPhase);
+        }
+        if !self.state.contains_player(player_id) {
+            return Err(GameError::PlayerNotInGame);
+        }
+        if player_id != self.state.dealer {
+            return Err(GameError::NotYourTurn);
+        }
+        if self.state.shuffle_index >= Self::MAX_SHUFFLES_PER_ROUND {
+            return Err(GameError::WrongPhase);
+        }
+        let round_index = self
+            .state
+            .current_round
+            .as_ref()
+            .expect("dealing requires a round")
+            .round_index;
+        let next = self.state.shuffle_index + 1;
+        self.prepare_pending_deck(next);
+        self.state.version += 1;
+        Ok(vec![GameEvent::DeckShuffled {
+            round_index,
+            shuffle_index: self.state.shuffle_index,
+            animation_seed: self.state.animation_seed,
+        }])
+    }
+
+    /// Dealer commits the pending deck into hands and enters bidding.
+    pub fn deal_cards(&mut self, player_id: PlayerId) -> Result<Vec<GameEvent>, GameError> {
+        if self.state.phase != GamePhase::Dealing || !self.state.rules.dealer_shuffle_ritual {
+            return Err(GameError::WrongPhase);
+        }
+        if !self.state.contains_player(player_id) {
+            return Err(GameError::PlayerNotInGame);
+        }
+        if player_id != self.state.dealer {
+            return Err(GameError::NotYourTurn);
+        }
+        let events = self.commit_pending_deal();
+        self.state.version += 1;
+        Ok(events)
+    }
+
+    /// Auto-deal (timeout / vacant dealer). Same commit as [`Self::deal_cards`].
+    pub fn auto_deal_cards(&mut self) -> Result<Vec<GameEvent>, GameError> {
+        if self.state.phase != GamePhase::Dealing || !self.state.rules.dealer_shuffle_ritual {
+            return Err(GameError::WrongPhase);
+        }
+        if self.state.deck.is_empty() {
+            self.prepare_pending_deck(self.state.shuffle_index.max(1));
+        }
+        let events = self.commit_pending_deal();
+        self.state.version += 1;
+        Ok(events)
+    }
+
+    fn commit_pending_deal(&mut self) -> Vec<GameEvent> {
+        let round_index = self
+            .state
+            .current_round
+            .as_ref()
+            .expect("deal requires a round")
+            .round_index;
+        let cards_per_player = self
+            .state
+            .current_round
+            .as_ref()
+            .expect("deal requires a round")
+            .cards_per_player;
+        let dealer = self.state.dealer;
+
+        // Pending deck should already be shuffled; if empty (restore edge), shuffle now.
+        if self.state.deck.len() < 52 {
+            self.prepare_pending_deck(self.state.shuffle_index.max(1));
+        }
+        let mut deck = std::mem::take(&mut self.state.deck);
+        let seat_order = self.seat_order_from(self.state.next_clockwise(dealer));
+        {
+            let round = self.state.current_round.as_mut().expect("deal requires a round");
+            for hand in round.hands.values_mut() {
+                hand.clear();
+            }
+            for _ in 0..cards_per_player {
+                for &player in &seat_order {
+                    round.hands.get_mut(&player).expect("hand exists").push(
+                        deck.pop().expect("deck has enough cards for the deal"),
+                    );
+                }
+            }
+        }
+
+        let (trump, trump_card) = match &self.state.rules.trump_rule {
+            TrumpRule::RevealUndealtCard => {
+                let card = deck.pop().expect("at least one undealt card remains");
+                (Some(card.suit), Some(card))
+            }
+            TrumpRule::FixedSequence { suits } => {
+                (Some(suits[round_index % suits.len()]), None)
+            }
+            _ => (None, None),
+        };
+        self.state.deck = deck;
+        self.state.trump = trump;
+        self.state.trump_card = trump_card;
+        self.state.shuffle_index = 0;
+        self.state.animation_seed = 0;
+        {
+            let round = self.state.current_round.as_mut().expect("deal requires a round");
+            round.current_turn = round.bidding_order[0];
+        }
         self.state.phase = GamePhase::Bidding;
 
-        let mut events = vec![
-            GameEvent::RoundStarted { round_index, cards_per_player, dealer },
-            GameEvent::CardsDealt { round_index },
-        ];
+        let mut events = vec![GameEvent::CardsDealt { round_index }];
         if let Some(trump) = trump {
-            events.push(GameEvent::TrumpSelected { round_index, trump, trump_card });
+            events.push(GameEvent::TrumpSelected {
+                round_index,
+                trump,
+                trump_card,
+            });
         }
         events
     }

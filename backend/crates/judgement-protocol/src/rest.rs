@@ -132,6 +132,14 @@ pub struct CreateRoomRequest {
     /// Default `false` — matching totals are allowed.
     #[serde(default)]
     pub dealer_total_restriction: bool,
+    /// When true, dealer shuffles in view each round before dealing.
+    /// Default `false` — cards deal automatically.
+    #[serde(default)]
+    pub dealer_shuffle_ritual: bool,
+    /// When true, clients play shuffle / card-place SFX.
+    /// Default `false` — quiet until the host enables it.
+    #[serde(default)]
+    pub table_sfx: bool,
     /// Organizer is not seated. The first joiner becomes host. Start still
     /// needs at least 3 ready players; the table does not have to be full.
     #[serde(default)]
@@ -257,6 +265,12 @@ pub struct RoomView {
     /// Classic dealer bid restriction (default off).
     #[serde(default)]
     pub dealer_total_restriction: bool,
+    /// Dealer shuffle ritual before each deal (default off).
+    #[serde(default)]
+    pub dealer_shuffle_ritual: bool,
+    /// Local shuffle / card-place SFX (default off).
+    #[serde(default)]
+    pub table_sfx: bool,
     /// True when the creator is not playing. The first joiner is host.
     #[serde(default)]
     pub open_start: bool,

@@ -589,6 +589,7 @@ Cosmetic engagement (avatars, reactions, cartoon text blasts) is presentation-on
 | [0003](adr/0003-table-size-timer-trump-options.md) | Table options | 3–8 seats, timer, trump, schedules |
 | [0004](adr/0004-presence-grace-bot-takeover.md) | Presence | Grace, bots, token rotation |
 | [0005](adr/0005-scheduled-game-events.md) | Scheduled events | Meetup RSVP → lobby |
+| [0008](adr/0008-dealer-shuffle-ritual.md) | Dealer shuffle ritual | Optional Pace flag; shared wash; auto-deal |
 
 ---
 

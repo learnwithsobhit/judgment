@@ -144,6 +144,8 @@ class ApiClient {
     List<String>? trumpCycle,
     RoundSchedule? roundSchedule,
     bool dealerTotalRestriction = false,
+    bool dealerShuffleRitual = false,
+    bool tableSfx = false,
     bool openStart = false,
     String? tournamentId,
   }) async {
@@ -155,6 +157,8 @@ class ApiClient {
       if (trumpCycle == null) 'first_trump': ?firstTrump,
       'round_schedule': ?roundSchedule?.toJson(),
       'dealer_total_restriction': dealerTotalRestriction,
+      'dealer_shuffle_ritual': dealerShuffleRitual,
+      'table_sfx': tableSfx,
       if (openStart) 'open_start': true,
       if (tournamentId != null) 'tournament_id': tournamentId,
     });

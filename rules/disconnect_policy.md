@@ -17,3 +17,7 @@ paused. Options:
 Host migration applies when the host disconnects (and `host_session` is
 synced). A non-zero grace (legacy) still allows short reconnect-before-vacant;
 see ADR 0004.
+
+When the table unfreezes, any active bid/play timer resumes from the frozen
+remainder, floored at **15 seconds** (and never above the room’s configured
+timeout), so a rejoin does not leave only a sliver of time to act.

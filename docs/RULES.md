@@ -68,9 +68,14 @@ There is no ranking across suits except via the trump and lead-suit rules.
 ## Dealing and trump
 
 1. The server shuffles the full deck with secure randomness (seeded in tests).
-2. Each player is dealt the round's card count, one at a time, starting
+2. **Dealer shuffle** (optional, **off by default**): when the host enables it
+   at room create, every seat sees a shared shuffle stage before hands are
+   dealt. The dealer may reshuffle or tap **Deal**; if they idle or leave, the
+   server auto-deals so the table never stalls. With the option off, shuffle
+   and deal are immediate (no ritual UI). See ADR 0008.
+3. Each player is dealt the round's card count, one at a time, starting
    clockwise-left of the dealer.
-3. Trump for the round is decided by the room's trump mode (ADR 0003):
+4. Trump for the round is decided by the room's trump mode (ADR 0003):
    - **Revealed card** (default): one card is revealed from the undealt
      remainder; **its suit is trump** and the revealed card is out of play
      for the round.

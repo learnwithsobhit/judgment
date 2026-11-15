@@ -19,6 +19,7 @@ import '../util/game_reclaim_store.dart';
 import '../util/room_rejoin.dart';
 import '../util/score_reveal.dart';
 import '../util/session_exit_analytics.dart';
+import '../util/game_sfx.dart';
 import '../util/soundboard.dart';
 import '../util/table_audio.dart';
 
@@ -201,6 +202,17 @@ class GameController extends ChangeNotifier {
   int turnTotalMs = 1;
   int? _timerDeadlineId;
 
+  /// Brief post-ritual hand reveal window (deal-out choreography).
+  DateTime? dealRevealUntil;
+
+  /// True while the top-bar / progress timer should be shown for this phase.
+  bool get showsPhaseTimer {
+    final v = view;
+    if (v == null || v.isFinished) return false;
+    if (turnDeadline == null) return false;
+    return v.isShuffleRitual || v.phase == 'bidding' || v.phase == 'playing';
+  }
+
   /// Pause banner while a peer is within reconnect grace or a seat is vacant.
   String? pauseReason;
   DateTime? pauseUntil;
@@ -248,6 +260,7 @@ class GameController extends ChangeNotifier {
   bool muteReactions = false;
 
   final TableAudioPlayer audio = TableAudioPlayer();
+  final GameSfx sfx = GameSfx();
   bool voiceRecording = false;
   String? audioQueueFullHint;
 
@@ -266,6 +279,9 @@ class GameController extends ChangeNotifier {
       audioQueueFullHint = null;
     };
     audio.applySessionUnlock();
+    if (audio.unlocked) {
+      unawaited(sfx.unlock());
+    }
   }
 
   bool get isPaused =>
@@ -602,18 +618,26 @@ class GameController extends ChangeNotifier {
         lastRejection = retryable ? '$message (retrying may help)' : message;
         _notify();
       case TimerUpdated(:final timer):
+        final remaining = timer.remainingMs.clamp(1, 1 << 31);
+        final incomingDeadline = DateTime.now().add(
+          Duration(milliseconds: remaining),
+        );
         if (_timerDeadlineId != timer.deadlineId) {
           _timerDeadlineId = timer.deadlineId;
-          turnTotalMs = timer.remainingMs.clamp(1, 1 << 31);
-          turnDeadline = DateTime.now().add(
-            Duration(milliseconds: timer.remainingMs),
-          );
+          turnTotalMs = remaining;
+          turnDeadline = incomingDeadline;
+          _notify();
+        } else {
+          // Same deadline (resync): adopt authoritative remaining — server
+          // now reports time left, so this cannot jump back to a full window.
+          turnDeadline = incomingDeadline;
           _notify();
         }
       case GamePaused(:final reason, :final remainingMs):
         pauseReason = _humanizePauseReason(reason);
         pauseUntil = DateTime.now().add(Duration(milliseconds: remainingMs));
         turnDeadline = null;
+        _timerDeadlineId = null;
         _notify();
       case GameResumed():
         pauseReason = null;
@@ -857,6 +881,20 @@ class GameController extends ChangeNotifier {
   void _applySnapshot(PlayerGameView next) {
     final prev = view;
     final prevHistoryLen = prev?.roundHistory.length ?? 0;
+    final leftRitual = prev?.isShuffleRitual == true && !next.isShuffleRitual;
+    if (leftRitual) {
+      // Ritual TimerUpdated must not leak into bidding when bid_timeout is off.
+      turnDeadline = null;
+      _timerDeadlineId = null;
+      if (next.ownHand.isNotEmpty) {
+        dealRevealUntil = DateTime.now().add(const Duration(milliseconds: 1200));
+      }
+    } else if (!next.isShuffleRitual &&
+        next.phase != 'bidding' &&
+        next.phase != 'playing') {
+      turnDeadline = null;
+      _timerDeadlineId = null;
+    }
 
     // Trick reveal hold: when a completed trick appears (or persists), ensure
     // the client keeps showing it for at least 1.6s.
@@ -869,6 +907,13 @@ class GameController extends ChangeNotifier {
         heldCompletedTrick = incoming;
         trickBanner = '${nicknameOf(incoming.winnerId)} takes the trick';
         _armHold();
+        // Completing play clears currentTrick in the same snapshot, so the
+        // in-progress branch below never sees +1 length — fire place SFX here.
+        if (prev != null &&
+            prev.currentTrick.isNotEmpty &&
+            incoming.plays.length == prev.currentTrick.length + 1) {
+          playCardSfx();
+        }
       }
     } else if (next.currentTrick.isNotEmpty) {
       // New lead arrived — keep hold until min duration elapses.
@@ -880,6 +925,11 @@ class GameController extends ChangeNotifier {
           (_holdUntil == null || !DateTime.now().isBefore(_holdUntil!))) {
         heldCompletedTrick = null;
         trickBanner = null;
+      }
+      // One soft place per newly played card (skip first snapshot / reconnect).
+      if (prev != null &&
+          next.currentTrick.length == prev.currentTrick.length + 1) {
+        playCardSfx();
       }
     } else if (next.lastCompletedTrick == null &&
         (heldCompletedTrick == null ||
@@ -1065,6 +1115,14 @@ class GameController extends ChangeNotifier {
     _sendCommand({'type': 'play_card', 'card_id': cardId});
   }
 
+  void shuffleDeck() {
+    _sendCommand({'type': 'shuffle_deck'});
+  }
+
+  void dealCards() {
+    _sendCommand({'type': 'deal_cards'});
+  }
+
   void setAvatar(String avatarId) {
     _sendAction({'type': 'set_avatar', 'avatar_id': avatarId});
   }
@@ -1084,14 +1142,44 @@ class GameController extends ChangeNotifier {
   void setMuteTableNoise(bool muted) {
     muteReactions = muted;
     audio.muted = muted;
+    sfx.muted = muted;
     if (!muted) {
-      unawaited(audio.unlock());
+      unawaited(unlockTableAudio());
     }
     _notify();
   }
 
-  Future<void> sendSoundboard(String soundId) async {
+  /// Unlock soundboard + local game SFX under a user gesture (web autoplay).
+  Future<void> unlockTableAudio() async {
     await audio.unlock();
+    await sfx.unlock();
+  }
+
+  /// Host create-room “Table sounds” flag; default off until a snapshot says otherwise.
+  /// Gates shuffle wash, card place, and victory celebration music.
+  bool get tableSfxEnabled => view?.tableSfx ?? false;
+
+  void playShuffleSfx() {
+    if (!tableSfxEnabled) return;
+    sfx.playShuffle();
+  }
+
+  void playCardSfx() {
+    if (!tableSfxEnabled) return;
+    sfx.playCard();
+  }
+
+  void playVictorySfx() {
+    if (!tableSfxEnabled) return;
+    sfx.playVictory();
+  }
+
+  void stopVictorySfx() {
+    unawaited(sfx.stopVictory());
+  }
+
+  Future<void> sendSoundboard(String soundId) async {
+    await unlockTableAudio();
     _sendAction({'type': 'send_soundboard', 'sound_id': soundId});
   }
 
@@ -1254,6 +1342,7 @@ class GameController extends ChangeNotifier {
     _holdTimer?.cancel();
     _bannerTimer?.cancel();
     unawaited(audio.dispose());
+    unawaited(sfx.dispose());
     _closeSocket();
     super.dispose();
   }

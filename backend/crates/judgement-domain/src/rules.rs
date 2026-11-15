@@ -391,6 +391,14 @@ pub struct GameRules {
     pub bid_timeout_seconds: Option<u16>,
     pub reconnect_grace_seconds: u16,
     pub allow_bots: bool,
+    /// When true, each round holds in `Dealing` so the dealer can shuffle
+    /// visibly before committing the deal. Default off (instant deal).
+    #[serde(default)]
+    pub dealer_shuffle_ritual: bool,
+    /// When true, clients may play local shuffle / card-place SFX.
+    /// Default off — quiet tables unless the host enables it at create.
+    #[serde(default)]
+    pub table_sfx: bool,
 }
 
 impl GameRules {
@@ -422,6 +430,8 @@ impl GameRules {
             // `RECONNECT_GRACE_SECONDS` (default 30) at start — see ADR 0004.
             reconnect_grace_seconds: 0,
             allow_bots: true,
+            dealer_shuffle_ritual: false,
+            table_sfx: false,
         }
     }
 

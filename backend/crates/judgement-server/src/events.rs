@@ -738,6 +738,8 @@ pub async fn open_lobby(
         trump_cycle,
         round_schedule: round_schedule.clone(),
         dealer_total_restriction: false,
+        dealer_shuffle_ritual: false,
+        table_sfx: false,
         open_start: false,
         tournament_id: None,
     };

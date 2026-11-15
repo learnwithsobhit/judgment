@@ -111,8 +111,9 @@ impl GameStore for PostgresStore {
             INSERT INTO rooms (
                 room_id, code, host_session_id, max_players, turn_timeout_seconds,
                 bid_timeout_seconds, first_trump, trump_cycle, round_schedule,
-                dealer_total_restriction, open_start, tournament_id, phase, game_id, created_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                dealer_total_restriction, dealer_shuffle_ritual, table_sfx, open_start, tournament_id,
+                phase, game_id, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
             ON CONFLICT (room_id) DO UPDATE SET
                 host_session_id = EXCLUDED.host_session_id,
                 max_players = EXCLUDED.max_players,
@@ -122,6 +123,8 @@ impl GameStore for PostgresStore {
                 trump_cycle = EXCLUDED.trump_cycle,
                 round_schedule = EXCLUDED.round_schedule,
                 dealer_total_restriction = EXCLUDED.dealer_total_restriction,
+                dealer_shuffle_ritual = EXCLUDED.dealer_shuffle_ritual,
+                table_sfx = EXCLUDED.table_sfx,
                 open_start = EXCLUDED.open_start,
                 tournament_id = EXCLUDED.tournament_id,
                 phase = EXCLUDED.phase,
@@ -138,6 +141,8 @@ impl GameStore for PostgresStore {
         .bind(serde_json::to_value(&room.trump_cycle)?)
         .bind(serde_json::to_value(&room.round_schedule)?)
         .bind(room.dealer_total_restriction)
+        .bind(room.dealer_shuffle_ritual)
+        .bind(room.table_sfx)
         .bind(room.open_start)
         .bind(room.tournament_id)
         .bind(&room.phase)
@@ -210,7 +215,8 @@ impl GameStore for PostgresStore {
             r#"
             SELECT room_id, code, host_session_id, max_players, turn_timeout_seconds,
                    bid_timeout_seconds, first_trump, trump_cycle, round_schedule,
-                   dealer_total_restriction, open_start, tournament_id, phase, game_id, created_at
+                   dealer_total_restriction, dealer_shuffle_ritual, table_sfx, open_start, tournament_id,
+                   phase, game_id, created_at
             FROM rooms
             "#,
         )
@@ -268,6 +274,8 @@ impl GameStore for PostgresStore {
                 trump_cycle,
                 round_schedule,
                 dealer_total_restriction: row.get("dealer_total_restriction"),
+                dealer_shuffle_ritual: row.get("dealer_shuffle_ritual"),
+                table_sfx: row.get("table_sfx"),
                 open_start: row.get("open_start"),
                 tournament_id: row.get("tournament_id"),
                 phase: row.get("phase"),

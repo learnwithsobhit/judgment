@@ -28,6 +28,10 @@ pub enum ClientCommand {
     Ready,
     Unready,
     StartGame,
+    /// Dealer reshuffles pending deck (ritual on, phase dealing).
+    ShuffleDeck,
+    /// Dealer commits deal (ritual on, phase dealing).
+    DealCards,
     PlaceBid {
         bid: u8,
     },
@@ -271,6 +275,8 @@ mod tests {
             ClientCommand::Ready,
             ClientCommand::Unready,
             ClientCommand::StartGame,
+            ClientCommand::ShuffleDeck,
+            ClientCommand::DealCards,
             ClientCommand::PlaceBid { bid: 3 },
             ClientCommand::PlayCard {
                 card_id: CardId {

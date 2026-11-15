@@ -86,6 +86,7 @@ impl Harness {
             serde_json::Value::Null, // omit key via helper body builder
             seed,
             true,
+            false,
         )
         .await;
     }
@@ -98,12 +99,14 @@ impl Harness {
         bid_timeout_json: serde_json::Value,
         seed: u64,
         omit_bid_key: bool,
+        dealer_shuffle_ritual: bool,
     ) {
         let host = self.create_session("Host").await;
         // Explicit descending 8→1 so command-count assertions stay stable
         // (Automatic house lists are longer, e.g. 12 rounds for 6 players).
         let mut body = serde_json::json!({
             "turn_timeout_seconds": turn_timeout_seconds,
+            "dealer_shuffle_ritual": dealer_shuffle_ritual,
             "round_schedule": {
                 "mode": "manual",
                 "steps": [
@@ -257,6 +260,18 @@ impl Harness {
                     .all(|c| c.view.as_ref().is_some_and(|v| v.state_version == max_v));
                 if aligned {
                     if self.phase() == GamePhase::Finished || self.current_actor().is_some() {
+                        return;
+                    }
+                    // Dealer shuffle ritual: waiting on Deal, no bids yet.
+                    if self.phase() == GamePhase::Dealing
+                        && self.clients.iter().any(|c| {
+                            c.view.as_ref().is_some_and(|v| {
+                                v.shuffle
+                                    .as_ref()
+                                    .is_some_and(|s| s.can_deal || s.can_shuffle)
+                            })
+                        })
+                    {
                         return;
                     }
                 }
@@ -425,6 +440,50 @@ impl Harness {
 
     fn phase(&self) -> GamePhase {
         self.clients[0].view.as_ref().unwrap().phase
+    }
+
+    async fn accept_command(&mut self, index: usize, action: ClientCommand) {
+        let envelope = self.envelope(index, action);
+        self.send_envelope(index, &envelope).await;
+        let mut accepted = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !accepted && tokio::time::Instant::now() < deadline {
+            for message in self.read_until_snapshot(index).await {
+                match message {
+                    ServerMessage::CommandAccepted { action_id, .. } => {
+                        assert_eq!(action_id, envelope.action_id);
+                        accepted = true;
+                    }
+                    ServerMessage::CommandRejected { message, .. } => {
+                        panic!("unexpected reject: {message}");
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(accepted, "expected CommandAccepted");
+        let target = self.clients[index]
+            .view
+            .as_ref()
+            .map(|v| v.state_version)
+            .unwrap_or(0);
+        for other in 0..self.clients.len() {
+            if other == index {
+                continue;
+            }
+            let peer_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            while tokio::time::Instant::now() < peer_deadline {
+                let peer_v = self.clients[other]
+                    .view
+                    .as_ref()
+                    .map(|v| v.state_version)
+                    .unwrap_or(0);
+                if peer_v >= target {
+                    break;
+                }
+                self.read_until_snapshot(other).await;
+            }
+        }
     }
 }
 
@@ -613,6 +672,7 @@ async fn bid_timer_only_auto_bids_then_waits_in_playing() {
             serde_json::json!(1),
             12,
             false,
+            false,
         )
         .await;
     harness.connect_all().await;
@@ -654,6 +714,7 @@ async fn play_timer_only_does_not_auto_bid() {
             Some(1),
             serde_json::Value::Null,
             13,
+            false,
             false,
         )
         .await;
@@ -736,4 +797,175 @@ async fn create_room_timeout_tri_state() {
         .unwrap();
     assert_eq!(independent.room.turn_timeout_seconds, Some(15));
     assert_eq!(independent.room.bid_timeout_seconds, Some(60));
+}
+
+#[tokio::test]
+async fn dealer_shuffle_ritual_shuffle_twice_then_deal() {
+    let addr = spawn_server().await;
+    let mut harness = Harness::new(addr).await;
+    harness
+        .start_six_player_game_with_timeouts(
+            Some(300),
+            serde_json::json!(300),
+            21,
+            false,
+            true,
+        )
+        .await;
+    harness.connect_all().await;
+
+    assert_eq!(harness.phase(), GamePhase::Dealing);
+    for client in &harness.clients {
+        let view = client.view.as_ref().unwrap();
+        assert!(view.own_hand.is_empty(), "hands locked until Deal");
+        assert!(view.shuffle.is_some());
+    }
+
+    let dealer_idx = harness
+        .clients
+        .iter()
+        .position(|c| {
+            c.view
+                .as_ref()
+                .is_some_and(|v| v.shuffle.as_ref().is_some_and(|s| s.can_deal))
+        })
+        .expect("dealer has ritual controls");
+    let non_dealer = (0..harness.clients.len())
+        .find(|&i| i != dealer_idx)
+        .unwrap();
+
+    // Non-dealer Deal must reject (auth is engine-side; rate-limit can mute Shuffle).
+    let spam = harness.envelope(non_dealer, ClientCommand::DealCards);
+    harness.send_envelope(non_dealer, &spam).await;
+    let mut rejected = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        match harness.read_message(non_dealer).await {
+            ServerMessage::CommandRejected { .. } => {
+                rejected = true;
+                break;
+            }
+            ServerMessage::StateSnapshot { view, .. } => {
+                harness.clients[non_dealer].view = Some(view);
+            }
+            _ => {}
+        }
+    }
+    assert!(rejected, "non-dealer DealCards must reject");
+
+    // Respect server min shuffle interval after initial ShuffleReady (~800ms).
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    harness
+        .accept_command(dealer_idx, ClientCommand::ShuffleDeck)
+        .await;
+    let idx_after = harness.clients[dealer_idx]
+        .view
+        .as_ref()
+        .unwrap()
+        .shuffle
+        .as_ref()
+        .unwrap()
+        .shuffle_index;
+    assert!(idx_after >= 2, "reshuffle bumps shuffle_index");
+
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    harness
+        .accept_command(dealer_idx, ClientCommand::ShuffleDeck)
+        .await;
+    // Rate-limit window: second Shuffle must ack (not silent) so clients
+    // do not wedge pendingActionId.
+    let spam = harness.envelope(dealer_idx, ClientCommand::ShuffleDeck);
+    harness.send_envelope(dealer_idx, &spam).await;
+    let mut rate_acked = false;
+    let rate_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < rate_deadline {
+        match harness.read_message(dealer_idx).await {
+            ServerMessage::CommandAccepted { action_id, .. } => {
+                assert_eq!(action_id, spam.action_id);
+                rate_acked = true;
+                break;
+            }
+            ServerMessage::CommandRejected { message, .. } => {
+                panic!("rate-limited shuffle should ack, not reject: {message}");
+            }
+            ServerMessage::StateSnapshot { view, .. } => {
+                harness.clients[dealer_idx].view = Some(view);
+            }
+            _ => {}
+        }
+    }
+    assert!(rate_acked, "rate-limited ShuffleDeck must CommandAccepted");
+
+    harness
+        .accept_command(dealer_idx, ClientCommand::DealCards)
+        .await;
+
+    assert_eq!(harness.phase(), GamePhase::Bidding);
+    for client in &harness.clients {
+        let view = client.view.as_ref().unwrap();
+        assert!(view.shuffle.is_none());
+        assert!(!view.own_hand.is_empty());
+    }
+
+    // One legal bid to prove the table progressed.
+    harness.step().await;
+    assert!(harness.phase() == GamePhase::Bidding || harness.phase() == GamePhase::Playing);
+}
+
+#[tokio::test]
+async fn dealer_shuffle_ritual_auto_deals_when_dealer_disconnects() {
+    // Zero grace so disconnect marks vacant immediately and auto-deals.
+    std::env::set_var("RECONNECT_GRACE_SECONDS", "0");
+    let addr = spawn_server().await;
+    let mut harness = Harness::new(addr).await;
+    harness
+        .start_six_player_game_with_timeouts(
+            Some(300),
+            serde_json::json!(300),
+            22,
+            false,
+            true,
+        )
+        .await;
+    harness.connect_all().await;
+    assert_eq!(harness.phase(), GamePhase::Dealing);
+
+    let dealer_idx = harness
+        .clients
+        .iter()
+        .position(|c| {
+            c.view
+                .as_ref()
+                .is_some_and(|v| v.shuffle.as_ref().is_some_and(|s| s.can_deal))
+        })
+        .unwrap();
+
+    // Drop dealer socket — vacancy + immediate ritual auto-deal.
+    {
+        let ws = harness.clients[dealer_idx].ws.take().unwrap();
+        drop(ws);
+    }
+
+    let spectator = if dealer_idx == 0 { 1 } else { 0 };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        let _ = tokio::time::timeout(Duration::from_millis(200), async {
+            harness.read_until_snapshot(spectator).await;
+        })
+        .await;
+        if matches!(
+            harness.clients[spectator].view.as_ref().map(|v| v.phase),
+            Some(GamePhase::Bidding)
+        ) {
+            break;
+        }
+    }
+    assert_eq!(
+        harness.clients[spectator].view.as_ref().unwrap().phase,
+        GamePhase::Bidding,
+        "vacant dealer must auto-deal out of ritual"
+    );
+    let view = harness.clients[spectator].view.as_ref().unwrap();
+    assert!(view.shuffle.is_none());
+    assert!(!view.own_hand.is_empty());
 }
