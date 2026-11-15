@@ -406,6 +406,28 @@ class GameController extends ChangeNotifier {
     return rank;
   }
 
+  /// Special seat ornament (e.g. peacock_kalgi) for a player at this table.
+  String? seatOrnamentOf(String playerId) {
+    final current = view;
+    if (current == null) return null;
+    if (playerId == myPlayerId) return current.ownSeatOrnament;
+    return current.opponents
+        .where((opponent) => opponent.playerId == playerId)
+        .map((opponent) => opponent.seatOrnament)
+        .firstOrNull;
+  }
+
+  bool signedInOf(String playerId) {
+    final current = view;
+    if (current == null) return false;
+    if (playerId == myPlayerId) return current.ownSignedIn;
+    return current.opponents
+            .where((opponent) => opponent.playerId == playerId)
+            .map((opponent) => opponent.signedIn)
+            .firstOrNull ??
+        false;
+  }
+
   String nicknameOf(String playerId) {
     if (playerId == myPlayerId) return myNickname;
     final opponent = view?.opponents.where((o) => o.playerId == playerId);

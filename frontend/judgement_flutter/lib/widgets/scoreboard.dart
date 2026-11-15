@@ -33,6 +33,7 @@ class Scoreboard extends StatelessWidget {
         avatarId: view.ownAvatarId,
         photoUrl: view.ownPhotoUrl,
         boardRank: view.ownLadderRank,
+        seatOrnament: view.ownSeatOrnament,
         signedIn: view.ownSignedIn,
         bid: bidsByPlayer[controller.myPlayerId] ?? view.ownBid,
         tricksWon: view.ownTricksWon,
@@ -46,6 +47,7 @@ class Scoreboard extends StatelessWidget {
           avatarId: o.avatarId,
           photoUrl: o.photoUrl,
           boardRank: o.ladderRank,
+          seatOrnament: o.seatOrnament,
           signedIn: o.signedIn,
           bid: o.bid,
           tricksWon: o.tricksWon,
@@ -191,6 +193,7 @@ class Scoreboard extends StatelessWidget {
           radius: 12,
           highlight: isLeader,
           boardRank: row.boardRank,
+          seatOrnament: row.seatOrnament,
           signedIn: row.signedIn,
         ),
         const SizedBox(width: 6),
@@ -245,6 +248,7 @@ class _PlayerRow {
   final String? avatarId;
   final String? photoUrl;
   final int? boardRank;
+  final String? seatOrnament;
   final bool signedIn;
   final int? bid;
   final int tricksWon;
@@ -257,6 +261,7 @@ class _PlayerRow {
     required this.avatarId,
     this.photoUrl,
     required this.boardRank,
+    this.seatOrnament,
     required this.signedIn,
     required this.bid,
     required this.tricksWon,

@@ -390,6 +390,8 @@ class _PodiumSeat extends StatelessWidget {
             radius: elevate ? 28 : 22,
             highlight: ranked.rank == 1,
             boardRank: controller.boardRankOf(ranked.playerId),
+            seatOrnament: controller.seatOrnamentOf(ranked.playerId),
+            signedIn: controller.signedInOf(ranked.playerId),
           ),
           const SizedBox(height: 8),
           Text(
@@ -491,6 +493,8 @@ class _StandingsTable extends StatelessWidget {
                           radius: 12,
                           highlight: ranked.rank == 1,
                           boardRank: controller.boardRankOf(ranked.playerId),
+                          seatOrnament: controller.seatOrnamentOf(ranked.playerId),
+                          signedIn: controller.signedInOf(ranked.playerId),
                         ),
                         const SizedBox(width: 8),
                         Text(

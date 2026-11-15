@@ -88,6 +88,8 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
               String? avatar,
               String? photoUrl,
               int? boardRank,
+              String? seatOrnament,
+              bool signedIn,
               bool winner,
             })
           >[
@@ -97,6 +99,8 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
               avatar: view.ownAvatarId,
               photoUrl: view.ownPhotoUrl,
               boardRank: view.ownLadderRank,
+              seatOrnament: view.ownSeatOrnament,
+              signedIn: view.ownSignedIn,
               winner: winnerIds.contains(widget.controller.myPlayerId),
             ),
             for (final o in view.opponents)
@@ -106,6 +110,8 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
                 avatar: o.avatarId,
                 photoUrl: o.photoUrl,
                 boardRank: o.ladderRank,
+                seatOrnament: o.seatOrnament,
+                signedIn: o.signedIn,
                 winner: winnerIds.contains(o.playerId),
               ),
           ]
@@ -195,6 +201,8 @@ class _VictoryCelebrationState extends State<VictoryCelebration>
                               avatarId: seats[i].avatar,
                               photoUrl: seats[i].photoUrl,
                               boardRank: seats[i].boardRank,
+                              seatOrnament: seats[i].seatOrnament,
+                              signedIn: seats[i].signedIn,
                               isWinner: seats[i].winner,
                               phase: _dance.value,
                               index: i,
@@ -301,6 +309,8 @@ class _DancingSeat extends StatelessWidget {
   final String? avatarId;
   final String? photoUrl;
   final int? boardRank;
+  final String? seatOrnament;
+  final bool signedIn;
   final bool isWinner;
   final double phase;
   final int index;
@@ -310,6 +320,8 @@ class _DancingSeat extends StatelessWidget {
     required this.avatarId,
     this.photoUrl,
     required this.boardRank,
+    this.seatOrnament,
+    this.signedIn = false,
     required this.isWinner,
     required this.phase,
     required this.index,
@@ -356,13 +368,15 @@ class _DancingSeat extends StatelessWidget {
                     radius: 28,
                     highlight: isWinner,
                     boardRank: boardRank,
+                    seatOrnament: seatOrnament,
+                    signedIn: signedIn,
                   ),
-                  if (isWinner && boardRank == null)
+                  if (isWinner && boardRank == null && seatOrnament == null)
                     const Positioned(
                       top: -10,
                       child: Text('👑', style: TextStyle(fontSize: 22)),
                     ),
-                  if (isWinner && boardRank != null)
+                  if (isWinner && (boardRank != null || seatOrnament != null))
                     const Positioned(
                       top: -4,
                       left: -4,

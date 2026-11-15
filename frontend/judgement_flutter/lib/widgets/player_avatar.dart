@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../util/avatar_pack.dart';
 import '../util/photo_url.dart';
+import '../util/seat_ornament.dart';
 
 /// Tests replace NetworkImage so widget tests never hit the network.
 @visibleForTesting
@@ -26,6 +27,9 @@ class PlayerAvatar extends StatefulWidget {
   /// 1, 2, or 3 on the overall board. Anyone else has no cap.
   final int? boardRank;
 
+  /// Special seat ornament (e.g. peacock_kalgi). Takes priority over [boardRank].
+  final String? seatOrnament;
+
   /// Account on this seat. Not online/offline — guests stay without a badge.
   final bool signedIn;
 
@@ -41,6 +45,7 @@ class PlayerAvatar extends StatefulWidget {
     this.photoUrl,
     this.onPhotoResolved,
     this.boardRank,
+    this.seatOrnament,
     this.signedIn = false,
   });
 
@@ -138,9 +143,16 @@ class _PlayerAvatarState extends State<PlayerAvatar>
             : fallback,
       ),
     );
-    final rank = _capRank(widget.boardRank);
+    final ornament = resolveSeatOrnament(
+      serverOrnament: widget.seatOrnament,
+      nicknameOrDisplay: widget.nickname,
+      signedIn: widget.signedIn,
+    );
+    final showPeacock = ornament == peacockKalgi;
+    final rank = showPeacock ? null : _capRank(widget.boardRank);
     final badgeSize = (widget.radius * 0.72).clamp(12.0, 18.0);
     final capHeight = widget.radius * _capHeightFactor;
+    final kalgiHeight = widget.radius * _kalgiHeightFactor;
     // Portrait padding is the top of the circle. Sit the brim on that rim.
     const portraitPad = 3.0;
     final child = ScaleTransition(
@@ -150,7 +162,17 @@ class _PlayerAvatarState extends State<PlayerAvatar>
         alignment: Alignment.topCenter,
         children: [
           portrait,
-          if (rank != null)
+          if (showPeacock)
+            Positioned(
+              top: portraitPad - kalgiHeight,
+              left: 0,
+              right: 0,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: _PeacockKalgi(radius: widget.radius),
+              ),
+            )
+          else if (rank != null)
             Positioned(
               top: portraitPad - capHeight,
               left: 0,
@@ -275,6 +297,109 @@ int? _capRank(int? rank) {
 
 const _capWidthFactor = 1.45;
 const _capHeightFactor = 1.07;
+const _kalgiWidthFactor = 1.55;
+const _kalgiHeightFactor = 1.55;
+
+/// F1: real peacock plume + slim gold clasp for allowlisted signed-in seats.
+class _PeacockKalgi extends StatelessWidget {
+  final double radius;
+
+  const _PeacockKalgi({required this.radius});
+
+  @override
+  Widget build(BuildContext context) {
+    final w = radius * _kalgiWidthFactor;
+    final h = radius * _kalgiHeightFactor;
+    final claspH = (radius * 0.28).clamp(6.0, 12.0);
+    return Tooltip(
+      message: 'Special kalgi',
+      child: Semantics(
+        label: 'Special kalgi',
+        child: SizedBox(
+          width: w,
+          height: h,
+          child: Stack(
+            alignment: Alignment.bottomCenter,
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: claspH * 0.35,
+                child: Image.asset(
+                  'assets/badges/peacock_kalgi_tip.png',
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
+              Positioned(
+                bottom: 0,
+                child: CustomPaint(
+                  size: Size(w * 0.52, claspH),
+                  painter: const _KalgiClaspPainter(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _KalgiClaspPainter extends CustomPainter {
+  const _KalgiClaspPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final r = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, h * 0.15, w, h * 0.7),
+      Radius.circular(h * 0.25),
+    );
+    final gold = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color(0xFFFFF3C4), Color(0xFFF6C431), Color(0xFF8C5E08)],
+      ).createShader(Rect.fromLTWH(0, 0, w, h));
+    canvas.drawRRect(r, gold);
+    canvas.drawRRect(
+      r,
+      Paint()
+        ..color = const Color(0xFF1A120C)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = (h * 0.12).clamp(1.0, 1.6),
+    );
+    canvas.drawLine(
+      Offset(w * 0.12, h * 0.38),
+      Offset(w * 0.88, h * 0.38),
+      Paint()
+        ..color = const Color(0xFFFFF8D0).withValues(alpha: 0.55)
+        ..strokeWidth = 1,
+    );
+    final jewel = Offset(w * 0.5, h * 0.5);
+    canvas.drawCircle(jewel, h * 0.22, Paint()..color = const Color(0xFFC62828));
+    canvas.drawCircle(
+      jewel,
+      h * 0.22,
+      Paint()
+        ..color = const Color(0xFF1A120C)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+    canvas.drawCircle(
+      jewel.translate(-h * 0.06, -h * 0.06),
+      h * 0.07,
+      Paint()..color = const Color(0xFFFFCDD2).withValues(alpha: 0.7),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _KalgiClaspPainter oldDelegate) => false;
+}
 
 /// Painted cap for overall 1st, 2nd, or 3rd. It sits on the top rim of the
 /// portrait and does not change the avatar's layout size.

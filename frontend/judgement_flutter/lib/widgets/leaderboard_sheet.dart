@@ -1049,6 +1049,8 @@ class _BoardRow extends StatelessWidget {
           nickname: row.displayName,
           radius: 16,
           boardRank: row.rank,
+          // Leaderboard rows are accounts; resolve Aadarsh by display name.
+          signedIn: true,
         ),
         const SizedBox(width: 8),
         Expanded(

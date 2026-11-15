@@ -22,6 +22,7 @@ pub mod rag_boot;
 pub mod reaper;
 pub mod restore;
 pub mod routes;
+pub mod seat_ornament;
 pub mod state;
 pub mod tournaments;
 pub mod ws;

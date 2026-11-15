@@ -215,6 +215,8 @@ class _SharePodiumSeat extends StatelessWidget {
             radius: elevate ? 28 : 22,
             highlight: elevate,
             boardRank: controller.boardRankOf(ranked.playerId),
+            seatOrnament: controller.seatOrnamentOf(ranked.playerId),
+            signedIn: controller.signedInOf(ranked.playerId),
           ),
           const SizedBox(height: 6),
           Text(

@@ -306,6 +306,9 @@ pub struct SeatView {
     /// True when this seat's session is bound to an account. Never send user_id.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub signed_in: bool,
+    /// Special seat ornament id (e.g. peacock_kalgi). Never send user_id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_ornament: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

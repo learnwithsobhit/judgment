@@ -28,6 +28,9 @@ pub struct OpponentView {
     /// True when this seat's session is bound to an account. Server fills it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub signed_in: bool,
+    /// Special seat ornament id (e.g. peacock_kalgi). Server fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_ornament: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +124,9 @@ pub struct PlayerGameView {
     /// True when the viewer's session is bound to an account. Server fills it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub own_signed_in: bool,
+    /// Special seat ornament id for the viewer. Server fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_seat_ornament: Option<String>,
     pub opponents: Vec<OpponentView>,
     pub current_trick: Vec<PlayedCard>,
     /// Present after a trick completes until the next card is led.
@@ -195,6 +201,7 @@ pub(crate) fn project_for(
             photo_url: p.photo_url.clone(),
             ladder_rank: None,
             signed_in: false,
+            seat_ornament: None,
         })
         .collect();
 
@@ -250,6 +257,7 @@ pub(crate) fn project_for(
         own_photo_url: own_player.photo_url.clone(),
         own_ladder_rank: None,
         own_signed_in: false,
+        own_seat_ornament: None,
         opponents,
         current_trick,
         last_completed_trick,

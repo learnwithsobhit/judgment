@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Peacock feather badge options — Aadarsh</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      color: #f4efe6;
+      background:
+        radial-gradient(ellipse at 50% 12%, #1a5c44 0%, transparent 48%),
+        linear-gradient(160deg, #0f3d2e 0%, #07251c 100%);
+      padding: 28px 16px 48px;
+    }
+    h1 {
+      text-align: center;
+      font-family: Georgia, "Iowan Old Style", serif;
+      color: #ffc857;
+      font-size: 1.28rem;
+      margin: 0 0 6px;
+    }
+    .sub {
+      text-align: center;
+      opacity: 0.72;
+      font-size: 0.88rem;
+      max-width: 640px;
+      margin: 0 auto 22px;
+      line-height: 1.4;
+    }
+    .grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      justify-content: center;
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+    .card {
+      width: 210px;
+      background: rgba(0,0,0,0.22);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 16px 12px 14px;
+      text-align: center;
+    }
+    .code {
+      font-size: 0.68rem;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      opacity: 0.55;
+      margin-bottom: 8px;
+    }
+    .stage {
+      position: relative;
+      width: 120px;
+      height: 148px;
+      margin: 0 auto 12px;
+    }
+    .avatar {
+      position: absolute;
+      left: 50%;
+      bottom: 4px;
+      transform: translateX(-50%);
+      width: 82px;
+      height: 82px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, #3d6b58, #1e3f33);
+      border: 3px solid rgba(212,175,55,0.45);
+      display: grid;
+      place-items: center;
+      color: rgba(255,255,255,0.5);
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .badge {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      transform: translateX(-50%);
+      width: 118px;
+      height: 96px;
+      filter: drop-shadow(0 3px 4px rgba(0,0,0,0.45));
+      overflow: visible;
+    }
+    .title { font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+    .desc { font-size: 0.74rem; opacity: 0.68; line-height: 1.35; }
+    .pick {
+      margin-top: 8px;
+      font-size: 0.72rem;
+      color: #ffc857;
+      opacity: 0.9;
+    }
+    .note {
+      max-width: 680px;
+      margin: 26px auto 0;
+      font-size: 0.8rem;
+      opacity: 0.75;
+      line-height: 1.45;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Peacock feather options — Aadarsh</h1>
+  <p class="sub">Professional kalgi / feather overlays that stay readable at table size. All CustomPaint-friendly (simple paths + eye motif).</p>
+
+  <div class="grid">
+    <!-- P1 -->
+    <div class="card">
+      <div class="code">Option P1 · best overall</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 100">
+          <defs>
+            <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFF1A8"/><stop offset="50%" stop-color="#F6C431"/><stop offset="100%" stop-color="#C88810"/>
+            </linearGradient>
+            <linearGradient id="featherTeal" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#26A69A"/><stop offset="55%" stop-color="#1565C0"/><stop offset="100%" stop-color="#0D47A1"/>
+            </linearGradient>
+          </defs>
+          <!-- single upright feather -->
+          <path d="M60 78 C52 58 48 36 54 14 C56 8 60 4 60 4 C60 4 64 8 66 14 C72 36 68 58 60 78Z"
+                fill="url(#featherTeal)" stroke="#0A1F18" stroke-width="1.6"/>
+          <path d="M60 78 L60 10" stroke="#81D4FA" stroke-width="1.2" opacity="0.7"/>
+          <!-- eye -->
+          <ellipse cx="60" cy="28" rx="11" ry="14" fill="#1B5E20" stroke="#0A1F18" stroke-width="1.2"/>
+          <ellipse cx="60" cy="28" rx="7" ry="9" fill="#1565C0"/>
+          <ellipse cx="60" cy="28" rx="3.6" ry="4.5" fill="#F9A825"/>
+          <circle cx="60" cy="28" r="1.8" fill="#1A120C"/>
+          <!-- gold band clasp -->
+          <rect x="48" y="72" width="24" height="8" rx="2" fill="url(#gGold)" stroke="#1A120C" stroke-width="1.3"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Classic kalgi plume</div>
+      <div class="desc">One upright peacock feather with full eye + gold clasp. Clean at small sizes; unmistakable royal Indian read.</div>
+      <div class="pick">Recommended default</div>
+    </div>
+
+    <!-- P2 -->
+    <div class="card">
+      <div class="code">Option P2</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 100">
+          <defs>
+            <linearGradient id="gGold2" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFF1A8"/><stop offset="100%" stop-color="#C88810"/>
+            </linearGradient>
+          </defs>
+          <!-- mukut base -->
+          <path d="M22 78 Q60 88 98 78 L92 66 Q60 74 28 66Z" fill="#8C5E08" stroke="#1A120C" stroke-width="1.8"/>
+          <path d="M28 68 Q44 42 60 34 Q76 42 92 68 Q60 78 28 68Z" fill="url(#gGold2)" stroke="#1A120C" stroke-width="2"/>
+          <circle cx="44" cy="58" r="3.2" fill="#E53935" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="60" cy="54" r="4" fill="#E53935" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="76" cy="58" r="3.2" fill="#43A047" stroke="#1A120C" stroke-width="1"/>
+          <!-- feather rising from center -->
+          <path d="M60 36 C55 24 52 12 56 2 C58 -1 60 -2 60 -2 C60 -2 62 -1 64 2 C68 12 65 24 60 36Z"
+                fill="#1565C0" stroke="#0A1F18" stroke-width="1.3"/>
+          <ellipse cx="60" cy="10" rx="6.5" ry="8" fill="#1B5E20" stroke="#0A1F18" stroke-width="1"/>
+          <ellipse cx="60" cy="10" rx="4" ry="5" fill="#29B6F6"/>
+          <ellipse cx="60" cy="10" rx="2" ry="2.5" fill="#F9A825"/>
+          <circle cx="60" cy="10" r="1" fill="#1A120C"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Mukut + kalgi</div>
+      <div class="desc">Gold arched crown with peacock feather as the tip ornament. Richest “maharaja” look; slightly taller on seats.</div>
+    </div>
+
+    <!-- P3 -->
+    <div class="card">
+      <div class="code">Option P3</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 100">
+          <!-- angled feather over brim -->
+          <g transform="translate(8,8) rotate(-28 70 50)">
+            <path d="M70 78 C62 56 58 34 64 12 C66 6 70 2 70 2 C70 2 74 6 76 12 C82 34 78 56 70 78Z"
+                  fill="#00897B" stroke="#0A1F18" stroke-width="1.5"/>
+            <path d="M70 76 L70 8" stroke="#80CBC4" stroke-width="1" opacity="0.75"/>
+            <ellipse cx="70" cy="24" rx="9" ry="11" fill="#1B5E20" stroke="#0A1F18" stroke-width="1.1"/>
+            <ellipse cx="70" cy="24" rx="5.5" ry="7" fill="#1976D2"/>
+            <ellipse cx="70" cy="24" rx="2.8" ry="3.5" fill="#F9A825"/>
+            <circle cx="70" cy="24" r="1.4" fill="#1A120C"/>
+          </g>
+          <path d="M18 78 H102 Q104 88 60 92 Q16 88 18 78Z" fill="#C88810" stroke="#1A120C" stroke-width="2"/>
+          <path d="M30 78 C24 52 34 28 60 24 C86 28 96 52 90 78Z" fill="#F6C431" stroke="#1A120C" stroke-width="2"/>
+          <ellipse cx="48" cy="42" rx="8" ry="4" fill="#FFF8D0" opacity="0.45"/>
+          <circle cx="60" cy="30" r="4" fill="#29B6F6" stroke="#1A120C" stroke-width="1.1"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Tilted feather over gold cap</div>
+      <div class="desc">Keeps the familiar overall-cap silhouette, with a peacock plume tucked at an angle. Softest upgrade from today’s caps.</div>
+    </div>
+
+    <!-- P4 -->
+    <div class="card">
+      <div class="code">Option P4</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 100">
+          <!-- twin feathers -->
+          <g transform="translate(-10,6) rotate(-18 60 50)">
+            <path d="M60 80 C54 60 50 40 55 18 C57 12 60 8 60 8 C60 8 63 12 65 18 C70 40 66 60 60 80Z"
+                  fill="#00695C" stroke="#0A1F18" stroke-width="1.3"/>
+            <ellipse cx="60" cy="26" rx="7" ry="9" fill="#1565C0"/>
+            <ellipse cx="60" cy="26" rx="3" ry="4" fill="#F9A825"/>
+            <circle cx="60" cy="26" r="1.3" fill="#1A120C"/>
+          </g>
+          <g transform="translate(10,6) rotate(18 60 50)">
+            <path d="M60 80 C54 60 50 40 55 18 C57 12 60 8 60 8 C60 8 63 12 65 18 C70 40 66 60 60 80Z"
+                  fill="#0277BD" stroke="#0A1F18" stroke-width="1.3"/>
+            <ellipse cx="60" cy="26" rx="7" ry="9" fill="#2E7D32"/>
+            <ellipse cx="60" cy="26" rx="3" ry="4" fill="#F9A825"/>
+            <circle cx="60" cy="26" r="1.3" fill="#1A120C"/>
+          </g>
+          <rect x="46" y="76" width="28" height="9" rx="2.5" fill="#F6C431" stroke="#1A120C" stroke-width="1.4"/>
+          <circle cx="60" cy="80.5" r="2.2" fill="#E53935" stroke="#1A120C" stroke-width="0.9"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Twin plume</div>
+      <div class="desc">Two crossed peacock feathers on a gold clasp. Festive and bold; denser at tiny scoreboard sizes.</div>
+    </div>
+
+    <!-- P5 -->
+    <div class="card">
+      <div class="code">Option P5 · minimal</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 100">
+          <defs>
+            <linearGradient id="plat" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#F8FBFF"/><stop offset="100%" stop-color="#8A94A3"/>
+            </linearGradient>
+          </defs>
+          <path d="M22 78 L18 52 L32 58 L40 30 L52 56 L60 22 L68 56 L80 30 L88 58 L102 52 L98 78Z"
+                fill="url(#plat)" stroke="#1A120C" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M18 78 H102 Q104 88 60 92 Q16 88 18 78Z" fill="#5C6573" stroke="#1A120C" stroke-width="2"/>
+          <!-- tiny feather pin instead of center jewel -->
+          <path d="M60 48 C57 38 56 28 58 20 C59 17 60 16 60 16 C60 16 61 17 62 20 C64 28 63 38 60 48Z"
+                fill="#1565C0" stroke="#0A1F18" stroke-width="1"/>
+          <ellipse cx="60" cy="24" rx="4.5" ry="5.5" fill="#1B5E20"/>
+          <ellipse cx="60" cy="24" rx="2.5" ry="3.2" fill="#29B6F6"/>
+          <circle cx="60" cy="24" r="1.1" fill="#F9A825"/>
+          <circle cx="44" cy="68" r="3.2" fill="#29B6F6" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="76" cy="68" r="3.2" fill="#29B6F6" stroke="#1A120C" stroke-width="1"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Platinum crown + eye pin</div>
+      <div class="desc">Western crown silhouette with a peacock-eye jewel as the centerpiece. Quieter, more “VIP badge” than full plume.</div>
+    </div>
+  </div>
+
+  <p class="note">
+    <strong>Best picks:</strong> <em>P1</em> if you want the feather to be the whole badge;
+    <em>P2</em> if you want crown + feather together (richest);
+    <em>P3</em> if you want to stay close to today’s cap language.<br/>
+    Reply with a code (e.g. <strong>P2</strong>) or a mix (“P1 feather on B noir band”).
+  </p>
+</body>
+</html>

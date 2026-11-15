@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rich peacock badge options — Aadarsh</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #f3efe6;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% 0%, #245a45 0%, transparent 55%),
+        radial-gradient(circle at 20% 80%, rgba(0, 80, 60, 0.35), transparent 40%),
+        #071c16;
+      padding: 28px 14px 56px;
+    }
+    h1 {
+      text-align: center;
+      font-family: Georgia, "Iowan Old Style", serif;
+      color: #ffd56a;
+      font-size: 1.35rem;
+      margin: 0 0 6px;
+      text-shadow: 0 2px 12px rgba(0,0,0,0.45);
+    }
+    .sub {
+      text-align: center;
+      max-width: 680px;
+      margin: 0 auto 24px;
+      opacity: 0.72;
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    .grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 22px;
+      justify-content: center;
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+    .card {
+      width: 250px;
+      border-radius: 18px;
+      padding: 18px 14px 16px;
+      background:
+        linear-gradient(165deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02)),
+        rgba(0,0,0,0.28);
+      border: 1px solid rgba(255, 213, 106, 0.14);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+      text-align: center;
+    }
+    .card.rec {
+      border-color: rgba(255, 213, 106, 0.55);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,213,106,0.2);
+    }
+    .code {
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #ffd56a;
+      opacity: 0.85;
+      margin-bottom: 10px;
+    }
+    .stage {
+      position: relative;
+      width: 160px;
+      height: 190px;
+      margin: 0 auto 14px;
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at 50% 70%, #1f5a44, #0a2a20 70%);
+      box-shadow: inset 0 0 40px rgba(0,0,0,0.35);
+      overflow: visible;
+    }
+    .avatar {
+      position: absolute;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      background:
+        linear-gradient(145deg, #4a7a66, #1c3f33 60%, #122821);
+      border: 3px solid rgba(232, 196, 90, 0.65);
+      box-shadow:
+        0 10px 24px rgba(0,0,0,0.45),
+        inset 0 1px 0 rgba(255,255,255,0.15);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 1.15rem;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.04em;
+    }
+    .badge {
+      position: absolute;
+      left: 50%;
+      top: 4px;
+      transform: translateX(-50%);
+      width: 140px;
+      height: 120px;
+      overflow: visible;
+      filter: drop-shadow(0 6px 10px rgba(0,0,0,0.5));
+    }
+    .title {
+      font-weight: 700;
+      font-size: 0.98rem;
+      margin-bottom: 5px;
+    }
+    .desc {
+      font-size: 0.76rem;
+      opacity: 0.7;
+      line-height: 1.4;
+    }
+    .tag {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      background: rgba(255,213,106,0.12);
+      color: #ffd56a;
+      border: 1px solid rgba(255,213,106,0.28);
+    }
+    .impl {
+      max-width: 760px;
+      margin: 28px auto 0;
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      opacity: 0.85;
+    }
+  </style>
+</head>
+<body>
+  <h1>Richer peacock badges — Aadarsh</h1>
+  <p class="sub">
+    More realistic materials: layered barbs, glowing eye, metallic gold with specular highlights.
+    These are still SVG mocks of what a production CustomPaint / small PNG badge would aim for.
+  </p>
+
+  <div class="grid">
+    <!-- R1 -->
+    <div class="card rec">
+      <div class="code">R1 · strongest pick</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 140 120">
+          <defs>
+            <radialGradient id="eyeGlow" cx="50%" cy="45%" r="55%">
+              <stop offset="0%" stop-color="#7CFFB2" stop-opacity="0.9"/>
+              <stop offset="35%" stop-color="#00B0FF" stop-opacity="0.55"/>
+              <stop offset="100%" stop-color="#00B0FF" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="eyeOuter" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#00C853"/>
+              <stop offset="55%" stop-color="#00695C"/>
+              <stop offset="100%" stop-color="#003D33"/>
+            </radialGradient>
+            <radialGradient id="eyeBlue" cx="40%" cy="35%" r="60%">
+              <stop offset="0%" stop-color="#82B1FF"/>
+              <stop offset="45%" stop-color="#1565C0"/>
+              <stop offset="100%" stop-color="#0D47A1"/>
+            </radialGradient>
+            <radialGradient id="eyeGold" cx="40%" cy="35%" r="60%">
+              <stop offset="0%" stop-color="#FFF59D"/>
+              <stop offset="50%" stop-color="#F9A825"/>
+              <stop offset="100%" stop-color="#EF6C00"/>
+            </radialGradient>
+            <linearGradient id="vane" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#004D40"/>
+              <stop offset="40%" stop-color="#0277BD"/>
+              <stop offset="75%" stop-color="#00695C"/>
+              <stop offset="100%" stop-color="#1A237E"/>
+            </linearGradient>
+            <linearGradient id="goldRich" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFF3C4"/>
+              <stop offset="35%" stop-color="#F6C431"/>
+              <stop offset="70%" stop-color="#C88810"/>
+              <stop offset="100%" stop-color="#6E3A00"/>
+            </linearGradient>
+            <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="2.2" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <!-- ambient glow behind eye -->
+          <ellipse cx="70" cy="38" rx="28" ry="34" fill="url(#eyeGlow)" filter="url(#softGlow)"/>
+          <!-- feather body -->
+          <path d="M70 108 C58 78 52 48 58 18 C61 8 70 2 70 2 C70 2 79 8 82 18 C88 48 82 78 70 108Z"
+                fill="url(#vane)" stroke="#041510" stroke-width="1.4"/>
+          <!-- barb hints -->
+          <g stroke="#80CBC4" stroke-width="0.7" opacity="0.55">
+            <path d="M70 100 C62 86 56 70 58 52"/><path d="M70 96 C78 82 84 66 82 48"/>
+            <path d="M70 88 C60 74 54 60 56 44"/><path d="M70 84 C80 70 86 56 84 40"/>
+            <path d="M70 72 C62 60 58 48 60 34"/><path d="M70 68 C78 56 82 44 80 30"/>
+          </g>
+          <path d="M70 106 L70 10" stroke="#B3E5FC" stroke-width="1.1" opacity="0.65"/>
+          <!-- eye stack -->
+          <ellipse cx="70" cy="36" rx="16" ry="20" fill="url(#eyeOuter)" stroke="#02140f" stroke-width="1.2"/>
+          <ellipse cx="70" cy="36" rx="10.5" ry="13.5" fill="url(#eyeBlue)"/>
+          <ellipse cx="70" cy="36" rx="5.5" ry="7" fill="url(#eyeGold)"/>
+          <circle cx="70" cy="36" r="2.4" fill="#0A0A0A"/>
+          <ellipse cx="66" cy="31" rx="2.2" ry="1.4" fill="#fff" opacity="0.55"/>
+          <!-- ornate gold clasp -->
+          <path d="M52 100 H88 Q90 112 70 114 Q50 112 52 100Z" fill="url(#goldRich)" stroke="#1A120C" stroke-width="1.4"/>
+          <path d="M56 102 H84" stroke="#FFF8D0" stroke-width="1" opacity="0.55"/>
+          <circle cx="70" cy="106" r="3.2" fill="#E53935" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="70" cy="105" r="1" fill="#FFCDD2" opacity="0.7"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Luminous kalgi plume</div>
+      <div class="desc">Single upright feather with iridescent eye glow, barb texture, and engraved gold clasp. Reads as jewelry, not a flat icon.</div>
+      <div class="tag">Best realism · feather-forward</div>
+    </div>
+
+    <!-- R2 -->
+    <div class="card">
+      <div class="code">R2 · richest royal</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 140 120">
+          <defs>
+            <linearGradient id="mukutGold" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFF6D0"/>
+              <stop offset="40%" stop-color="#F0B429"/>
+              <stop offset="100%" stop-color="#8A5200"/>
+            </linearGradient>
+            <radialGradient id="ruby" cx="35%" cy="30%" r="65%">
+              <stop offset="0%" stop-color="#FF8A80"/><stop offset="55%" stop-color="#C62828"/><stop offset="100%" stop-color="#6A0000"/>
+            </radialGradient>
+            <radialGradient id="em" cx="35%" cy="30%" r="65%">
+              <stop offset="0%" stop-color="#A5D6A7"/><stop offset="55%" stop-color="#2E7D32"/><stop offset="100%" stop-color="#1B5E20"/>
+            </radialGradient>
+            <linearGradient id="plume2" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#004D40"/><stop offset="50%" stop-color="#1565C0"/><stop offset="100%" stop-color="#004D40"/>
+            </linearGradient>
+            <radialGradient id="eye2" cx="40%" cy="35%" r="60%">
+              <stop offset="0%" stop-color="#69F0AE"/><stop offset="40%" stop-color="#00B0FF"/><stop offset="100%" stop-color="#0D47A1"/>
+            </radialGradient>
+          </defs>
+          <!-- feather tip -->
+          <path d="M70 48 C64 34 62 18 66 6 C68 2 70 0 70 0 C70 0 72 2 74 6 C78 18 76 34 70 48Z"
+                fill="url(#plume2)" stroke="#041510" stroke-width="1.2"/>
+          <ellipse cx="70" cy="14" rx="8" ry="10" fill="#0B3D2E" stroke="#02140f" stroke-width="1"/>
+          <ellipse cx="70" cy="14" rx="5" ry="6.5" fill="url(#eye2)"/>
+          <ellipse cx="70" cy="14" rx="2.4" ry="3" fill="#F9A825"/>
+          <circle cx="70" cy="14" r="1.1" fill="#111"/>
+          <ellipse cx="68" cy="11.5" rx="1.3" ry="0.8" fill="#fff" opacity="0.5"/>
+          <!-- mukut dome -->
+          <path d="M24 88 Q70 102 116 88 L108 70 Q70 82 32 70Z" fill="#5C3A0A" stroke="#1A120C" stroke-width="1.5"/>
+          <path d="M30 72 Q48 40 70 32 Q92 40 110 72 Q70 86 30 72Z" fill="url(#mukutGold)" stroke="#1A120C" stroke-width="1.8"/>
+          <!-- engraved arcs -->
+          <path d="M40 68 Q70 78 100 68" fill="none" stroke="#8A5200" stroke-width="1.2" opacity="0.7"/>
+          <path d="M46 58 Q70 48 94 58" fill="none" stroke="#FFF3C4" stroke-width="1" opacity="0.35"/>
+          <circle cx="48" cy="64" r="4.2" fill="url(#ruby)" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="70" cy="58" r="5.2" fill="url(#ruby)" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="92" cy="64" r="4.2" fill="url(#em)" stroke="#1A120C" stroke-width="1"/>
+          <ellipse cx="46" cy="62" rx="1.4" ry="0.9" fill="#fff" opacity="0.45"/>
+          <ellipse cx="68" cy="55" rx="1.6" ry="1" fill="#fff" opacity="0.5"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Engraved mukut + kalgi</div>
+      <div class="desc">Antique gold dome with cabochon gems and a peacock tip. Most “royal jewelry” — taller on the seat.</div>
+      <div class="tag">Maharaja · crown + feather</div>
+    </div>
+
+    <!-- R3 -->
+    <div class="card">
+      <div class="code">R3 · modern VIP</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 140 120">
+          <defs>
+            <linearGradient id="noirBand" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#3A2F28"/><stop offset="100%" stop-color="#0C0A08"/>
+            </linearGradient>
+            <linearGradient id="goldCap" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFF1A8"/><stop offset="45%" stop-color="#F6C431"/><stop offset="100%" stop-color="#8C5E08"/>
+            </linearGradient>
+            <linearGradient id="tiltFeather" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#00695C"/><stop offset="50%" stop-color="#1565C0"/><stop offset="100%" stop-color="#1A237E"/>
+            </linearGradient>
+            <radialGradient id="eye3" cx="35%" cy="30%" r="65%">
+              <stop offset="0%" stop-color="#B9F6CA"/><stop offset="35%" stop-color="#00E5FF"/><stop offset="100%" stop-color="#0D47A1"/>
+            </radialGradient>
+            <filter id="glow3" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="1.8"/>
+            </filter>
+          </defs>
+          <g transform="rotate(-32 88 40)">
+            <ellipse cx="88" cy="28" rx="18" ry="22" fill="#00B0FF" opacity="0.25" filter="url(#glow3)"/>
+            <path d="M88 78 C78 58 74 36 80 12 C82 5 88 0 88 0 C88 0 94 5 96 12 C102 36 98 58 88 78Z"
+                  fill="url(#tiltFeather)" stroke="#041510" stroke-width="1.3"/>
+            <g stroke="#80DEEA" stroke-width="0.6" opacity="0.5">
+              <path d="M88 70 C80 58 76 44 78 30"/><path d="M88 66 C96 54 100 40 98 26"/>
+            </g>
+            <ellipse cx="88" cy="24" rx="11" ry="14" fill="#004D40" stroke="#02140f" stroke-width="1"/>
+            <ellipse cx="88" cy="24" rx="7" ry="9" fill="url(#eye3)"/>
+            <ellipse cx="88" cy="24" rx="3.4" ry="4.2" fill="#F9A825"/>
+            <circle cx="88" cy="24" r="1.6" fill="#111"/>
+            <ellipse cx="85" cy="20" rx="1.8" ry="1" fill="#fff" opacity="0.55"/>
+          </g>
+          <path d="M18 86 Q70 70 122 86 Q70 108 18 86Z" fill="url(#noirBand)" stroke="#1A120C" stroke-width="1.6"/>
+          <path d="M34 86 C28 58 40 34 70 30 C100 34 112 58 106 86Z" fill="url(#goldCap)" stroke="#1A120C" stroke-width="1.8"/>
+          <ellipse cx="54" cy="48" rx="12" ry="6" fill="#FFF8D0" opacity="0.35"/>
+          <circle cx="70" cy="38" r="4.5" fill="#29B6F6" stroke="#1A120C" stroke-width="1.1"/>
+          <ellipse cx="68" cy="36" rx="1.4" ry="0.9" fill="#E1F5FE" opacity="0.7"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Noir gold cap + tilted plume</div>
+      <div class="desc">Espresso brim, polished gold dome, peacock tucked at an angle with soft cyan bloom. Closest to “premium app VIP.”</div>
+      <div class="tag">UI-rich · cap family</div>
+    </div>
+
+    <!-- R4 -->
+    <div class="card">
+      <div class="code">R4 · gem-first</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 140 120">
+          <defs>
+            <linearGradient id="platMetal" x1="0" y1="0" x2="0.3" y2="1">
+              <stop offset="0%" stop-color="#FFFFFF"/>
+              <stop offset="30%" stop-color="#E8EEF6"/>
+              <stop offset="70%" stop-color="#9AA3B2"/>
+              <stop offset="100%" stop-color="#4A5564"/>
+            </linearGradient>
+            <radialGradient id="diamondEye" cx="35%" cy="30%" r="70%">
+              <stop offset="0%" stop-color="#E0F7FA"/>
+              <stop offset="25%" stop-color="#00E5FF"/>
+              <stop offset="55%" stop-color="#2979FF"/>
+              <stop offset="100%" stop-color="#1A237E"/>
+            </radialGradient>
+            <filter id="spark" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="0.8" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <path d="M22 86 H118 Q120 98 70 102 Q20 98 22 86Z" fill="#5A6574" stroke="#1A120C" stroke-width="1.6"/>
+          <path d="M26 86 L18 54 L34 62 L42 28 L56 58 L70 16 L84 58 L98 28 L106 62 L122 54 L114 86Z"
+                fill="url(#platMetal)" stroke="#1A120C" stroke-width="1.7" stroke-linejoin="round"/>
+          <!-- micro highlights on peaks -->
+          <g fill="#fff" opacity="0.55" filter="url(#spark)">
+            <circle cx="42" cy="26" r="1.4"/><circle cx="70" cy="14" r="1.8"/><circle cx="98" cy="26" r="1.4"/>
+          </g>
+          <!-- peacock eye as center gem -->
+          <circle cx="70" cy="58" r="14" fill="#003D33" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="70" cy="58" r="10.5" fill="url(#diamondEye)"/>
+          <circle cx="70" cy="58" r="4.5" fill="#F9A825"/>
+          <circle cx="70" cy="58" r="2" fill="#111"/>
+          <ellipse cx="65" cy="52" rx="3" ry="2" fill="#fff" opacity="0.55"/>
+          <!-- tiny feather barbs peeking above gem -->
+          <path d="M70 44 C66 36 65 28 68 22 C69 20 70 19 70 19 C70 19 71 20 72 22 C75 28 74 36 70 44Z"
+                fill="#1565C0" stroke="#041510" stroke-width="0.9" opacity="0.95"/>
+          <circle cx="48" cy="78" r="3.5" fill="#29B6F6" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="92" cy="78" r="3.5" fill="#29B6F6" stroke="#1A120C" stroke-width="1"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Platinum diadem + peacock gem</div>
+      <div class="desc">Quiet VIP crown; the peacock becomes a glowing sapphire-eye jewel. Most “product UI,” least costume.</div>
+      <div class="tag">Subtle · luxury app</div>
+    </div>
+  </div>
+
+  <div class="impl">
+    <strong>Why the earlier set felt fake:</strong> flat fills, no eye glow, no barb texture, no metal speculars.<br/><br/>
+    <strong>For production realism</strong> (recommended): keep CustomPaint for the metal base, and optionally drop in one small high-quality peacock-eye PNG (~64–128px) for the eye only — that combo looks richest on Flutter web without heavy assets.<br/><br/>
+    Reply with <strong>R1</strong>, <strong>R2</strong>, <strong>R3</strong>, or <strong>R4</strong> (or a mix). If you want photo-real feathers even stronger, we can source a licensed peacock feather PNG for the plume and paint only the clasp/crown.
+  </div>
+</body>
+</html>

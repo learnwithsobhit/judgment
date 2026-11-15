@@ -913,6 +913,7 @@ class _TableArea extends StatelessWidget {
     final palette = context.palette;
     return Container(
       margin: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+      clipBehavior: Clip.none,
       decoration: BoxDecoration(
         gradient: RadialGradient(
           colors: [palette.feltHighlight, palette.felt, palette.feltDark],
@@ -922,7 +923,9 @@ class _TableArea extends StatelessWidget {
         border: Border.all(color: palette.wood, width: 4),
         boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 16)],
       ),
+      // Allow overall caps / peacock kalgi to paint past the felt edge.
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
@@ -1024,6 +1027,9 @@ class _TableArea extends StatelessWidget {
     Map<String, int> placeMarks,
   ) {
     if (seats.isEmpty) return const SizedBox(width: 4);
+    // Side seats sit in a tall column; reserve headroom so kalgi/caps are not
+    // clipped by the Expanded row above the avatar.
+    const sideOrnamentPad = 28.0;
     return SizedBox(
       width: width,
       child: Column(
@@ -1031,7 +1037,15 @@ class _TableArea extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final opponent in seats)
-            _seat(view, opponent, crowded, placeMarks[opponent.playerId]),
+            Padding(
+              padding: const EdgeInsets.only(top: sideOrnamentPad),
+              child: _seat(
+                view,
+                opponent,
+                crowded,
+                placeMarks[opponent.playerId],
+              ),
+            ),
         ],
       ),
     );
@@ -1104,12 +1118,12 @@ class _TableArea extends StatelessWidget {
     final isMyTurn = view.currentTurn == controller.myPlayerId;
     final isDealer = view.round?.dealer == controller.myPlayerId;
     final isLeader = view.leader?.playerId == controller.myPlayerId;
-    // Match crowded opponent radius so the overall cap stays readable.
+    // Match crowded opponent radius so the overall cap / kalgi stays readable.
     const avatarRadius = 16.0;
-    // Cap paints above the portrait; reserve space so it never underlaps the trick.
-    const capReserve = avatarRadius * 1.07;
+    // Ornaments paint above the portrait; reserve space so they never underlap the trick.
+    const ornamentReserve = avatarRadius * 1.55;
     return Padding(
-      padding: const EdgeInsets.only(top: capReserve),
+      padding: const EdgeInsets.only(top: ornamentReserve),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1127,6 +1141,7 @@ class _TableArea extends StatelessWidget {
                     radius: avatarRadius,
                     highlight: isMyTurn || isLeader,
                     boardRank: view.ownLadderRank,
+                    seatOrnament: view.ownSeatOrnament,
                     signedIn: view.ownSignedIn,
                     flashMood: controller.avatarFlashes[controller.myPlayerId],
                     onLongPress: () => controller.sendAvatarFlash('cheer'),
@@ -1305,6 +1320,7 @@ class _OpponentSeat extends StatelessWidget {
         children: [
           Stack(
             clipBehavior: Clip.none,
+            alignment: Alignment.topCenter,
             children: [
               PlayerAvatar(
                 avatarId: opponent.avatarId,
@@ -1314,6 +1330,7 @@ class _OpponentSeat extends StatelessWidget {
                 highlight: isTurn || isLeader,
                 muted: disconnected,
                 boardRank: opponent.ladderRank,
+                seatOrnament: opponent.seatOrnament,
                 signedIn: opponent.signedIn,
                 flashMood: controller.avatarFlashes[opponent.playerId],
                 onLongPress: () =>

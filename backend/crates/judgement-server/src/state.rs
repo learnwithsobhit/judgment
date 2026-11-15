@@ -140,6 +140,7 @@ impl Room {
                 vacant: false,
                 ladder_rank: None,
                 signed_in: false,
+                seat_ornament: None,
             })
             .collect();
         seats.sort_by_key(|s| s.seat);

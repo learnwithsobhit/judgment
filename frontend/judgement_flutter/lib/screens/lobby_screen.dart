@@ -672,6 +672,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               radius: 18,
               highlight: isMe,
               boardRank: seat.ladderRank,
+              seatOrnament: seat.seatOrnament,
               signedIn: seat.signedIn,
             ),
       title: Text(

@@ -41,6 +41,11 @@ pub fn stamp_room_ladder_ranks(state: &AppState, view: &mut RoomView) {
             .and_then(|session| session.user_id);
         seat.signed_in = user_id.is_some();
         seat.ladder_rank = user_id.and_then(|id| ladder_rank(id, &board));
+        seat.seat_ornament = crate::seat_ornament::for_signed_in_nickname(
+            &seat.nickname,
+            seat.signed_in,
+        )
+        .map(str::to_string);
     }
 }
 

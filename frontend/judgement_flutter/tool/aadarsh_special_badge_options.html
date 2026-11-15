@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aadarsh special badge options — Judgement</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      color: #f4efe6;
+      background:
+        radial-gradient(ellipse at 50% 15%, #1a5c44 0%, transparent 50%),
+        linear-gradient(160deg, #0f3d2e 0%, #07251c 100%);
+      padding: 28px 16px 48px;
+    }
+    h1 {
+      text-align: center;
+      font-family: Georgia, "Iowan Old Style", serif;
+      color: #ffc857;
+      font-size: 1.3rem;
+      margin: 0 0 6px;
+    }
+    .sub {
+      text-align: center;
+      opacity: 0.72;
+      font-size: 0.88rem;
+      margin: 0 0 8px;
+      max-width: 640px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .hint {
+      text-align: center;
+      opacity: 0.55;
+      font-size: 0.78rem;
+      margin: 0 0 26px;
+    }
+    .grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      justify-content: center;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .card {
+      width: 200px;
+      background: rgba(0,0,0,0.22);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 18px 12px 14px;
+      text-align: center;
+    }
+    .card.pick { outline: 2px solid #ffc857; }
+    .code {
+      display: inline-block;
+      font-size: 0.7rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      opacity: 0.55;
+      margin-bottom: 10px;
+    }
+    .stage {
+      position: relative;
+      width: 112px;
+      height: 132px;
+      margin: 0 auto 12px;
+    }
+    .avatar {
+      position: absolute;
+      left: 50%;
+      bottom: 6px;
+      transform: translateX(-50%);
+      width: 82px;
+      height: 82px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, #3d6b58, #1e3f33);
+      border: 3px solid rgba(212,175,55,0.45);
+      display: grid;
+      place-items: center;
+      color: rgba(255,255,255,0.5);
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .badge {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      transform: translateX(-50%);
+      width: 102px;
+      height: 74px;
+      filter: drop-shadow(0 3px 4px rgba(0,0,0,0.45));
+    }
+    .title { font-weight: 700; font-size: 0.92rem; margin-bottom: 4px; }
+    .desc { font-size: 0.75rem; opacity: 0.68; line-height: 1.35; }
+    .compare {
+      max-width: 720px;
+      margin: 28px auto 0;
+      padding: 14px 16px;
+      background: rgba(0,0,0,0.18);
+      border-radius: 12px;
+      font-size: 0.8rem;
+      opacity: 0.8;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <h1>Special badge options — Aadarsh</h1>
+  <p class="sub">Unique overlay for his signed-in account — separate from gold/silver/bronze overall caps. Shown here on a seat avatar so you can compare silhouettes.</p>
+  <p class="hint">Identity should key off account (user id / email allowlist), not nickname alone.</p>
+
+  <div class="grid">
+    <!-- A -->
+    <div class="card">
+      <div class="code">Option A</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 78">
+          <defs>
+            <linearGradient id="aM" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#F8FBFF"/><stop offset="40%" stop-color="#D7DEE8"/><stop offset="100%" stop-color="#8A94A3"/>
+            </linearGradient>
+            <linearGradient id="aB" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#E8EEF6"/><stop offset="100%" stop-color="#5C6573"/>
+            </linearGradient>
+          </defs>
+          <path d="M18 58 H102 Q104 68 60 72 Q16 68 18 58Z" fill="url(#aB)" stroke="#1A120C" stroke-width="2.2"/>
+          <path d="M22 58 L18 38 L30 44 L38 20 L50 42 L60 10 L70 42 L82 20 L90 44 L102 38 L98 58Z"
+                fill="url(#aM)" stroke="#1A120C" stroke-width="2.2" stroke-linejoin="round"/>
+          <circle cx="60" cy="9" r="4.2" fill="#E8F4FF" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="38" cy="52" r="4" fill="#4FC3F7" stroke="#1A120C" stroke-width="1.1"/>
+          <circle cx="60" cy="50" r="5.2" fill="#29B6F6" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="82" cy="52" r="4" fill="#4FC3F7" stroke="#1A120C" stroke-width="1.1"/>
+          <ellipse cx="46" cy="28" rx="8" ry="4" fill="#fff" opacity="0.45"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Platinum diadem</div>
+      <div class="desc">Cool white-gold / platinum with ice-blue jewels. Reads “VIP exclusive,” clearly not ladder gold/silver/bronze.</div>
+    </div>
+
+    <!-- B -->
+    <div class="card">
+      <div class="code">Option B</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 78">
+          <defs>
+            <linearGradient id="bM" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFE9A0"/><stop offset="45%" stop-color="#F0B429"/><stop offset="100%" stop-color="#8B5A00"/>
+            </linearGradient>
+            <linearGradient id="bInk" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#3A2A18"/><stop offset="100%" stop-color="#120C08"/>
+            </linearGradient>
+          </defs>
+          <path d="M16 60 H104 Q106 70 60 74 Q14 70 16 60Z" fill="url(#bInk)" stroke="#1A120C" stroke-width="2.2"/>
+          <path d="M20 60 L12 32 L26 40 L34 12 L48 38 L60 4 L72 38 L86 12 L94 40 L108 32 L100 60Z"
+                fill="url(#bM)" stroke="#1A120C" stroke-width="2.2" stroke-linejoin="round"/>
+          <circle cx="60" cy="4" r="4.5" fill="#FFF3C4" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="34" cy="54" r="3.8" fill="#C62828" stroke="#1A120C" stroke-width="1.1"/>
+          <circle cx="60" cy="52" r="5" fill="#FFD54F" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="86" cy="54" r="3.8" fill="#2E7D32" stroke="#1A120C" stroke-width="1.1"/>
+          <ellipse cx="44" cy="24" rx="7" ry="3.5" fill="#FFF8D0" opacity="0.5"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Noir &amp; gold imperial</div>
+      <div class="desc">Black circlet + rich gold fleurons. Most “private club / founder” of the set; very distinct on green felt.</div>
+    </div>
+
+    <!-- C -->
+    <div class="card">
+      <div class="code">Option C</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 78">
+          <defs>
+            <linearGradient id="cM" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFF1A8"/><stop offset="40%" stop-color="#F6C431"/><stop offset="100%" stop-color="#C88810"/>
+            </linearGradient>
+          </defs>
+          <!-- mukut-inspired arched crown -->
+          <path d="M14 62 Q60 72 106 62 L100 48 Q60 58 20 48Z" fill="#8C5E08" stroke="#1A120C" stroke-width="2"/>
+          <path d="M20 50 Q36 18 60 8 Q84 18 100 50 Q60 62 20 50Z" fill="url(#cM)" stroke="#1A120C" stroke-width="2.2"/>
+          <path d="M60 8 L60 0" stroke="#1A120C" stroke-width="2"/>
+          <circle cx="60" cy="0" r="4.5" fill="#E53935" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="38" cy="28" r="3.5" fill="#43A047" stroke="#1A120C" stroke-width="1"/>
+          <circle cx="60" cy="22" r="4" fill="#E53935" stroke="#1A120C" stroke-width="1.1"/>
+          <circle cx="82" cy="28" r="3.5" fill="#1E88E5" stroke="#1A120C" stroke-width="1"/>
+          <ellipse cx="48" cy="34" rx="8" ry="4" fill="#FFF8D0" opacity="0.4"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Indian royal mukut</div>
+      <div class="desc">Arched ceremonial silhouette with kalgi tip. Culturally distinct and premium — strongest “special person” read.</div>
+    </div>
+
+    <!-- D -->
+    <div class="card">
+      <div class="code">Option D</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 78">
+          <defs>
+            <linearGradient id="dM" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#F3E5FF"/><stop offset="40%" stop-color="#B39DDB"/><stop offset="100%" stop-color="#5E35B1"/>
+            </linearGradient>
+            <linearGradient id="dB" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFD54F"/><stop offset="100%" stop-color="#8C5E08"/>
+            </linearGradient>
+          </defs>
+          <path d="M18 58 H102 Q104 68 60 72 Q16 68 18 58Z" fill="url(#dB)" stroke="#1A120C" stroke-width="2.2"/>
+          <path d="M22 58 L14 36 L28 42 L36 16 L48 40 L60 6 L72 40 L84 16 L92 42 L106 36 L98 58Z"
+                fill="url(#dM)" stroke="#1A120C" stroke-width="2.2" stroke-linejoin="round"/>
+          <circle cx="60" cy="5" r="4" fill="#FFD54F" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="36" cy="52" r="3.8" fill="#FFD54F" stroke="#1A120C" stroke-width="1.1"/>
+          <circle cx="60" cy="50" r="5" fill="#FFF59D" stroke="#1A120C" stroke-width="1.2"/>
+          <circle cx="84" cy="52" r="3.8" fill="#FFD54F" stroke="#1A120C" stroke-width="1.1"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Amethyst regalia</div>
+      <div class="desc">Royal purple metal + gold band/jewels. Fantasy-VIP vibe; farthest from ladder metals.</div>
+    </div>
+
+    <!-- E -->
+    <div class="card">
+      <div class="code">Option E</div>
+      <div class="stage">
+        <svg class="badge" viewBox="0 0 120 78">
+          <defs>
+            <linearGradient id="eDome" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFF8D0"/><stop offset="50%" stop-color="#F6C431"/><stop offset="100%" stop-color="#A86B00"/>
+            </linearGradient>
+            <linearGradient id="eBrim" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#5C4030"/><stop offset="100%" stop-color="#1A120C"/>
+            </linearGradient>
+          </defs>
+          <!-- special cap sibling to ladder caps, but unique palette -->
+          <path d="M8 52 Q60 36 112 52 Q60 78 8 52Z" fill="url(#eBrim)" stroke="#1A120C" stroke-width="2"/>
+          <path d="M28 52 C22 28 32 8 60 6 C88 8 98 28 92 52Z" fill="url(#eDome)" stroke="#1A120C" stroke-width="2.2"/>
+          <ellipse cx="46" cy="22" rx="10" ry="6" fill="#FFF8D0" opacity="0.55"/>
+          <circle cx="60" cy="10" r="5" fill="#29B6F6" stroke="#1A120C" stroke-width="1.3"/>
+          <circle cx="60" cy="10" r="2" fill="#E1F5FE"/>
+        </svg>
+        <div class="avatar">AC</div>
+      </div>
+      <div class="title">Heirloom gold cap</div>
+      <div class="desc">Keeps the existing cap language (same family as overall ranks) but with espresso brim + diamond button — “special seat” without a full crown.</div>
+    </div>
+  </div>
+
+  <div class="compare">
+    <strong>How this would work in product:</strong> painted CustomPaint (same as today’s caps) · always on for his account even if not top-3 · if he also has ladder 1–3, show this special badge instead of (or stacked above) the rank cap · gate by stable <code>user_id</code> / email allowlist, not display name.<br/><br/>
+    Reply with a letter (e.g. <strong>B</strong> or <strong>C</strong>) — or mix (“C silhouette + A platinum metal”).
+  </div>
+</body>
+</html>

@@ -35,6 +35,7 @@ class GameSfx {
   static const victoryAssets = <String>[
     'sounds/victory_festive_flute.mp3',
     'sounds/victory_indian_dhol.mp3',
+    'sounds/victory_shaadi_band.mp3',
   ];
 
   Future<void> unlock() async {
