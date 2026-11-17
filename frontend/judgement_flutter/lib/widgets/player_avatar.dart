@@ -151,7 +151,7 @@ class _PlayerAvatarState extends State<PlayerAvatar>
     final showPeacock = ornament == peacockKalgi;
     final rank = showPeacock ? null : _capRank(widget.boardRank);
     final badgeSize = (widget.radius * 0.72).clamp(12.0, 18.0);
-    final capHeight = widget.radius * _capHeightFactor;
+    final capHeight = widget.radius * _rankBadgeHeightFactor;
     final kalgiHeight = widget.radius * _kalgiHeightFactor;
     // Portrait padding is the top of the circle. Sit the brim on that rim.
     const portraitPad = 3.0;
@@ -295,10 +295,21 @@ int? _capRank(int? rank) {
   return rank;
 }
 
+/// Flip to `true` to restore the old painted baseball-style overall caps.
+const usePaintedRankCaps = false;
+
 const _capWidthFactor = 1.45;
 const _capHeightFactor = 1.07;
+/// Imperial crown PNGs are taller/narrower than the painted baseball caps.
+const _crownWidthFactor = 1.38;
+const _crownHeightFactor = 1.32;
 const _kalgiWidthFactor = 1.55;
 const _kalgiHeightFactor = 1.55;
+
+double get _rankBadgeWidthFactor =>
+    usePaintedRankCaps ? _capWidthFactor : _crownWidthFactor;
+double get _rankBadgeHeightFactor =>
+    usePaintedRankCaps ? _capHeightFactor : _crownHeightFactor;
 
 /// F1: real peacock plume + slim gold clasp for allowlisted signed-in seats.
 class _PeacockKalgi extends StatelessWidget {
@@ -401,13 +412,55 @@ class _KalgiClaspPainter extends CustomPainter {
   bool shouldRepaint(covariant _KalgiClaspPainter oldDelegate) => false;
 }
 
-/// Painted cap for overall 1st, 2nd, or 3rd. It sits on the top rim of the
-/// portrait and does not change the avatar's layout size.
+String _rankCrownAsset(int rank) => switch (rank) {
+  1 => 'assets/badges/rank_crown_gold.png',
+  2 => 'assets/badges/rank_crown_silver.png',
+  _ => 'assets/badges/rank_crown_bronze.png',
+};
+
+/// Overall 1st/2nd/3rd badge on the portrait rim. Default: imperial crown PNGs.
+/// Set [usePaintedRankCaps] to restore the legacy baseball-cap CustomPaint.
 class _RankCap extends StatelessWidget {
   final int rank;
   final double radius;
 
   const _RankCap({required this.rank, required this.radius});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (rank) {
+      1 => '1st overall',
+      2 => '2nd overall',
+      _ => '3rd overall',
+    };
+    final w = radius * _rankBadgeWidthFactor;
+    final h = radius * _rankBadgeHeightFactor;
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        label: label,
+        child: SizedBox(
+          width: w,
+          height: h,
+          child: usePaintedRankCaps
+              ? _PaintedRankCap(rank: rank)
+              : Image.asset(
+                  _rankCrownAsset(rank),
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) =>
+                      SizedBox.expand(child: _PaintedRankCap(rank: rank)),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Legacy painted baseball-style cap (kept for revert / Image.asset fallback).
+class _PaintedRankCap extends StatelessWidget {
+  final int rank;
+
+  const _PaintedRankCap({required this.rank});
 
   @override
   Widget build(BuildContext context) {
@@ -431,27 +484,12 @@ class _RankCap extends StatelessWidget {
         const Color(0xFFF8C99A),
       ),
     };
-    final label = switch (rank) {
-      1 => '1st overall',
-      2 => '2nd overall',
-      _ => '3rd overall',
-    };
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        label: label,
-        child: SizedBox(
-          width: radius * _capWidthFactor,
-          height: radius * _capHeightFactor,
-          child: CustomPaint(
-            painter: _CapPainter(
-              dome: dome,
-              brim: brim,
-              shade: shade,
-              shine: shine,
-            ),
-          ),
-        ),
+    return CustomPaint(
+      painter: _CapPainter(
+        dome: dome,
+        brim: brim,
+        shade: shade,
+        shine: shine,
       ),
     );
   }
