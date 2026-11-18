@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>JPL Season 1 — Full Fixture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --felt: #0f3d2e; --felt-deep: #071f18; --gold: #d4a84b; --gold-soft: #e8c878;
+    --ink: #f7f3ea; --muted: rgba(247,243,234,.78); --line: rgba(212,168,75,.34);
+    --orange: #c45c26; --blue: #2a6f97;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
+  body {
+    margin: 0; color: var(--ink);
+    font-family: Manrope, system-ui, sans-serif;
+    background: #071f18;
+  }
+  .page {
+    width: 1600px; margin: 0 auto; padding: 64px 56px 80px;
+    background: linear-gradient(180deg, #071f18, #0f3d2e 28%, #123d30);
+  }
+  .hero { text-align: center; margin-bottom: 44px; }
+  .eyebrow {
+    display: inline-block; border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 16px; letter-spacing: .14em; text-transform: uppercase;
+    font-size: 14px; color: var(--gold-soft); font-weight: 700; margin-bottom: 16px;
+  }
+  h1 {
+    font-family: Fraunces, Georgia, serif; font-size: 84px; line-height: .95;
+    margin: 0; letter-spacing: -.03em;
+  }
+  h1 span { display: block; color: var(--gold-soft); }
+  .lede {
+    max-width: 780px; margin: 18px auto 0; color: var(--muted); font-size: 22px; line-height: 1.45;
+  }
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 32px;
+  }
+  .stat {
+    background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 18px;
+    padding: 20px; text-align: center;
+  }
+  .stat strong {
+    display: block; font-family: Fraunces, Georgia, serif; font-size: 42px; color: var(--gold-soft);
+  }
+  .stat span { display: block; margin-top: 8px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h2 {
+    font-family: Fraunces, Georgia, serif; font-size: 34px; margin: 0 0 16px; letter-spacing: -.02em;
+  }
+  .roster {
+    list-style: none; padding: 0; margin: 0 0 40px;
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;
+  }
+  .roster li {
+    background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; font-weight: 600; font-size: 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .code {
+    width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center;
+    background: rgba(212,168,75,.22); color: var(--gold-soft); font-size: 12px; font-weight: 700;
+  }
+  .matchday {
+    margin-bottom: 24px; padding: 22px; border: 1px solid var(--line); border-radius: 20px;
+    background: rgba(0,0,0,.18);
+  }
+  .tables { display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 14px; }
+  .table {
+    border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; background: rgba(0,0,0,.2);
+  }
+  .table[data-kind="Big Six"] { border-top: 4px solid var(--gold); }
+  .table[data-kind="Orange"] { border-top: 4px solid var(--orange); }
+  .table[data-kind="Blue"] { border-top: 4px solid var(--blue); }
+  .table header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .table h3 { margin: 0; font-size: 18px; }
+  .badge {
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 999px; background: rgba(255,255,255,.08); color: var(--muted);
+  }
+  .seats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .seat {
+    padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,.09);
+    font-size: 15px; font-weight: 600;
+  }
+  .players {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px;
+  }
+  .player-card {
+    border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; background: rgba(0,0,0,.18);
+  }
+  .player-card h3 {
+    margin: 0 0 10px; font-size: 17px; display: flex; align-items: center; gap: 8px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 5px 7px; vertical-align: top; border-top: 1px solid rgba(255,255,255,.1); }
+  th { color: var(--gold-soft); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; border-top: 0; }
+  footer {
+    margin-top: 32px; text-align: center; color: var(--muted); font-size: 15px; line-height: 1.5;
+    border-top: 1px solid var(--line); padding-top: 20px;
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="eyebrow">Official fixture · Judgement Premier League</div>
+      <h1>Judgement<span>Premier League</span></h1>
+      <p class="lede">Season 1 all-play-all — 14 players, 6 matchdays, 18 tables. Every pair shares a seat at least once. Gold 500 · Silver 100 · Bronze 20.</p>
+      <div class="stats">
+        <div class="stat"><strong>14</strong><span>Players</span></div>
+        <div class="stat"><strong>6</strong><span>Matchdays</span></div>
+        <div class="stat"><strong>18</strong><span>Tables</span></div>
+        <div class="stat"><strong>91</strong><span>Pairs covered</span></div>
+      </div>
+    </header>
+
+    <h2>The squad</h2>
+    <ul class="roster"><li><span class="code">A</span>Upavan</li><li><span class="code">B</span>Dharmendra</li><li><span class="code">C</span>shobhit</li><li><span class="code">D</span>Ankit</li><li><span class="code">E</span>Gagan</li><li><span class="code">F</span>Arun</li><li><span class="code">G</span>Deepak</li><li><span class="code">H</span>Anurag</li><li><span class="code">I</span>akash</li><li><span class="code">J</span>Aadarsh</li><li><span class="code">K</span>Chandan</li><li><span class="code">L</span>Kapil</li><li><span class="code">M</span>ashish</li><li><span class="code">N</span>Uday</li></ul>
+
+    <h2>All matchdays</h2>
+    
+    <section class="matchday">
+      <h2>Matchday 1</h2>
+      <div class="tables">
+        <article class="table" data-kind="Big Six">
+          <header><h3>Big Six</h3><span class="badge">6 seats</span></header>
+          <div class="seats"><span class="seat">Upavan</span><span class="seat">Dharmendra</span><span class="seat">shobhit</span><span class="seat">Gagan</span><span class="seat">Anurag</span><span class="seat">ashish</span></div>
+        </article>
+        <article class="table" data-kind="Orange">
+          <header><h3>Orange</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Deepak</span><span class="seat">Aadarsh</span><span class="seat">Chandan</span><span class="seat">Uday</span></div>
+        </article>
+        <article class="table" data-kind="Blue">
+          <header><h3>Blue</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Ankit</span><span class="seat">Arun</span><span class="seat">akash</span><span class="seat">Kapil</span></div>
+        </article></div>
+    </section>
+    <section class="matchday">
+      <h2>Matchday 2</h2>
+      <div class="tables">
+        <article class="table" data-kind="Big Six">
+          <header><h3>Big Six</h3><span class="badge">6 seats</span></header>
+          <div class="seats"><span class="seat">shobhit</span><span class="seat">Deepak</span><span class="seat">akash</span><span class="seat">Chandan</span><span class="seat">Kapil</span><span class="seat">ashish</span></div>
+        </article>
+        <article class="table" data-kind="Orange">
+          <header><h3>Orange</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Dharmendra</span><span class="seat">Ankit</span><span class="seat">Anurag</span><span class="seat">Aadarsh</span></div>
+        </article>
+        <article class="table" data-kind="Blue">
+          <header><h3>Blue</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Upavan</span><span class="seat">Gagan</span><span class="seat">Arun</span><span class="seat">Uday</span></div>
+        </article></div>
+    </section>
+    <section class="matchday">
+      <h2>Matchday 3</h2>
+      <div class="tables">
+        <article class="table" data-kind="Big Six">
+          <header><h3>Big Six</h3><span class="badge">6 seats</span></header>
+          <div class="seats"><span class="seat">shobhit</span><span class="seat">Ankit</span><span class="seat">Arun</span><span class="seat">Aadarsh</span><span class="seat">ashish</span><span class="seat">Uday</span></div>
+        </article>
+        <article class="table" data-kind="Orange">
+          <header><h3>Orange</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Upavan</span><span class="seat">Dharmendra</span><span class="seat">Deepak</span><span class="seat">Kapil</span></div>
+        </article>
+        <article class="table" data-kind="Blue">
+          <header><h3>Blue</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Gagan</span><span class="seat">Anurag</span><span class="seat">akash</span><span class="seat">Chandan</span></div>
+        </article></div>
+    </section>
+    <section class="matchday">
+      <h2>Matchday 4</h2>
+      <div class="tables">
+        <article class="table" data-kind="Big Six">
+          <header><h3>Big Six</h3><span class="badge">6 seats</span></header>
+          <div class="seats"><span class="seat">Upavan</span><span class="seat">Ankit</span><span class="seat">Gagan</span><span class="seat">Arun</span><span class="seat">Deepak</span><span class="seat">Chandan</span></div>
+        </article>
+        <article class="table" data-kind="Orange">
+          <header><h3>Orange</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Dharmendra</span><span class="seat">shobhit</span><span class="seat">akash</span><span class="seat">Aadarsh</span></div>
+        </article>
+        <article class="table" data-kind="Blue">
+          <header><h3>Blue</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Anurag</span><span class="seat">Kapil</span><span class="seat">ashish</span><span class="seat">Uday</span></div>
+        </article></div>
+    </section>
+    <section class="matchday">
+      <h2>Matchday 5</h2>
+      <div class="tables">
+        <article class="table" data-kind="Big Six">
+          <header><h3>Big Six</h3><span class="badge">6 seats</span></header>
+          <div class="seats"><span class="seat">Gagan</span><span class="seat">Arun</span><span class="seat">Deepak</span><span class="seat">Anurag</span><span class="seat">Aadarsh</span><span class="seat">Kapil</span></div>
+        </article>
+        <article class="table" data-kind="Orange">
+          <header><h3>Orange</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Upavan</span><span class="seat">akash</span><span class="seat">ashish</span><span class="seat">Uday</span></div>
+        </article>
+        <article class="table" data-kind="Blue">
+          <header><h3>Blue</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Dharmendra</span><span class="seat">shobhit</span><span class="seat">Ankit</span><span class="seat">Chandan</span></div>
+        </article></div>
+    </section>
+    <section class="matchday">
+      <h2>Matchday 6</h2>
+      <div class="tables">
+        <article class="table" data-kind="Big Six">
+          <header><h3>Big Six</h3><span class="badge">6 seats</span></header>
+          <div class="seats"><span class="seat">Upavan</span><span class="seat">Dharmendra</span><span class="seat">Arun</span><span class="seat">Aadarsh</span><span class="seat">Chandan</span><span class="seat">Uday</span></div>
+        </article>
+        <article class="table" data-kind="Orange">
+          <header><h3>Orange</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">shobhit</span><span class="seat">Ankit</span><span class="seat">Anurag</span><span class="seat">Kapil</span></div>
+        </article>
+        <article class="table" data-kind="Blue">
+          <header><h3>Blue</h3><span class="badge">4 seats</span></header>
+          <div class="seats"><span class="seat">Gagan</span><span class="seat">Deepak</span><span class="seat">akash</span><span class="seat">ashish</span></div>
+        </article></div>
+    </section>
+
+    <h2>Per-player cards</h2>
+    <div class="players">
+    <article class="player-card">
+      <h3><span class="code">A</span> Upavan</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Big Six</td><td>Anurag · Dharmendra · Gagan · ashish · shobhit</td></tr><tr><td>MD2</td><td>Blue</td><td>Arun · Gagan · Uday</td></tr><tr><td>MD3</td><td>Orange</td><td>Deepak · Dharmendra · Kapil</td></tr><tr><td>MD4</td><td>Big Six</td><td>Ankit · Arun · Chandan · Deepak · Gagan</td></tr><tr><td>MD5</td><td>Orange</td><td>Uday · akash · ashish</td></tr><tr><td>MD6</td><td>Big Six</td><td>Aadarsh · Arun · Chandan · Dharmendra · Uday</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">B</span> Dharmendra</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Big Six</td><td>Anurag · Gagan · Upavan · ashish · shobhit</td></tr><tr><td>MD2</td><td>Orange</td><td>Aadarsh · Ankit · Anurag</td></tr><tr><td>MD3</td><td>Orange</td><td>Deepak · Kapil · Upavan</td></tr><tr><td>MD4</td><td>Orange</td><td>Aadarsh · akash · shobhit</td></tr><tr><td>MD5</td><td>Blue</td><td>Ankit · Chandan · shobhit</td></tr><tr><td>MD6</td><td>Big Six</td><td>Aadarsh · Arun · Chandan · Uday · Upavan</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">C</span> shobhit</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Big Six</td><td>Anurag · Dharmendra · Gagan · Upavan · ashish</td></tr><tr><td>MD2</td><td>Big Six</td><td>Chandan · Deepak · Kapil · akash · ashish</td></tr><tr><td>MD3</td><td>Big Six</td><td>Aadarsh · Ankit · Arun · Uday · ashish</td></tr><tr><td>MD4</td><td>Orange</td><td>Aadarsh · Dharmendra · akash</td></tr><tr><td>MD5</td><td>Blue</td><td>Ankit · Chandan · Dharmendra</td></tr><tr><td>MD6</td><td>Orange</td><td>Ankit · Anurag · Kapil</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">D</span> Ankit</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Blue</td><td>Arun · Kapil · akash</td></tr><tr><td>MD2</td><td>Orange</td><td>Aadarsh · Anurag · Dharmendra</td></tr><tr><td>MD3</td><td>Big Six</td><td>Aadarsh · Arun · Uday · ashish · shobhit</td></tr><tr><td>MD4</td><td>Big Six</td><td>Arun · Chandan · Deepak · Gagan · Upavan</td></tr><tr><td>MD5</td><td>Blue</td><td>Chandan · Dharmendra · shobhit</td></tr><tr><td>MD6</td><td>Orange</td><td>Anurag · Kapil · shobhit</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">E</span> Gagan</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Big Six</td><td>Anurag · Dharmendra · Upavan · ashish · shobhit</td></tr><tr><td>MD2</td><td>Blue</td><td>Arun · Uday · Upavan</td></tr><tr><td>MD3</td><td>Blue</td><td>Anurag · Chandan · akash</td></tr><tr><td>MD4</td><td>Big Six</td><td>Ankit · Arun · Chandan · Deepak · Upavan</td></tr><tr><td>MD5</td><td>Big Six</td><td>Aadarsh · Anurag · Arun · Deepak · Kapil</td></tr><tr><td>MD6</td><td>Blue</td><td>Deepak · akash · ashish</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">F</span> Arun</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Blue</td><td>Ankit · Kapil · akash</td></tr><tr><td>MD2</td><td>Blue</td><td>Gagan · Uday · Upavan</td></tr><tr><td>MD3</td><td>Big Six</td><td>Aadarsh · Ankit · Uday · ashish · shobhit</td></tr><tr><td>MD4</td><td>Big Six</td><td>Ankit · Chandan · Deepak · Gagan · Upavan</td></tr><tr><td>MD5</td><td>Big Six</td><td>Aadarsh · Anurag · Deepak · Gagan · Kapil</td></tr><tr><td>MD6</td><td>Big Six</td><td>Aadarsh · Chandan · Dharmendra · Uday · Upavan</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">G</span> Deepak</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Orange</td><td>Aadarsh · Chandan · Uday</td></tr><tr><td>MD2</td><td>Big Six</td><td>Chandan · Kapil · akash · ashish · shobhit</td></tr><tr><td>MD3</td><td>Orange</td><td>Dharmendra · Kapil · Upavan</td></tr><tr><td>MD4</td><td>Big Six</td><td>Ankit · Arun · Chandan · Gagan · Upavan</td></tr><tr><td>MD5</td><td>Big Six</td><td>Aadarsh · Anurag · Arun · Gagan · Kapil</td></tr><tr><td>MD6</td><td>Blue</td><td>Gagan · akash · ashish</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">H</span> Anurag</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Big Six</td><td>Dharmendra · Gagan · Upavan · ashish · shobhit</td></tr><tr><td>MD2</td><td>Orange</td><td>Aadarsh · Ankit · Dharmendra</td></tr><tr><td>MD3</td><td>Blue</td><td>Chandan · Gagan · akash</td></tr><tr><td>MD4</td><td>Blue</td><td>Kapil · Uday · ashish</td></tr><tr><td>MD5</td><td>Big Six</td><td>Aadarsh · Arun · Deepak · Gagan · Kapil</td></tr><tr><td>MD6</td><td>Orange</td><td>Ankit · Kapil · shobhit</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">I</span> akash</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Blue</td><td>Ankit · Arun · Kapil</td></tr><tr><td>MD2</td><td>Big Six</td><td>Chandan · Deepak · Kapil · ashish · shobhit</td></tr><tr><td>MD3</td><td>Blue</td><td>Anurag · Chandan · Gagan</td></tr><tr><td>MD4</td><td>Orange</td><td>Aadarsh · Dharmendra · shobhit</td></tr><tr><td>MD5</td><td>Orange</td><td>Uday · Upavan · ashish</td></tr><tr><td>MD6</td><td>Blue</td><td>Deepak · Gagan · ashish</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">J</span> Aadarsh</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Orange</td><td>Chandan · Deepak · Uday</td></tr><tr><td>MD2</td><td>Orange</td><td>Ankit · Anurag · Dharmendra</td></tr><tr><td>MD3</td><td>Big Six</td><td>Ankit · Arun · Uday · ashish · shobhit</td></tr><tr><td>MD4</td><td>Orange</td><td>Dharmendra · akash · shobhit</td></tr><tr><td>MD5</td><td>Big Six</td><td>Anurag · Arun · Deepak · Gagan · Kapil</td></tr><tr><td>MD6</td><td>Big Six</td><td>Arun · Chandan · Dharmendra · Uday · Upavan</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">K</span> Chandan</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Orange</td><td>Aadarsh · Deepak · Uday</td></tr><tr><td>MD2</td><td>Big Six</td><td>Deepak · Kapil · akash · ashish · shobhit</td></tr><tr><td>MD3</td><td>Blue</td><td>Anurag · Gagan · akash</td></tr><tr><td>MD4</td><td>Big Six</td><td>Ankit · Arun · Deepak · Gagan · Upavan</td></tr><tr><td>MD5</td><td>Blue</td><td>Ankit · Dharmendra · shobhit</td></tr><tr><td>MD6</td><td>Big Six</td><td>Aadarsh · Arun · Dharmendra · Uday · Upavan</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">L</span> Kapil</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Blue</td><td>Ankit · Arun · akash</td></tr><tr><td>MD2</td><td>Big Six</td><td>Chandan · Deepak · akash · ashish · shobhit</td></tr><tr><td>MD3</td><td>Orange</td><td>Deepak · Dharmendra · Upavan</td></tr><tr><td>MD4</td><td>Blue</td><td>Anurag · Uday · ashish</td></tr><tr><td>MD5</td><td>Big Six</td><td>Aadarsh · Anurag · Arun · Deepak · Gagan</td></tr><tr><td>MD6</td><td>Orange</td><td>Ankit · Anurag · shobhit</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">M</span> ashish</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Big Six</td><td>Anurag · Dharmendra · Gagan · Upavan · shobhit</td></tr><tr><td>MD2</td><td>Big Six</td><td>Chandan · Deepak · Kapil · akash · shobhit</td></tr><tr><td>MD3</td><td>Big Six</td><td>Aadarsh · Ankit · Arun · Uday · shobhit</td></tr><tr><td>MD4</td><td>Blue</td><td>Anurag · Kapil · Uday</td></tr><tr><td>MD5</td><td>Orange</td><td>Uday · Upavan · akash</td></tr><tr><td>MD6</td><td>Blue</td><td>Deepak · Gagan · akash</td></tr></tbody></table>
+    </article>
+    <article class="player-card">
+      <h3><span class="code">N</span> Uday</h3>
+      <table><thead><tr><th>MD</th><th>Table</th><th>Opponents</th></tr></thead><tbody><tr><td>MD1</td><td>Orange</td><td>Aadarsh · Chandan · Deepak</td></tr><tr><td>MD2</td><td>Blue</td><td>Arun · Gagan · Upavan</td></tr><tr><td>MD3</td><td>Big Six</td><td>Aadarsh · Ankit · Arun · ashish · shobhit</td></tr><tr><td>MD4</td><td>Blue</td><td>Anurag · Kapil · ashish</td></tr><tr><td>MD5</td><td>Orange</td><td>Upavan · akash · ashish</td></tr><tr><td>MD6</td><td>Big Six</td><td>Aadarsh · Arun · Chandan · Dharmendra · Upavan</td></tr></tbody></table>
+    </article></div>
+
+    <footer>
+      Judgement Premier League — Season 1 · Bid exact. Play brave. Brag in fifteen minutes.<br/>
+      #JudgementTable
+    </footer>
+  </div>
+</body>
+</html>
