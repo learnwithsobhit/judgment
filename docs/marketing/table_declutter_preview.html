@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Judgement table preview</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 16px;
+    padding: 24px;
+    background: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #f4f7f5;
+  }
+  h1 { font-size: 14px; font-weight: 600; color: #aaa; margin: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+  .phone {
+    width: 390px;
+    height: 780px;
+    background: #071510;
+    border-radius: 36px;
+    border: 3px solid #333;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 20px 50px rgba(0,0,0,.5);
+  }
+  .notch {
+    height: 28px;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    font-size: 11px;
+    color: #ccc;
+  }
+  .chrome { padding: 8px 12px 0; }
+  .top1, .top2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; font-weight: 600; }
+  .quiet { color: rgba(244,247,245,.65); font-weight: 400; }
+  .trump {
+    background: rgba(228,197,106,.18);
+    color: #e4c56a;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+  }
+  .tools { display: flex; gap: 4px; }
+  .tool {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: rgba(255,255,255,.06); color: #9aaba3;
+    display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  }
+  .shot { color: #e4c56a; font-weight: 800; font-size: 13px; margin-top: 6px; }
+  .bar { height: 3px; border-radius: 99px; background: rgba(255,255,255,.08); margin: 6px 0 8px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 62%; background: #e4c56a; }
+  .felt {
+    margin: 0 8px;
+    height: 390px;
+    border-radius: 18px;
+    background: radial-gradient(ellipse at center, #1b5a44 0%, #12382c 55%, #0c281f 100%);
+    border: 1px solid rgba(255,255,255,.06);
+    position: relative;
+  }
+  .seat {
+    position: absolute;
+    width: 96px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .av {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #2d6b55; border: 2px solid rgba(255,255,255,.25);
+    display: grid; place-items: center; font-size: 11px; font-weight: 800;
+    position: relative;
+  }
+  .seat.turn .av { border-color: #e4c56a; box-shadow: 0 0 0 2px rgba(228,197,106,.35); }
+  .d {
+    position: absolute; right: -4px; top: -4px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #e4c56a; color: #111; font-size: 9px; font-weight: 900;
+    display: grid; place-items: center;
+  }
+  .plate {
+    width: 100%;
+    background: rgba(0,0,0,.55);
+    border-radius: 10px;
+    padding: 3px 5px;
+    text-align: center;
+  }
+  .seat.turn .plate { background: rgba(228,197,106,.92); color: #1a1408; }
+  .name { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stats { font-size: 10px; font-weight: 700; color: rgba(244,247,245,.72); }
+  .seat.turn .stats { color: #3a3018; }
+  .s1 { left: 40px; top: 18px; }
+  .s2 { right: 40px; top: 18px; }
+  .s3 { left: 8px; top: 140px; }
+  .s4 { right: 8px; top: 110px; }
+  .s5 { right: 8px; top: 210px; }
+  .s6 { left: 40px; top: 250px; }
+  .center {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    color: rgba(244,247,245,.28); font-size: 12px; text-align: center;
+    pointer-events: none;
+  }
+  .self {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(0,0,0,.55); border-radius: 12px; padding: 4px 10px 4px 4px;
+  }
+  .self .av { width: 34px; height: 34px; }
+  .dock {
+    margin: 8px;
+    background: rgba(6,18,14,.95);
+    border-radius: 14px;
+    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: center;
+    min-height: 72px;
+  }
+  .social { display: flex; flex-direction: column; gap: 6px; }
+  .social button {
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.06);
+    color: #f4f7f5;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    min-width: 56px;
+  }
+  .main { text-align: center; min-width: 0; }
+  .sofar { font-size: 12px; font-weight: 800; margin-bottom: 4px; }
+  .status { font-size: 12px; color: rgba(244,247,245,.72); }
+  .bids { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin: 6px 0 4px; }
+  .bids button {
+    width: 34px; height: 34px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.06); color: #fff; font-weight: 800; font-size: 12px;
+  }
+  .confirm {
+    width: 100%; border: 0; border-radius: 10px; padding: 10px;
+    background: #e4c56a; color: #1a1408; font-weight: 900; font-size: 13px;
+  }
+  .hand {
+    display: flex; justify-content: center; gap: 4px;
+    padding: 4px 8px 12px;
+  }
+  .card {
+    width: 44px; height: 60px; border-radius: 6px;
+    background: #f7f3ea; border: 1px solid #d7d0c2;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; color: #1b1b1b; line-height: 1.1;
+  }
+  .card.red { color: #b42318; }
+  .tag {
+    position: absolute; left: 12px; bottom: 8px;
+    font-size: 10px; color: #e4c56a; font-weight: 700;
+  }
+  .waiting .bids, .waiting .confirm, .playing .bids, .playing .confirm, .playing .sofar { display: none; }
+  .yourbid .status { display: none; }
+  .playing .center { color: rgba(244,247,245,.55); }
+</style>
+</head>
+<body>
+  <h1>Proposed live table — phone preview</h1>
+  <div class="row">
+    <div class="phone waiting" id="p1">
+      <div class="notch"><span>judgement.live</span><span>9:54</span></div>
+      <div class="chrome">
+        <div class="top1">
+          <div class="meta"><span>Round 3/12</span><span class="quiet">07:28</span><span class="trump">Hearts</span></div>
+          <div class="tools"><div class="tool">?</div><div class="tool">≡</div><div class="tool">×</div></div>
+        </div>
+        <div class="shot">Bid 12s</div>
+        <div class="bar"><i></i></div>
+      </div>
+      <div class="felt">
+        <div class="center"></div>
+        <div class="seat s1"><div class="av">Up</div><div class="plate"><div class="name">Upavan C</div><div class="stats">bid 0 · won 0</div></div></div>
+        <div class="seat s2"><div class="av">de</div><div class="plate"><div class="name">deepu</div><div class="stats">bid 2 · won 0</div></div></div>
+        <div class="seat s3"><div class="av">Ar</div><div class="plate"><div class="name">Arun C</div><div class="stats">6 cards</div></div></div>
+        <div class="seat s4 turn"><div class="av">Dh<span class="d">D</span></div><div class="plate"><div class="name">Dharmen</div><div class="stats">6 cards</div></div></div>
+        <div class="seat s5"><div class="av">Aa</div><div class="plate"><div class="name">Aadarsh</div><div class="stats">6 cards</div></div></div>
+        <div class="seat s6"><div class="av">as</div><div class="plate"><div class="name">ashish</div><div class="stats">6 cards</div></div></div>
+        <div class="self"><div class="av">sh</div><div><div class="name">shobhit C</div><div class="stats">bid — · won 0</div></div></div>
+      </div>
+      <div class="dock">
+        <div class="social"><button>React</button><button>Mute</button></div>
+        <div class="main">
+          <div class="sofar">So far 2 / 6</div>
+          <div class="status">Waiting for Dharmendra C to bid…</div>
+          <div class="bids"><button>0</button><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button></div>
+          <button class="confirm">Confirm</button>
+        </div>
+      </div>
+      <div class="hand">
+        <div class="card">10<br>S</div><div class="card">5<br>C</div><div class="card">2<br>C</div>
+        <div class="card red">Q<br>D</div><div class="card red">9<br>D</div><div class="card red">4<br>D</div>
+      </div>
+      <div class="tag">AFTER · waiting</div>
+    </div>
+
+    <div class="phone yourbid" id="p2">
+      <div class="notch"><span>judgement.live</span><span>9:54</span></div>
+      <div class="chrome">
+        <div class="top1">
+          <div class="meta"><span>Round 3/12</span><span class="quiet">07:28</span><span class="trump">Hearts</span></div>
+          <div class="tools"><div class="tool">?</div><div class="tool">≡</div><div class="tool">×</div></div>
+        </div>
+        <div class="shot">Bid 12s</div>
+        <div class="bar"><i></i></div>
+      </div>
+      <div class="felt">
+        <div class="center"></div>
+        <div class="seat s1"><div class="av">Up</div><div class="plate"><div class="name">Upavan C</div><div class="stats">bid 0 · won 0</div></div></div>
+        <div class="seat s2"><div class="av">de</div><div class="plate"><div class="name">deepu</div><div class="stats">bid 2 · won 0</div></div></div>
+        <div class="seat s3"><div class="av">Ar</div><div class="plate"><div class="name">Arun C</div><div class="stats">6 cards</div></div></div>
+        <div class="seat s4"><div class="av">Dh<span class="d">D</span></div><div class="plate"><div class="name">Dharmen</div><div class="stats">6 cards</div></div></div>
+        <div class="seat s5"><div class="av">Aa</div><div class="plate"><div class="name">Aadarsh</div><div class="stats">6 cards</div></div></div>
+        <div class="seat s6"><div class="av">as</div><div class="plate"><div class="name">ashish</div><div class="stats">6 cards</div></div></div>
+        <div class="self"><div class="av" style="border-color:#e4c56a">sh</div><div><div class="name">shobhit C</div><div class="stats">your turn to bid</div></div></div>
+      </div>
+      <div class="dock">
+        <div class="social"><button>React</button><button>Mute</button></div>
+        <div class="main">
+          <div class="sofar">So far 2 / 6</div>
+          <div class="status">Waiting…</div>
+          <div class="bids"><button>0</button><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button></div>
+          <button class="confirm">Confirm</button>
+        </div>
+      </div>
+      <div class="hand">
+        <div class="card">10<br>S</div><div class="card">5<br>C</div><div class="card">2<br>C</div>
+        <div class="card red">Q<br>D</div><div class="card red">9<br>D</div><div class="card red">4<br>D</div>
+      </div>
+      <div class="tag">AFTER · your bid</div>
+    </div>
+
+    <div class="phone playing" id="p3">
+      <div class="notch"><span>judgement.live</span><span>9:54</span></div>
+      <div class="chrome">
+        <div class="top1">
+          <div class="meta"><span>Round 3/12</span><span class="quiet">07:28</span><span class="trump">Hearts</span></div>
+          <div class="tools"><div class="tool">?</div><div class="tool">≡</div><div class="tool">×</div></div>
+        </div>
+        <div class="shot">Play 12s</div>
+        <div class="bar"><i></i></div>
+      </div>
+      <div class="felt">
+        <div class="center">Trick plays here</div>
+        <div class="seat s1 turn"><div class="av">Up</div><div class="plate"><div class="name">Upavan C</div><div class="stats">bid 0 · won 0</div></div></div>
+        <div class="seat s2"><div class="av">de</div><div class="plate"><div class="name">deepu</div><div class="stats">bid 2 · won 0</div></div></div>
+        <div class="seat s3"><div class="av">Ar</div><div class="plate"><div class="name">Arun C</div><div class="stats">bid 1 · won 0</div></div></div>
+        <div class="seat s4"><div class="av">Dh<span class="d">D</span></div><div class="plate"><div class="name">Dharmen</div><div class="stats">bid 1 · won 0</div></div></div>
+        <div class="seat s5"><div class="av">Aa</div><div class="plate"><div class="name">Aadarsh</div><div class="stats">bid 0 · won 0</div></div></div>
+        <div class="seat s6"><div class="av">as</div><div class="plate"><div class="name">ashish</div><div class="stats">bid 1 · won 0</div></div></div>
+        <div class="self"><div class="av">sh</div><div><div class="name">shobhit C</div><div class="stats">bid 1 · won 0</div></div></div>
+      </div>
+      <div class="dock">
+        <div class="social"><button>React</button><button>Mute</button></div>
+        <div class="main">
+          <div class="sofar">So far 2 / 6</div>
+          <div class="status">Waiting for Upavan C to play…</div>
+          <div class="bids"></div>
+          <button class="confirm">Confirm</button>
+        </div>
+      </div>
+      <div class="hand">
+        <div class="card">10<br>S</div><div class="card">5<br>C</div><div class="card">2<br>C</div>
+        <div class="card red">Q<br>D</div><div class="card red">9<br>D</div><div class="card red">4<br>D</div>
+      </div>
+      <div class="tag">AFTER · playing</div>
+    </div>
+  </div>
+</body>
+</html>

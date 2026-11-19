@@ -9,10 +9,35 @@ import 'package:flutter/foundation.dart';
 
 import 'table_media_session.dart';
 
+/// Shuffle-without-repeat bag: deplete a shuffled copy, then refill.
+class VictoryTrackBag {
+  VictoryTrackBag(this.assets, {math.Random? rng}) : _rng = rng ?? math.Random();
+
+  final List<String> assets;
+  final math.Random _rng;
+  final List<String> _bag = [];
+
+  String next() {
+    if (assets.isEmpty) {
+      throw StateError('VictoryTrackBag has no assets');
+    }
+    if (_bag.isEmpty) {
+      _bag
+        ..addAll(assets)
+        ..shuffle(_rng);
+    }
+    return _bag.removeLast();
+  }
+}
+
 /// Short, overlapping table feedback. Soft fade is baked into the shuffle asset.
-/// Victory beds are longer Pixabay instrumentals, picked at random when Table sounds is on.
+/// Victory beds are longer Pixabay instrumentals; Table sounds picks via
+/// shuffle-without-repeat (all three before any repeat).
 class GameSfx {
-  GameSfx() {
+  GameSfx({math.Random? rng, VictoryTrackBag? victoryBag})
+    : _victoryBag =
+          victoryBag ??
+          VictoryTrackBag(victoryAssets, rng: rng ?? math.Random()) {
     _shuffle.setReleaseMode(ReleaseMode.stop);
     _card.setReleaseMode(ReleaseMode.stop);
     _victory.setReleaseMode(ReleaseMode.stop);
@@ -24,7 +49,7 @@ class GameSfx {
   final AudioPlayer _shuffle = AudioPlayer();
   final AudioPlayer _card = AudioPlayer();
   final AudioPlayer _victory = AudioPlayer();
-  final _rng = math.Random();
+  final VictoryTrackBag _victoryBag;
 
   bool muted = false;
   bool unlocked = false;
@@ -57,11 +82,10 @@ class GameSfx {
     unawaited(_play(_card, cardPlayAsset, volume: 0.7));
   }
 
-  /// Random celebratory bed (flute+tabla or dhol). Soft out-fade is baked into assets.
+  /// Next celebratory bed. Soft out-fade is baked into assets.
   void playVictory() {
     if (muted || victoryAssets.isEmpty) return;
-    final asset = victoryAssets[_rng.nextInt(victoryAssets.length)];
-    unawaited(_playVictory(asset));
+    unawaited(_playVictory(_victoryBag.next()));
   }
 
   Future<void> stopVictory({bool softFade = true}) async {

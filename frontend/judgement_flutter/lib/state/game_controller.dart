@@ -202,9 +202,6 @@ class GameController extends ChangeNotifier {
   int turnTotalMs = 1;
   int? _timerDeadlineId;
 
-  /// Brief post-ritual hand reveal window (deal-out choreography).
-  DateTime? dealRevealUntil;
-
   /// True while the top-bar / progress timer should be shown for this phase.
   bool get showsPhaseTimer {
     final v = view;
@@ -906,11 +903,10 @@ class GameController extends ChangeNotifier {
     final leftRitual = prev?.isShuffleRitual == true && !next.isShuffleRitual;
     if (leftRitual) {
       // Ritual TimerUpdated must not leak into bidding when bid_timeout is off.
+      // Hand faces stay fully visible immediately — no opacity-0 deal hide
+      // (that raced BidPanel / bid timers and caused blind bids).
       turnDeadline = null;
       _timerDeadlineId = null;
-      if (next.ownHand.isNotEmpty) {
-        dealRevealUntil = DateTime.now().add(const Duration(milliseconds: 1200));
-      }
     } else if (!next.isShuffleRitual &&
         next.phase != 'bidding' &&
         next.phase != 'playing') {

@@ -79,10 +79,10 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
         setState(() {});
       }
     });
-    // Warm SVG faces/back so the first deal does not flicker.
+    // Warm PNG faces/back so the first deal does not flicker.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      precacheCardAssets(context);
+      unawaited(precacheCardAssets(context));
     });
   }
 
@@ -1821,11 +1821,6 @@ class _HandArea extends StatelessWidget {
     final playable = view.legalActions.playableCards.toSet();
     final myTurnToPlay = view.phase == 'playing' && controller.isMyTurn;
     final pending = controller.pendingActionId != null;
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final revealUntil = controller.dealRevealUntil;
-    final revealing = !reduceMotion &&
-        revealUntil != null &&
-        DateTime.now().isBefore(revealUntil);
 
     final hand = [...view.ownHand]
       ..sort((a, b) {
@@ -1837,11 +1832,8 @@ class _HandArea extends StatelessWidget {
       });
 
     final cardWidth = MediaQuery.sizeOf(context).width < 600 ? 52.0 : 64.0;
-    // Cap total deal-out ~1.2s (plan); stagger across the hand.
-    final stepMs = hand.isEmpty
-        ? 0
-        : (1200 / hand.length).floor().clamp(40, 80);
 
+    // Fully opaque immediately — never hide faces during bidding/play.
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
       child: SingleChildScrollView(
@@ -1849,118 +1841,35 @@ class _HandArea extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            for (var i = 0; i < hand.length; i++)
+            for (final card in hand)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: _DealRevealCard(
-                  revealing: revealing,
-                  delay: Duration(milliseconds: stepMs * i),
-                  child: PlayingCardWidget(
-                    card: hand[i],
-                    width: cardWidth,
-                    highlighted: myTurnToPlay && playable.contains(hand[i].id),
-                    disabled: myTurnToPlay && !playable.contains(hand[i].id),
-                    onTap: pending
-                        ? null
-                        : () {
-                            final blocked =
-                                controller.cardBlockedReason(hand[i]);
-                            if (blocked == null) {
-                              controller.playCard(hand[i].id);
-                            } else {
-                              ScaffoldMessenger.of(context)
-                                ..hideCurrentSnackBar()
-                                ..showSnackBar(
-                                  SnackBar(
-                                    content: Text(blocked),
-                                    duration: const Duration(seconds: 2),
-                                  ),
-                                );
-                            }
-                          },
-                  ),
+                child: PlayingCardWidget(
+                  card: card,
+                  width: cardWidth,
+                  highlighted: myTurnToPlay && playable.contains(card.id),
+                  disabled: myTurnToPlay && !playable.contains(card.id),
+                  onTap: pending
+                      ? null
+                      : () {
+                          final blocked = controller.cardBlockedReason(card);
+                          if (blocked == null) {
+                            controller.playCard(card.id);
+                          } else {
+                            ScaffoldMessenger.of(context)
+                              ..hideCurrentSnackBar()
+                              ..showSnackBar(
+                                SnackBar(
+                                  content: Text(blocked),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                          }
+                        },
                 ),
               ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Short settle after ritual Deal — stagger fade/slide, never blocks play.
-class _DealRevealCard extends StatefulWidget {
-  final Widget child;
-  final bool revealing;
-  final Duration delay;
-
-  const _DealRevealCard({
-    required this.child,
-    required this.revealing,
-    required this.delay,
-  });
-
-  @override
-  State<_DealRevealCard> createState() => _DealRevealCardState();
-}
-
-class _DealRevealCardState extends State<_DealRevealCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 280),
-  );
-  bool _started = false;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.revealing) {
-      _c.value = 0;
-      Future<void>.delayed(widget.delay, () {
-        if (mounted) {
-          _started = true;
-          _c.forward();
-        }
-      });
-    } else {
-      _c.value = 1;
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _DealRevealCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.revealing && !oldWidget.revealing && !_started) {
-      _c.value = 0;
-      Future<void>.delayed(widget.delay, () {
-        if (mounted) {
-          _started = true;
-          _c.forward();
-        }
-      });
-    } else if (!widget.revealing && _c.value < 1) {
-      _c.value = 1;
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final curved = CurvedAnimation(parent: _c, curve: Curves.easeOut);
-    return FadeTransition(
-      opacity: curved,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, 0.12),
-          end: Offset.zero,
-        ).animate(curved),
-        child: widget.child,
       ),
     );
   }

@@ -37,6 +37,7 @@ void main() {
     expect(paths, hasLength(52));
     expect(allCardAssetPaths(), hasLength(53));
     expect(allCardAssetPaths(), contains(cardBackAssetPath));
+    expect(cardPrecacheBatchSize, 8);
   });
 
   testWidgets('playing card loads PNG asset and keeps semantic label',
