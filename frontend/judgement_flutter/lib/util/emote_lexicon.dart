@@ -3,6 +3,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+/// Original 12 — typed-vibe lexicon still maps onto these.
 const quickReactEmojis = [
   '🔥',
   '😂',
@@ -17,6 +18,101 @@ const quickReactEmojis = [
   '💪',
   '✨',
 ];
+
+class ReactionCategory {
+  final String label;
+  final List<String> emojis;
+
+  const ReactionCategory({required this.label, required this.emojis});
+}
+
+/// WhatsApp-style picker groups. Single-codepoint glyphs (❤️ keeps VS16).
+const reactionCategories = <ReactionCategory>[
+  ReactionCategory(
+    label: 'Smileys',
+    emojis: [
+      '😀',
+      '😃',
+      '😄',
+      '😁',
+      '😆',
+      '😅',
+      '😂',
+      '🤣',
+      '😊',
+      '🙂',
+      '😉',
+      '😍',
+      '🤩',
+      '😘',
+      '😎',
+      '🤓',
+      '😢',
+      '😭',
+      '😤',
+      '😠',
+      '😡',
+      '🤯',
+      '😱',
+      '😴',
+      '🥳',
+      '💀',
+    ],
+  ),
+  ReactionCategory(
+    label: 'Gestures',
+    emojis: [
+      '👍',
+      '👎',
+      '👌',
+      '👏',
+      '🙌',
+      '🙏',
+      '💪',
+      '👀',
+      '🤝',
+      '👊',
+      '👋',
+      '🤞',
+    ],
+  ),
+  ReactionCategory(
+    label: 'Hearts',
+    emojis: [
+      '❤️',
+      '💕',
+      '💖',
+      '💗',
+      '💛',
+      '💚',
+      '💙',
+      '💜',
+      '🖤',
+      '💔',
+    ],
+  ),
+  ReactionCategory(
+    label: 'Celebrate',
+    emojis: [
+      '🎉',
+      '🎊',
+      '🎈',
+      '🎁',
+      '🏆',
+      '🥇',
+      '🎯',
+      '🔥',
+      '✨',
+      '⭐',
+      '💯',
+      '💥',
+    ],
+  ),
+];
+
+List<String> allReactionEmojis() => [
+      for (final category in reactionCategories) ...category.emojis,
+    ];
 
 class EmoteStyle {
   final List<String> emojis;

@@ -647,15 +647,21 @@ async fn cached_jwks(
         .build()
         .map_err(|_| ApiError::Conflict(format!("could not reach {who}")))?
         .get(url)
+        // Prefer plain JSON; gzip feature still decompresses if the host ignores this.
+        .header(reqwest::header::ACCEPT_ENCODING, "identity, gzip")
         .send()
         .await
         .map_err(|_| ApiError::Conflict(format!("could not reach {who}")))?;
+    if !response.status().is_success() {
+        tracing::warn!(status = %response.status(), %who, "jwks fetch failed");
+        return Err(ApiError::Conflict(format!("could not reach {who}")));
+    }
     let body = response
         .text()
         .await
         .map_err(|_| ApiError::Conflict(format!("could not read {who} keys")))?;
     let set = jwk_set_from_json(&body).map_err(|err| {
-        tracing::warn!(error = %err, %who, "jwks parse failed");
+        tracing::warn!(error = %err, %who, body_prefix = %body.chars().take(24).collect::<String>(), "jwks parse failed");
         ApiError::Conflict(format!("could not read {who} keys"))
     })?;
     *cache.lock().unwrap() = Some(CachedJwks {

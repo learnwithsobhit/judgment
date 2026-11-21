@@ -4,6 +4,7 @@ import '../app/app.dart';
 import '../models/protocol.dart';
 import '../state/game_controller.dart';
 import '../util/score_reveal.dart';
+import 'pace_line.dart';
 import 'player_avatar.dart';
 import 'round_score_matrix.dart';
 
@@ -67,6 +68,13 @@ class Scoreboard extends StatelessWidget {
                 ? 'Scoreboard'
                 : 'Round ${round.roundIndex + 1} of ${round.totalRounds} · ${round.cardsPerPlayer} cards',
             style: Theme.of(context).textTheme.titleMedium,
+            textAlign: TextAlign.center,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: PaceLine(
+            controller: controller,
             textAlign: TextAlign.center,
           ),
         ),

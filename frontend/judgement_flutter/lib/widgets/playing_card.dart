@@ -28,6 +28,7 @@ class PlayingCardWidget extends StatelessWidget {
     final height = width * 1.45;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final assetPath = cardFaceAssetPath(card);
+    final placeholder = CardFacePlaceholder(card: card);
 
     final face = AnimatedContainer(
       duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 150),
@@ -60,7 +61,15 @@ class PlayingCardWidget extends StatelessWidget {
                 height: height,
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.medium,
-                errorBuilder: (_, _, _) => _CardFallback(card: card),
+                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                  return cardFrameOrPlaceholder(
+                    image: child,
+                    placeholder: placeholder,
+                    frame: frame,
+                    wasSynchronouslyLoaded: wasSynchronouslyLoaded,
+                  );
+                },
+                errorBuilder: (_, _, _) => placeholder,
               ),
             ),
             if (disabled) const ColoredBox(color: Color(0x99B0B0B0)),
@@ -80,11 +89,11 @@ class PlayingCardWidget extends StatelessWidget {
   }
 }
 
-/// Last-resort readable face if an asset fails to load.
-class _CardFallback extends StatelessWidget {
+/// Rank + suit ink shown until the PNG frame is ready, and if the asset fails.
+class CardFacePlaceholder extends StatelessWidget {
   final CardModel card;
 
-  const _CardFallback({required this.card});
+  const CardFacePlaceholder({super.key, required this.card});
 
   @override
   Widget build(BuildContext context) {
@@ -102,6 +111,21 @@ class _CardFallback extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Solid back shown until `back.png` is ready.
+const cardBackPlaceholderColor = Color(0xFF1A237E);
+
+/// PNG once a frame exists; otherwise the readable placeholder. No fade.
+@visibleForTesting
+Widget cardFrameOrPlaceholder({
+  required Widget image,
+  required Widget placeholder,
+  required int? frame,
+  required bool wasSynchronouslyLoaded,
+}) {
+  if (wasSynchronouslyLoaded || frame != null) return image;
+  return placeholder;
 }
 
 /// A face-down card back, used for opponents' hidden cards.
@@ -130,8 +154,16 @@ class CardBack extends StatelessWidget {
           width: width,
           height: height,
           fit: BoxFit.cover,
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            return cardFrameOrPlaceholder(
+              image: child,
+              placeholder: const ColoredBox(color: cardBackPlaceholderColor),
+              frame: frame,
+              wasSynchronouslyLoaded: wasSynchronouslyLoaded,
+            );
+          },
           errorBuilder: (_, _, _) => const ColoredBox(
-            color: Color(0xFF1A237E),
+            color: cardBackPlaceholderColor,
           ),
         ),
       ),

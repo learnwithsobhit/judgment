@@ -25,7 +25,6 @@ import '../widgets/cartoon_text_blast.dart';
 import '../widgets/emoji_blast.dart';
 import '../widgets/emote_bar.dart';
 import '../widgets/festival_admin_toggle.dart';
-import '../widgets/pace_line.dart';
 import '../widgets/exit_confirm_dialogs.dart';
 import '../widgets/player_avatar.dart';
 import '../widgets/playing_card.dart';
@@ -55,6 +54,8 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
   int _postGameStep = 0;
   bool _leaveDialogOpen = false;
   bool _leaving = false;
+  String? _warmedHandKey;
+  bool _deckWarmStarted = false;
 
   GameController get controller => widget.controller;
 
@@ -82,7 +83,7 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     // Warm PNG faces/back so the first deal does not flicker.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(precacheCardAssets(context));
+      _maybeWarmDealtHand();
     });
   }
 
@@ -142,7 +143,35 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _maybeWarmDealtHand() {
+    if (!mounted) return;
+    final hand = controller.view?.ownHand ?? const <CardModel>[];
+    if (hand.isEmpty) {
+      _warmedHandKey = null;
+      if (_deckWarmStarted) return;
+      _deckWarmStarted = true;
+      unawaited(
+        precacheCardAssets(context, priority: const [cardBackAssetPath]),
+      );
+      return;
+    }
+    final key = hand.map(cardFaceAssetPath).join('\u0001');
+    if (key == _warmedHandKey) return;
+    _warmedHandKey = key;
+    _deckWarmStarted = true;
+    unawaited(
+      precacheCardAssets(
+        context,
+        priority: [
+          ...hand.map(cardFaceAssetPath),
+          cardBackAssetPath,
+        ],
+      ),
+    );
+  }
+
   void _onControllerChanged() {
+    _maybeWarmDealtHand();
     _syncExitGuard();
     _syncFestivalLock();
     if (_leaveDialogOpen && !controller.shouldGuardExit && mounted) {
@@ -430,8 +459,7 @@ class _TableScreenState extends State<TableScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ),
-            EmoteBar(controller: controller),
-            _ActionArea(controller: controller),
+            _TableActionDock(controller: controller),
             _HandArea(controller: controller),
           ],
         ),
@@ -709,6 +737,9 @@ class _TopBar extends StatelessWidget {
         : (remaining.inMilliseconds / 1000).ceil().clamp(0, 999);
 
     final narrow = MediaQuery.sizeOf(context).width < 600;
+    final shotUrgent = remainingSeconds != null && remainingSeconds <= 10;
+    final lead = _leadChipParts(controller);
+    final capsule = _statusCapsule(view, lead);
     final status = <Widget>[
       if (round != null)
         Text(
@@ -719,34 +750,32 @@ class _TopBar extends StatelessWidget {
         ),
       if (controller.gameElapsed != null) ...[
         const SizedBox(width: 8),
-        const Icon(Icons.schedule, size: 16, color: Colors.white70),
-        const SizedBox(width: 4),
         Text(
           _formatGameElapsed(controller.gameElapsed!),
-          style: const TextStyle(
-            fontFeatures: [FontFeature.tabularFigures()],
-            color: Colors.white70,
-            fontWeight: FontWeight.w600,
+          style: TextStyle(
+            fontFeatures: const [FontFeature.tabularFigures()],
+            color: Colors.white.withValues(alpha: 0.55),
+            fontWeight: FontWeight.w500,
+            fontSize: 12,
           ),
         ),
       ],
-      if (view.trump != null) ...[const SizedBox(width: 8), _trumpChip(view)],
     ];
     final tools = <Widget>[
       if (remainingSeconds != null) ...[
         Icon(
           Icons.timer_outlined,
           size: 18,
-          color: remainingSeconds <= 10 ? Colors.orangeAccent : Colors.white70,
+          color: shotUrgent ? Colors.orangeAccent : goldAccent,
         ),
         const SizedBox(width: 4),
         Text(
           '${_timerPhaseHint(view.phase)}${remainingSeconds}s',
           style: TextStyle(
             fontFeatures: const [FontFeature.tabularFigures()],
-            color: remainingSeconds <= 10
-                ? Colors.orangeAccent
-                : Colors.white70,
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            color: shotUrgent ? Colors.orangeAccent : goldAccent,
           ),
         ),
         const SizedBox(width: 8),
@@ -787,13 +816,38 @@ class _TopBar extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(children: [...status, const Spacer()]),
+                Row(
+                  children: [
+                    ...status,
+                    if (capsule != null) ...[
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: capsule,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
                 Row(mainAxisAlignment: MainAxisAlignment.end, children: tools),
               ],
             )
           else
-            Row(children: [...status, const Spacer(), ...tools]),
-          PaceLine(controller: controller),
+            Row(
+              children: [
+                ...status,
+                if (capsule != null) ...[
+                  const SizedBox(width: 8),
+                  Flexible(child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: capsule,
+                  )),
+                ] else
+                  const Spacer(),
+                ...tools,
+              ],
+            ),
           if (remaining != null && !view.isFinished)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -802,9 +856,7 @@ class _TopBar extends StatelessWidget {
                     .clamp(0.0, 1.0),
                 minHeight: 3,
                 backgroundColor: Colors.white12,
-                color: remaining.inSeconds <= 10
-                    ? Colors.orangeAccent
-                    : goldAccent,
+                color: shotUrgent ? Colors.orangeAccent : goldAccent,
               ),
             ),
         ],
@@ -827,38 +879,26 @@ class _TopBar extends StatelessWidget {
     );
   }
 
+  Widget? _statusCapsule(PlayerGameView view, _LeadParts? lead) {
+    final hasTrump = view.trump != null;
+    if (!hasTrump && lead == null) return null;
+    if (hasTrump && lead != null) {
+      return _TrumpLeadCapsule(view: view, lead: lead);
+    }
+    if (hasTrump) return _trumpChip(view);
+    return _LeadHalf(lead: lead!);
+  }
+
   Widget _trumpChip(PlayerGameView view) {
-    final symbol = suitSymbols[view.trump] ?? '?';
     return Tooltip(
-      message: view.trumpCard == null
-          ? 'Trump: ${view.trump}'
-          : 'Trump: ${view.trump} (revealed ${view.trumpCard!.label})',
+      message: _trumpTooltip(view),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              symbol,
-              style: TextStyle(
-                color: suitColorOnLight(view.trump),
-                fontSize: 16,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              'trump',
-              style: TextStyle(
-                color: Colors.black.withValues(alpha: 0.7),
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
+        child: _TrumpFace(view: view),
       ),
     );
   }
@@ -880,6 +920,167 @@ class _TopBar extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
       ),
+    );
+  }
+}
+
+class _LeadParts {
+  const _LeadParts({required this.name, required this.suffix});
+
+  final String name;
+  final String suffix;
+
+  String get spoken => name.isEmpty ? suffix : '$name $suffix';
+}
+
+_LeadParts? _leadChipParts(GameController controller) {
+  final view = controller.view;
+  if (view == null) return null;
+  final leader = view.leader;
+  if (leader == null || view.roundHistory.isEmpty) return null;
+  if (leader.margin <= 0) return const _LeadParts(name: '', suffix: 'Tied');
+  final mine = leader.playerId == controller.myPlayerId;
+  final name = mine
+      ? 'You'
+      : seatLabel(controller.nicknameOf(leader.playerId));
+  if (ScoreReveal.fromView(view).showTotals) {
+    return _LeadParts(name: name, suffix: '+${leader.margin}');
+  }
+  return _LeadParts(name: name, suffix: 'ahead');
+}
+
+String _trumpTooltip(PlayerGameView view) {
+  return view.trumpCard == null
+      ? 'Trump: ${view.trump}'
+      : 'Trump: ${view.trump} (revealed ${view.trumpCard!.label})';
+}
+
+class _TrumpFace extends StatelessWidget {
+  const _TrumpFace({required this.view, this.symbolOnly = false});
+
+  final PlayerGameView view;
+  final bool symbolOnly;
+
+  @override
+  Widget build(BuildContext context) {
+    final symbol = suitSymbols[view.trump] ?? '?';
+    final glyph = Text(
+      symbol,
+      style: TextStyle(
+        color: suitColorOnLight(view.trump),
+        fontSize: 16,
+      ),
+    );
+    if (symbolOnly) return glyph;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        glyph,
+        const SizedBox(width: 4),
+        Text(
+          'trump',
+          style: TextStyle(
+            color: Colors.black.withValues(alpha: 0.7),
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// White trump half + gold lead half as one capsule.
+class _TrumpLeadCapsule extends StatelessWidget {
+  const _TrumpLeadCapsule({required this.view, required this.lead});
+
+  final PlayerGameView view;
+  final _LeadParts lead;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '${_trumpTooltip(view)} · ${lead.spoken}',
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: SizedBox(
+          height: 28,
+          child: Row(
+            children: [
+              ColoredBox(
+                key: const ValueKey('table-trump-face'),
+                color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Center(
+                    child: _TrumpFace(view: view, symbolOnly: true),
+                  ),
+                ),
+              ),
+              const ColoredBox(color: goldAccent, child: SizedBox(width: 1)),
+              Expanded(child: _LeadHalf(lead: lead, paired: true)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LeadHalf extends StatelessWidget {
+  const _LeadHalf({required this.lead, this.paired = false});
+
+  final _LeadParts lead;
+  final bool paired;
+
+  static const _style = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w800,
+    color: goldAccent,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(
+      children: [
+        if (lead.name.isNotEmpty)
+          Flexible(
+            child: Text(
+              lead.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _style,
+            ),
+          ),
+        Text(
+          lead.name.isEmpty ? lead.suffix : ' ${lead.suffix}',
+          maxLines: 1,
+          softWrap: false,
+          style: _style,
+        ),
+      ],
+    );
+    final body = Semantics(
+      label: lead.spoken,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: row,
+      ),
+    );
+    if (paired) {
+      return ColoredBox(
+        key: const ValueKey('table-lead-chip'),
+        color: feltGreen,
+        child: body,
+      );
+    }
+    return Container(
+      key: const ValueKey('table-lead-chip'),
+      decoration: BoxDecoration(
+        color: feltGreen,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: goldAccent.withValues(alpha: 0.45)),
+      ),
+      child: body,
     );
   }
 }
@@ -935,22 +1136,8 @@ class _TableArea extends StatelessWidget {
                   constraints.maxWidth,
                   hasSides: ring.left.isNotEmpty || ring.right.isNotEmpty,
                 );
-                return Column(
+                final table = Column(
                   children: [
-                    if (view.leader != null && view.roundHistory.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          _leaderChipLabel(controller, view),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: goldAccent,
-                          ),
-                        ),
-                      ),
                     if (ring.top.isNotEmpty)
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1009,6 +1196,18 @@ class _TableArea extends StatelessWidget {
                     ),
                   ],
                 );
+                if (constraints.maxHeight < 200) {
+                  return FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.center,
+                    child: SizedBox(
+                      width: constraints.maxWidth,
+                      height: 200,
+                      child: table,
+                    ),
+                  );
+                }
+                return table;
               },
             ),
           ),
@@ -1028,25 +1227,55 @@ class _TableArea extends StatelessWidget {
   ) {
     if (seats.isEmpty) return const SizedBox(width: 4);
     // Side seats sit in a tall column; reserve headroom so kalgi/caps are not
-    // clipped by the Expanded row above the avatar.
-    const sideOrnamentPad = 28.0;
+    // clipped by the Expanded row above the avatar. Scale down when the dock
+    // eats felt height (e.g. BidPanel + Confirm on a short phone).
     return SizedBox(
       width: width,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (final opponent in seats)
-            Padding(
-              padding: const EdgeInsets.only(top: sideOrnamentPad),
-              child: _seat(
-                view,
-                opponent,
-                crowded,
-                placeMarks[opponent.playerId],
-              ),
-            ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tight = constraints.maxHeight < 180;
+          final ornamentPad = tight ? 8.0 : 28.0;
+          final column = Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final opponent in seats)
+                Padding(
+                  padding: EdgeInsets.only(top: ornamentPad),
+                  child: _seat(
+                    view,
+                    opponent,
+                    crowded,
+                    placeMarks[opponent.playerId],
+                  ),
+                ),
+            ],
+          );
+          if (!tight) {
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final opponent in seats)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 28),
+                    child: _seat(
+                      view,
+                      opponent,
+                      crowded,
+                      placeMarks[opponent.playerId],
+                    ),
+                  ),
+              ],
+            );
+          }
+          return FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: SizedBox(width: width, child: column),
+          );
+        },
       ),
     );
   }
@@ -1066,6 +1295,7 @@ class _TableArea extends StatelessWidget {
       pulseDealer: view.isShuffleRitual &&
           view.round?.dealer == opponent.playerId,
       avatarRadius: crowded ? 16 : 20,
+      crowded: crowded,
       place: place,
     );
   }
@@ -1122,8 +1352,28 @@ class _TableArea extends StatelessWidget {
     const avatarRadius = 16.0;
     // Ornaments paint above the portrait; reserve space so they never underlap the trick.
     const ornamentReserve = avatarRadius * 1.55;
+    final stats = _seatStatLine(
+      bid: view.ownBid,
+      tricksWon: view.ownTricksWon,
+      crowded: false,
+      dealerPrefix: isDealer,
+    );
+    final dealerBadge = isDealer
+        ? const CircleAvatar(
+            radius: 9,
+            backgroundColor: goldAccent,
+            child: Text(
+              'D',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          )
+        : null;
     return Padding(
-      padding: const EdgeInsets.only(top: ornamentReserve),
+      padding: EdgeInsets.only(top: ornamentReserve, bottom: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1148,6 +1398,8 @@ class _TableArea extends StatelessWidget {
                   ),
                 ),
               ),
+              if (dealerBadge != null)
+                Positioned(right: -2, top: -2, child: dealerBadge),
               if (isLeader)
                 const Positioned(
                   left: -2,
@@ -1163,7 +1415,7 @@ class _TableArea extends StatelessWidget {
               child: ColoredBox(
                 color: isMyTurn
                     ? goldAccent
-                    : Colors.black.withValues(alpha: 0.35),
+                    : Colors.black.withValues(alpha: 0.55),
                 child: IntrinsicHeight(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1191,22 +1443,19 @@ class _TableArea extends StatelessWidget {
                                   fontSize: 13,
                                 ),
                               ),
-                              Text(
-                                [
-                                  if (isDealer) 'dealer',
-                                  if (view.ownBid != null)
-                                    'bid ${view.ownBid} · won ${view.ownTricksWon}',
-                                ].join(' · '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: isMyTurn
-                                      ? Colors.black87
-                                      : Colors.white70,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
+                              if (stats != null)
+                                Text(
+                                  stats,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: isMyTurn
+                                        ? Colors.black87
+                                        : Colors.white.withValues(alpha: 0.85),
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                         ),
@@ -1223,22 +1472,19 @@ class _TableArea extends StatelessWidget {
   }
 }
 
-String _leaderChipLabel(GameController controller, PlayerGameView view) {
-  final leader = view.leader;
-  if (leader == null) return '';
-  final totalsVisible = ScoreReveal.fromView(view).showTotals;
-  if (!totalsVisible) {
-    if (leader.margin == 0) return 'Tied on round scores';
-    if (leader.playerId == controller.myPlayerId) {
-      return 'You’re ahead on round scores';
-    }
-    return '${controller.nicknameOf(leader.playerId)} ahead on round scores';
-  }
-  if (leader.margin == 0) return 'Tied for the lead';
-  if (leader.playerId == controller.myPlayerId) {
-    return 'You’re leading by ${leader.margin}';
-  }
-  return '${controller.nicknameOf(leader.playerId)} leads by ${leader.margin}';
+/// Glanceable seat stats after a bid. Unbid seats show the name only.
+String? _seatStatLine({
+  required int? bid,
+  required int tricksWon,
+  required bool crowded,
+  bool dealerPrefix = false,
+}) {
+  if (bid == null) return null;
+  final core = crowded
+      ? 'b$bid·w$tricksWon'
+      : 'bid $bid · won $tricksWon';
+  if (dealerPrefix) return 'dealer · $core';
+  return core;
 }
 
 /// Clockwise opponents split into left (bottom to top), top (left to right),
@@ -1281,6 +1527,7 @@ class _OpponentSeat extends StatelessWidget {
   final bool isLeader;
   final bool pulseDealer;
   final double avatarRadius;
+  final bool crowded;
   final int? place;
 
   const _OpponentSeat({
@@ -1291,6 +1538,7 @@ class _OpponentSeat extends StatelessWidget {
     required this.isLeader,
     this.pulseDealer = false,
     required this.avatarRadius,
+    required this.crowded,
     this.place,
   });
 
@@ -1313,6 +1561,11 @@ class _OpponentSeat extends StatelessWidget {
             ),
           )
         : null;
+    final stats = _seatStatLine(
+      bid: opponent.bid,
+      tricksWon: opponent.tricksWon,
+      crowded: crowded,
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       child: Column(
@@ -1356,7 +1609,9 @@ class _OpponentSeat extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: ColoredBox(
-              color: Colors.black.withValues(alpha: 0.4),
+              color: isTurn
+                  ? goldAccent.withValues(alpha: 0.92)
+                  : Colors.black.withValues(alpha: 0.55),
               child: IntrinsicHeight(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1366,7 +1621,7 @@ class _OpponentSeat extends StatelessWidget {
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 4,
-                          vertical: 2,
+                          vertical: 3,
                         ),
                         child: Column(
                           children: [
@@ -1374,34 +1629,31 @@ class _OpponentSeat extends StatelessWidget {
                               seatLabel(opponent.nickname),
                               maxLines: 1,
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
+                                color: isTurn ? Colors.black : Colors.white,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
-                            Text(
-                              opponent.bid == null
-                                  ? '${opponent.cardCount} cards'
-                                  : 'bid ${opponent.bid}',
-                              maxLines: 1,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Colors.white70,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (opponent.bid != null)
-                              Text(
-                                'won ${opponent.tricksWon}',
-                                maxLines: 1,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white70,
+                            if (stats != null)
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  stats,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: crowded ? 11 : 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: isTurn
+                                        ? Colors.black87
+                                        : Colors.white.withValues(
+                                            alpha: 0.85,
+                                          ),
+                                  ),
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
                           ],
                         ),
@@ -1475,12 +1727,13 @@ class _TrickArea extends StatelessWidget {
     final cards = controller.displayTrick;
     if (cards.isEmpty) {
       final view = controller.view!;
+      // Dock owns bidding/playing wait copy — keep the felt center calm.
       final label = switch (view.phase) {
-        'bidding' => 'Bidding in progress',
-        'playing' => 'Waiting for the lead…',
+        'bidding' || 'playing' => null,
         'round_scoring' || 'game_scoring' => 'Scoring the round…',
         _ => 'Shuffling…',
       };
+      if (label == null) return const SizedBox.shrink();
       return Text(
         label,
         style: TextStyle(
@@ -1561,99 +1814,168 @@ class _TrickArea extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Action area: bidding panel or a status line
+// Phase-aware south dock: React/Mute + primary action
 // ---------------------------------------------------------------------------
 
-class _ActionArea extends StatelessWidget {
+class _TableActionDock extends StatelessWidget {
   final GameController controller;
 
-  const _ActionArea({required this.controller});
+  const _TableActionDock({required this.controller});
 
   @override
   Widget build(BuildContext context) {
     final view = controller.view!;
     final pending = controller.pendingActionId != null;
-    final Widget body;
+    final myBid = view.phase == 'bidding' && controller.isMyTurn;
+    final status = myBid ? null : _dockStatusText(controller, view);
 
+    Widget? extra;
     if (view.isShuffleRitual) {
       final ritual = view.shuffle!;
       if (ritual.canDeal || ritual.canShuffle) {
-        body = ShuffleRitualActions(controller: controller);
-      } else {
-        body = const SizedBox(height: 4);
+        extra = ShuffleRitualActions(controller: controller);
       }
-    } else if (view.phase == 'bidding' && controller.isMyTurn) {
-      final cards = view.round?.cardsPerPlayer ?? 0;
-      final legal = view.legalActions.legalBids.toSet();
-      final isDealer = view.round?.dealer == controller.myPlayerId;
-      final dealerRestricted =
-          isDealer &&
-          List.generate(cards + 1, (b) => b).any((b) => !legal.contains(b));
-      body = BidPanel(
-        cards: cards,
-        legalBids: legal,
-        dealerRestricted: dealerRestricted,
-        pending: pending,
-        onConfirm: controller.placeBid,
-      );
-    } else {
-      final status = _statusText(view);
-      body = status == null
-          ? const SizedBox(height: 4)
-          : Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Semantics(
-                liveRegion: true,
-                label: status,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (pending) ...[
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    Text(
-                      status,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.75),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
+    } else if (myBid) {
+      extra = _myBidPanel(context, view, pending);
     }
 
-    if (view.phase != 'bidding') return body;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _BidsSoFarBar(controller: controller),
-        body,
-      ],
+    return Container(
+      key: const ValueKey('table-action-dock'),
+      color: Colors.black.withValues(alpha: 0.42),
+      padding: const EdgeInsets.fromLTRB(8, 4, 10, 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          EmoteUnlockBanner(controller: controller),
+          if (view.phase == 'bidding')
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _BidsSoFarBar(controller: controller),
+            ),
+          _DockCaptionRow(
+            controller: controller,
+            status: status,
+            pending: pending && status != null,
+          ),
+          if (extra != null) extra,
+        ],
+      ),
     );
   }
 
-  String? _statusText(PlayerGameView view) {
-    final turnName = view.currentTurn == null
-        ? null
-        : controller.nicknameOf(view.currentTurn!);
-    return switch (view.phase) {
-      'bidding' => 'Waiting for $turnName to bid…',
-      'playing' =>
-        controller.isMyTurn
-            ? 'Your turn — pick a card'
-            : 'Waiting for $turnName to play…',
-      'round_scoring' || 'game_scoring' => 'Scoring…',
-      'dealing' => view.isShuffleRitual ? null : 'Dealing…',
-      'round_setup' => 'Dealing…',
-      _ => null,
-    };
+  Widget _myBidPanel(
+    BuildContext context,
+    PlayerGameView view,
+    bool pending,
+  ) {
+    final cards = view.round?.cardsPerPlayer ?? 0;
+    final legal = view.legalActions.legalBids.toSet();
+    final isDealer = view.round?.dealer == controller.myPlayerId;
+    final dealerRestricted =
+        isDealer &&
+        List.generate(cards + 1, (b) => b).any((b) => !legal.contains(b));
+    final panel = BidPanel(
+      cards: cards,
+      legalBids: legal,
+      dealerRestricted: dealerRestricted,
+      pending: pending,
+      onConfirm: controller.placeBid,
+    );
+    if (MediaQuery.disableAnimationsOf(context)) return panel;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.92, end: 1),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(0, (1 - value) * 8),
+            child: child,
+          ),
+        );
+      },
+      child: panel,
+    );
   }
+}
+
+class _DockCaptionRow extends StatelessWidget {
+  final GameController controller;
+  final String? status;
+  final bool pending;
+
+  const _DockCaptionRow({
+    required this.controller,
+    required this.status,
+    required this.pending,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        EmoteReactButton(controller: controller),
+        const SizedBox(width: 6),
+        EmoteMicButton(controller: controller),
+        Expanded(
+          child: status == null
+              ? const SizedBox(height: 40)
+              : Semantics(
+                  liveRegion: true,
+                  label: status,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (pending) ...[
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Flexible(
+                          child: Text(
+                            status!,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.8),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+        ),
+        EmoteMuteButton(controller: controller),
+      ],
+    );
+  }
+}
+
+String? _dockStatusText(GameController controller, PlayerGameView view) {
+  final turnName = view.currentTurn == null
+      ? null
+      : controller.nicknameOf(view.currentTurn!);
+  return switch (view.phase) {
+    'bidding' => 'Waiting for $turnName to bid…',
+    'playing' =>
+      controller.isMyTurn
+          ? 'Your turn — pick a card'
+          : 'Waiting for $turnName to play…',
+    'round_scoring' || 'game_scoring' => 'Scoring…',
+    'dealing' => view.isShuffleRitual ? null : 'Dealing…',
+    'round_setup' => 'Dealing…',
+    _ => null,
+  };
 }
 
 /// Soft one-shot pulse on the dealer badge when the shuffle phase begins.
@@ -1697,8 +2019,7 @@ class _SoftPulseOnceState extends State<_SoftPulseOnce>
   }
 }
 
-/// Placed bids for this round, kept next to the bid buttons so a short phone
-/// table cannot hide them. Hidden once bidding ends.
+/// One line: So far total, then compact bid pills. Scrolls sideways at 8-max.
 class _BidsSoFarBar extends StatelessWidget {
   final GameController controller;
 
@@ -1718,53 +2039,54 @@ class _BidsSoFarBar extends StatelessWidget {
     }
     final total = placed.values.fold<int>(0, (sum, bid) => sum + bid);
     final cards = view.round?.cardsPerPlayer;
-    final opponents = [...view.opponents]
-      ..sort((a, b) => a.seat.compareTo(b.seat));
-    final clockwise = [
-      ...opponents.where((opponent) => opponent.seat > view.ownSeat),
-      ...opponents.where((opponent) => opponent.seat < view.ownSeat),
-    ];
-    final chips = <({String id, String label, int? bid})>[
-      for (final opponent in clockwise)
+    final soFar = cards == null ? 'So far $total' : 'So far $total / $cards';
+
+    final roster = <({String label, int? bid, bool isTurn})>[
+      for (final opponent in view.opponents)
         (
-          id: opponent.playerId,
           label: seatLabel(opponent.nickname),
           bid: placed[opponent.playerId],
+          isTurn: view.currentTurn == opponent.playerId,
         ),
       (
-        id: controller.myPlayerId,
         label: 'you',
         bid: placed[controller.myPlayerId],
+        isTurn: view.currentTurn == controller.myPlayerId,
       ),
     ];
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
-      child: Column(
+    return SizedBox(
+      height: 32,
+      child: Row(
         children: [
           Text(
-            cards == null ? 'So far $total' : 'So far $total / $cards',
-            textAlign: TextAlign.center,
+            soFar,
+            maxLines: 1,
+            softWrap: false,
             style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
               color: Colors.white,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
-          const SizedBox(height: 4),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 6,
-            runSpacing: 4,
-            children: [
-              for (final chip in chips)
-                _BidChip(
-                  label: chip.bid == null
-                      ? '${chip.label} —'
-                      : '${chip.label} ${chip.bid}',
-                  current: view.currentTurn == chip.id,
-                ),
-            ],
+          const SizedBox(width: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < roster.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 6),
+                    _BidPill(
+                      label: roster[i].label,
+                      bid: roster[i].bid,
+                      isTurn: roster[i].isTurn,
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -1772,29 +2094,35 @@ class _BidsSoFarBar extends StatelessWidget {
   }
 }
 
-class _BidChip extends StatelessWidget {
-  final String label;
-  final bool current;
+class _BidPill extends StatelessWidget {
+  const _BidPill({
+    required this.label,
+    required this.bid,
+    required this.isTurn,
+  });
 
-  const _BidChip({required this.label, required this.current});
+  final String label;
+  final int? bid;
+  final bool isTurn;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: current
-            ? goldAccent.withValues(alpha: 0.22)
-            : Colors.black.withValues(alpha: 0.28),
-        borderRadius: BorderRadius.circular(10),
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+        border: isTurn ? Border.all(color: goldAccent, width: 1) : null,
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: current ? FontWeight.w800 : FontWeight.w500,
-            color: current ? goldAccent : Colors.white70,
+          '$label ${bid ?? '—'}',
+          maxLines: 1,
+          softWrap: false,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
           ),
         ),
       ),

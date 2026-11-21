@@ -19,7 +19,15 @@ const ALLOWED_AVATARS: &[&str] = &[
 ];
 
 const ALLOWED_EMOJIS: &[&str] = &[
-    "🔥", "😂", "👏", "😱", "😎", "💀", "🎯", "🙌", "😤", "👀", "💪", "✨",
+    // Smileys
+    "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "🙂", "😉", "😍", "🤩",
+    "😘", "😎", "🤓", "😢", "😭", "😤", "😠", "😡", "🤯", "😱", "😴", "🥳", "💀",
+    // Gestures
+    "👍", "👎", "👌", "👏", "🙌", "🙏", "💪", "👀", "🤝", "👊", "👋", "🤞",
+    // Hearts (❤️ is U+2764 U+FE0F — same bytes as the Flutter catalog)
+    "❤️", "💕", "💖", "💗", "💛", "💚", "💙", "💜", "🖤", "💔",
+    // Celebrate
+    "🎉", "🎊", "🎈", "🎁", "🏆", "🥇", "🎯", "🔥", "✨", "⭐", "💯", "💥",
 ];
 
 /// Moods accepted for manual avatar flash.
@@ -415,6 +423,22 @@ mod tests {
         let style = resolve_emote_text("xyzzyq");
         assert!(style.sticker_id.is_none());
         assert!(!style.emojis.is_empty());
+    }
+
+    #[test]
+    fn reaction_catalog_is_allowlisted() {
+        for emoji in ALLOWED_EMOJIS {
+            assert!(is_allowed_emoji(emoji), "{emoji} must be allowed");
+        }
+        assert!(is_allowed_emoji("👍"));
+        assert!(is_allowed_emoji("❤️"));
+        assert!(is_allowed_emoji("🎉"));
+        assert!(!is_allowed_emoji("🐸"));
+        assert!(!is_allowed_emoji("not-an-emoji"));
+        let unique: std::collections::HashSet<_> = ALLOWED_EMOJIS.iter().copied().collect();
+        assert_eq!(unique.len(), ALLOWED_EMOJIS.len());
+        assert!(ALLOWED_EMOJIS.len() >= 50);
+        assert!(ALLOWED_EMOJIS.len() <= 70);
     }
 
     #[test]

@@ -51,20 +51,25 @@ class _BidPanelState extends State<BidPanel> {
     final selected = _selectedBid;
     final cards = widget.cards;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 600;
           final gap = compact ? 4.0 : 8.0;
           return Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 widget.dealerRestricted
                     ? 'Your bid — as dealer, the total cannot equal $cards'
                     : 'Your bid — how many tricks will you win?',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: compact ? 13 : 14,
+                ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: compact ? 6 : 8),
               Wrap(
                 spacing: gap,
                 runSpacing: gap,

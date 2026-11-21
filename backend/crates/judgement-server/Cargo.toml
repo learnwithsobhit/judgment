@@ -19,7 +19,9 @@ thiserror = { workspace = true }
 rand = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 jsonwebtoken = "9"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "native-tls"] }
+# gzip: Telegram JWKS is served Content-Encoding: gzip; without this feature
+# the body stays compressed and auth fails with "could not read Telegram keys".
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "native-tls", "gzip"] }
 chrono-tz = "0.10"
 sha2 = "0.10"
 hex = "0.4"
@@ -32,6 +34,6 @@ futures-util = { version = "0.3.33", default-features = false, features = ["sink
 
 [dev-dependencies]
 futures-util = { version = "0.3.33", features = ["sink"] }
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "native-tls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "native-tls", "gzip"] }
 tokio-tungstenite = "0.30.0"
 judgement-persistence = { workspace = true }
